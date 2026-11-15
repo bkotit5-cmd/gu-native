@@ -383,11 +383,16 @@ void plat_error_box(const char *msg) { box(msg, false); }
 // The crash being reported is memory running out (unhandled_filter): plat_fatal_notice says so instead of a bare error
 static volatile bool g_fault_oom;
 
-void plat_fatal_notice(void) {
+void plat_fatal_notice_why(const char *why) {
     rt_log_flush();
     if (g_fault_oom) box(rt_out_of_memory_text(), true);  // (whoever has the log: the player has to be told what to do)
+    else if (why && !strcmp(why, "file_cut"))  // (hle/abort.c: whoever has the log, as the memory's)
+        box("The game stopped: one of its files is shorter than it should be, or damaged (cut short when it was copied). Copy the "
+            "romfs folder again; Verify game files (System, Your game) names the file. The details are in log.txt.", true);
     else if (g_own_log) box("The game stopped because of an error. The details are in log.txt, next to MHGU.exe.", true);
 }
+
+void plat_fatal_notice(void) { plat_fatal_notice_why(NULL); }
 
 typedef struct { void *(*fn)(void *); void *arg; } ThreadStart;
 static unsigned __stdcall thread_trampoline(void *p) {

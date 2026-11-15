@@ -737,18 +737,31 @@ void plat_error_box(const char *msg) {
 }
 
 // The game's error screen, in a process of its own (LogShareActivity): this one is about to end, and sharing the log
-// must outlive it. SDL looked up at run time, as in plat_error_box.
-static bool crash_screen(void) {
+// must outlive it. SDL looked up at run time, as in plat_error_box. why: what went wrong, for the screen to say
+// (GameActivity.crashReportWhy; NULL: crashReport)
+static bool crash_screen(const char *why) {
     typedef void *(*Get)(void);
     Get get_env = (Get)dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"), get_act = (Get)dlsym(RTLD_DEFAULT, "SDL_GetAndroidActivity");
     JNIEnv *env = get_env ? (JNIEnv *)get_env() : NULL;
     jobject act = env && get_act ? (jobject)get_act() : NULL;
     if (!act) return false;
     jclass cls = (*env)->GetObjectClass(env, act);
-    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "crashReport", "()V") : NULL;
-    if (m) (*env)->CallStaticVoidMethod(env, cls, m);
-    bool ok = m && !(*env)->ExceptionCheck(env);
-    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    bool ok = false;
+    if (cls && why) {
+        jmethodID m = (*env)->GetStaticMethodID(env, cls, "crashReportWhy", "(Ljava/lang/String;)V");
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env), m = NULL;
+        jstring s = m ? (*env)->NewStringUTF(env, why) : NULL;
+        if (s) (*env)->CallStaticVoidMethod(env, cls, m, s);
+        ok = s && !(*env)->ExceptionCheck(env);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        if (s) (*env)->DeleteLocalRef(env, s);
+    }
+    if (cls && !ok) {
+        jmethodID m = (*env)->GetStaticMethodID(env, cls, "crashReport", "()V");
+        if (m) (*env)->CallStaticVoidMethod(env, cls, m);
+        ok = m && !(*env)->ExceptionCheck(env);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    }
     if (cls) (*env)->DeleteLocalRef(env, cls);
     (*env)->DeleteLocalRef(env, act);
     return ok;
@@ -765,18 +778,24 @@ int plat_thread_create(void *(*fn)(void *), void *arg, size_t stack) {
     return err;
 }
 
-void plat_fatal_notice(void) {
+void plat_fatal_notice_why(const char *why) {
     int config_language(void);
     if (!g_own_log) return;
     const char *msg = settings_text(config_language(), "The game stopped because of an error. The details are in log.txt, "
                                                        "in Android/data/com.mhgu.recomp/files.");
-    if (crash_screen()) {
+    if (why && !strcmp(why, "file_cut"))
+        msg = settings_text(config_language(), "The game stopped: one of its files is shorter than it should be, or damaged (cut "
+                                               "short when it was copied). Copy the romfs folder to the device again; System › "
+                                               "Your game › Verify game files names the file.");
+    if (crash_screen(why)) {
         fprintf(stderr, "\n*** %s\n", msg);
         usleep(300000);  // (the log's last lines on their way to the file: stderr is a pipe, log_tee)
         return;
     }
     plat_error_box(msg);
 }
+
+void plat_fatal_notice(void) { plat_fatal_notice_why(NULL); }
 
 // Which phone, for a log someone else reads (not everyone who sends one knows its chip)
 void plat_log_device(void) {

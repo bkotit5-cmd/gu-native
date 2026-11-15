@@ -7,6 +7,7 @@
 
 #include "../hle.h"
 #include "../kernel.h"
+#include "../platform.h"
 
 static const char *guest_str(uint32_t addr, char *buf, size_t size) {  // a guest string ("-": none), cut at size
     if (!addr) return "-";
@@ -28,11 +29,22 @@ HLE_SDK("_ZN2nn4diag6detail10VAbortImplEPKcS3_S3_iPKNS_6ResultEPKNS_2os17UserExc
     if (STK(0)) LOG("[abort] result %08x (%04u-%04u)\n", result, 2000 + (result & 0x1ff), (result >> 9) & 0x1fff);
     if (STK(2)) LOG("[abort] message: %s\n", guest_str(STK(2), fmt, sizeof fmt));
     kernel_log_guest_stack("[abort] the game", c);
+    // The file system's results (module 2): 3005 a read past a file's end, 4000-4999 data found damaged. The game's own
+    // RomFS code checks its reads against each file's size and gives up on a file cut short when it was copied: GU#232
+    // closed so entering an area (2002-3005) with one of its archives some 10 MB short. Told as such, with the way out.
+    uint32_t module = result & 0x1ff, desc = (result >> 9) & 0x1fff;
+    bool file_cut = STK(0) && module == 2 && (desc == 3005 || (desc >= 4000 && desc < 5000));
+    if (file_cut)
+        LOG("[abort] the game's file system gave up on one of its files (%04u-%04u: %s): a file of the game's copy cut short or "
+            "changed when it was copied. Verify game files (System > Your game) names it; copying the romfs folder again mends it\n",
+            2000 + module, desc, desc == 3005 ? "read past its end" : "its data damaged");
+    plat_fatal_notice_why(file_cut ? "file_cut" : NULL);  // (the error screen, with Share log: before 1.0.1 the app just closed)
     exit(1);
 }
 
 HLE_SDK("abort", abort) {
     kernel_log_guest_stack("[abort] abort()", c);
+    plat_fatal_notice();
     exit(1);
 }
 
@@ -50,5 +62,6 @@ HLE_SDK("exit", exit) {
             LD32(c->r[13] + 0x414));
     }
     kernel_log_guest_stack("[abort] the game", c);
+    if (c->r[14] == FATAL_EXIT_RET) plat_fatal_notice();  // (the game's fatal error: the error screen, with Share log)
     exit((int)ARG(0));
 }
