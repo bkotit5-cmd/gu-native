@@ -543,7 +543,19 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   refuses the next submission with EPROTO (`IOCTL_KGSL_GPU_COMMAND failed: errno 71`, "the context faulted before"; EDEADLK once it
   gives the context up). 0.1.9.1's report named only that next one: an empty submission (#191). `devicelost` in the control file
   fakes one. Each kind of depth copy or blit is named once in the log where the game first does it (`[vk] depth blit ...`,
-  `depth_copy_note`).
+  `depth_copy_note`). Since 1.0.1 a submission's line is followed by its uploads (copies into buffers, the vertex cache's, and
+  into images, the textures', with the biggest image) and how many of its programs were drawn for the first time in the
+  session, each marked `+` in the program lines; the window image's pass (the 3D picture, the HUD and the overlay, the frame's
+  second submission) is named as such. The Adreno 6xx faults of 1.0 (Redmi Note 8 in the village, POCO X3 entering Jurassic
+  Frontier's area 11 and Verdant Hills' area 5) all came at a load's or an area's first frames: those say whether the faulting
+  frame carried new textures or new programs.
+- Once a minute (no `MHGU_VK_STATS`) `[vk] the minute:` gives the frames, the translating thread's time and the waits for the GPU
+  per frame (they grow when the GPU limits the rate, a GPU slowed by heat among them), and what was copied: the vertex cache's
+  whole ranges and written pages, the draws past its most, all of it, and the textures. On Android the `[mem]` line is followed by
+  `[perf] heat:` (`android_perf.c heat_line`): the thermal status and headroom, the battery's temperature, each CPU cluster's
+  clock now / allowed / its most (a thermal cap lowers the second) and the GPU's clock where an app may read it. Players' "the FPS
+  fall after a while and come back when the menu opens" (Helio G70 / G85, Mali-G52 MC2) can be told from these: heat, the GPU,
+  or the vertex cache copying again.
 - Adreno 618, Android 10 (1.1.87, Xiaomi surya; #138, #140, #160, #191, one player): the GPU faults the moment the hunter walks
   from Verdant Hills' area 4 into area 5 (a cave), every time, 0.1.6 to 0.1.9.1, 30 or 40 FPS, Shadows on or off; 3D 790x356
   (33 %), Low-end mode, MSAA 1x, FXAA off. Both 0.1.9.1 crashes came at submission 15203. No depth copy or blit is new there,
@@ -558,7 +570,16 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   GB, play right, #171): under 10.65 GB of the other 10.92, or with empty files (mods' aside), the log warns and, a few seconds in, a
   notice tells the player (`romfs_incomplete`, `overlay.cpp romfs_notice`; `MHGU_ROMFS_SHORT=11.5` shows it on a complete copy). The
   log's `[romfs] the game's own files` line gives both sizes, and a file or folder the scan can't read (`stat` or `opendir`
-  refused) is named, the first five.
+  refused) is named, the first five. Since 1.0.1 each of the game's own files is also checked against version 1.4.0's size
+  (`game_files.txt`, Verify's list) on a thread of its own as the game starts (`verify.c verify_quick_start`, some tens of ms): one
+  smaller and not whole (an archive whose entries reach past its end, any other kind smaller; the movies left out) is logged
+  (`[romfs] WARNING: cut short: ...`, then a count) and the notice names how many and the first one. GU#232's copy, one area's
+  archive some 10 MB short of 12.31 GB, passed the size rule above and closed the game entering that area: the game's own file
+  system check, `[abort] result 00177a02 (2002-3005)`, a read past a file's end. That result (and 2002-4xxx, data damaged) now
+  logs what it means and shows the error screen with a line on the cut file (`hle/abort.c`, `plat_fatal_notice_why("file_cut")`,
+  `LogShareActivity` EXTRA_WHY); every other abort of the game shows the error screen too (before, the app just closed).
+  `MHGU_GAME_FILES=<list>` gives the check another list (a test: a size raised in it makes that file "cut"), `MHGU_ROMFS_NOQUICK=1`
+  skips it.
 - `Config` gets its defaults by position: `CONFIG_DEFAULT_VALUES` in `config.c`. A new field in `config.h` needs its value there, in its
   place, or every later field moves (two added once turned most touch buttons off).
 - The shadow maps are one 1024x3072 depth atlas (three cascades), the first pass of a hunt's frame: 47 draws, 2.8 ms of a Moto g06's 18.6.
