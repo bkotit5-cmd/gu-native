@@ -860,11 +860,31 @@ static void *lobby_attach_thread(void *arg) {
     return station_thread(a);
 }
 
+// Hunter Search's network: in a village's multiplayer mode, Hunter Search on keeps a network of 2 up with the hunter's
+// card in its advertise data, whose byte 0x1C is 0xFF where a hub's (of 2, 3 or 4 players) holds 1. A game that gets one
+// from a hub server shows it neither in its hub list nor in its Hunter Search (checked on the PC with a real server's
+// answer: 11 of its 18 networks were these, the hub list showed the other 7 and Hunter Search none), so they are not
+// listed: each took a place of the server's answer (18 at most), hiding a hub from that search, and told its player
+// "Your hub is not listed online" when the server was down, in a village with no hub. The LAN still finds them.
+static bool hunter_search_net(const uint8_t *info) {
+    return info[NI_NODE_MAX] == 2 && rd16(info + NI_ADV_SIZE) > 0x1C && info[NI_ADV + 0x1C] == 0xFF;
+}
+static bool hunter_search_now(void) {
+    pthread_mutex_lock(&L.mu);
+    bool hs = hunter_search_net(L.info);
+    pthread_mutex_unlock(&L.mu);
+    return hs;
+}
+
 static void *lobby_thread(void *arg) {
     plat_thread_name("ldn-lobby");
     uint32_t gen = (uint32_t)(uintptr_t)arg;
     static __thread uint8_t buf[MAX_FRAME];
     uint8_t req[LOBBY_HEADER + NETINFO_SIZE], type;
+    bool told = false;  // (Hunter Search's network: logged once)
+    // (the game sets a new network's advertise data right after making it - until then it holds the last network's:
+    // a moment for it before telling a hub from Hunter Search's network)
+    if (!lobby_wait(gen, 1000)) return NULL;
     while (lobby_gen == gen) {
         char srv[LOBBY_NAME];
         struct sockaddr_in addr;
@@ -872,6 +892,12 @@ static void *lobby_thread(void *arg) {
         if (!lobby_server(srv)) break;
         if (!online_ok(srv, 0)) {  // (listed once the notice is closed)
             if (!lobby_wait(gen, 500)) break;
+            continue;
+        }
+        if (hunter_search_now()) {  // (not listed; looked at again in case the game makes it a hub)
+            if (!told) LOG("[ldn] Hunter Search's network: not listed on the hub server %s (only hubs are)\n", srv);
+            told = true;
+            if (!lobby_wait(gen, 2000)) break;
             continue;
         }
         bool named = resolve_host(srv, LOBBY_PORT, &addr);
@@ -905,6 +931,7 @@ static void *lobby_thread(void *arg) {
             keyed ? "players with the same matchmaking key see it" : "public, every player sees it");
         hub_report(NOTE_HOST, srv, HUB_ONLINE, (int)((plat_now_ns() - asked) / 1000000), -1);
         uint64_t now = plat_now_ns(), last_rx = now, next_ping = now + LOBBY_PING_NS;
+        bool unlisted = false;  // (it turned out to be Hunter Search's network: the server's connection closed on purpose)
         while (lobby_gen == gen) {
             now = plat_now_ns();
             if (L.lobby_dirty) {
@@ -913,6 +940,7 @@ static void *lobby_thread(void *arg) {
                 memcpy(info, L.info, NETINFO_SIZE);
                 L.lobby_dirty = false;
                 pthread_mutex_unlock(&L.mu);
+                if (hunter_search_net(info)) { unlisted = true; break; }  // (closing the connection takes it off the list)
                 if (!frame_send(s, S_UPDATE, info, NETINFO_SIZE, NULL, 0)) break;
             }
             if (now >= next_ping) {
@@ -937,6 +965,7 @@ static void *lobby_thread(void *arg) {
         }
         hclose(s);
         if (lobby_gen != gen) break;
+        if (unlisted) continue;
         LOG("[ldn] lost the hub server: this hub is not listed online (trying again in 10 s)\n");
         hub_report(NOTE_HOST, srv, HUB_LOST, -1, -1);
         if (!lobby_wait(gen, 10000)) break;

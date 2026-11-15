@@ -850,6 +850,11 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   before the one-time notice about playing online was closed (`settings_panel_online_ok`, the thank-you's card;
   `[Multiplayer] OnlineNoticeShown`): the game's search waits under the card (up to 60 s: it runs on a thread of its own, and
   a search that finds nothing ends there) and a created hub waits to be listed. `MHGU_ONLINE_NOTICE=0|1` in a test run. MH4U for Android shows the same card and text.
+  Hunter Search's network is not listed (1.0.1, `hunter_search_net`): with Hunter Search on, a village's multiplayer mode
+  keeps a network of 2 up whose advertise data has 0xFF at 0x1C (a hub's, of 2 to 4 players, has 1 there). Games that get
+  them from a server show them nowhere (PC, a real server's answer: 11 of its 18 networks were these; the hub list showed
+  the other 7, Hunter Search none), and a server answers 18 at most, so they hid hubs. The LAN still answers for them. A
+  network is looked at 1 s after it is made (its advertise data comes then) and again at each change.
 - Crossplay with emulators (S36, 1.0; `[Multiplayer] Crossplay` = Off | Rooms | Ryujinx, the Multiplayer page's first
   section, `settings_panel.cpp crossplay_rows`): ldn.c's nn::ldn drives an `XBackend` (net.h) instead of the port's link:
   create, scan, connect, the game's datagrams (`ldn_send`), and the backend calls back `ldn_x_info` / `ldn_x_lost` /
