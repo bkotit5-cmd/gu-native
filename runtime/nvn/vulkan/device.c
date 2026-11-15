@@ -1390,6 +1390,7 @@ static bool frame_begin(void) {
                                 .framebuffer = sc_fb[cur_frame.image], .renderArea = {{0, 0}, sc_phys},
                                 .clearValueCount = 1, .pClearValues = &black};
     vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
+    vk_lost_window_pass(sc_phys.width, sc_phys.height, g_vk.sc_format);  // (the device-lost report names it)
     VkViewport vp = {0, 0, (float)sc_phys.width, (float)sc_phys.height, 0, 1};
     VkRect2D sc = {{0, 0}, sc_phys};
     vkCmdSetViewport(cb, 0, 1, &vp);

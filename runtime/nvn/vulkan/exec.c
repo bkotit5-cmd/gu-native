@@ -199,6 +199,15 @@ typedef struct {
     LostPass pass[LOST_PASSES];
     uint32_t prog[LOST_PROGS][2];  // (vertex and fragment code addresses)
     uint8_t prog_pass[LOST_PROGS];  // (the pass it drew in, 255 past LOST_PASSES)
+    uint8_t prog_new[LOST_PROGS];   // (1.0.1) drawn for the first time in this session (lost_first)
+    uint32_t new_progs;             // (all of those)
+    // (1.0.1) the copies it took (its upload buffer's, and the main one's into images): into buffers (the vertex cache)
+    // and into images (the textures' uploads), their bytes, and the biggest image's size and format. The Adreno 6xx
+    // faults come at an area's first frames (#160, #191, GU#204; M02 and M03 of 1.0): whether the faulting submission
+    // carried uploads or programs drawn for the first time tells a texture or a shader from the rest.
+    uint32_t up_bufs, up_imgs, big_w, big_h;
+    uint64_t up_buf_bytes, up_img_bytes;
+    int big_fmt;
 } LostRec;
 static LostRec lost_rec[SUBS];
 static void lost_reset(int slot, uint64_t seq) { memset(&lost_rec[slot], 0, sizeof lost_rec[slot]); lost_rec[slot].seq = seq; }
@@ -213,14 +222,48 @@ static void lost_draw(void) {
     r->draws++;
     if (r->npass) r->pass[r->npass - 1].draws++;
 }
+// (1.0.1) the programs drawn so far in this session (vertex and fragment code addresses): a pair's first draw is marked
+// in the report. Render thread only; once the table is three quarters full, nothing more is marked.
+#define LOST_SEEN 8192
+static uint64_t lost_seen[LOST_SEEN];
+static int lost_nseen;
+static bool lost_first(uint64_t vs, uint64_t fs) {
+    uint64_t key = ((vs & 0xffffffffull) << 32 | (fs & 0xffffffffull)) | 1;
+    uint32_t at = (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> 51) & (LOST_SEEN - 1);
+    for (int probe = 0; probe < 64; probe++, at = (at + 1) & (LOST_SEEN - 1)) {
+        if (lost_seen[at] == key) return false;
+        if (!lost_seen[at]) {
+            if (lost_nseen >= LOST_SEEN * 3 / 4) return false;
+            lost_seen[at] = key, lost_nseen++;
+            return true;
+        }
+    }
+    return false;
+}
 static void lost_prog(uint64_t vs, uint64_t fs) {
     LostRec *r = &lost_rec[cur_sub];
     uint8_t pass = r->passes && r->passes <= LOST_PASSES ? (uint8_t)(r->passes - 1) : 255;
+    bool fresh = lost_first(vs, fs);
+    r->new_progs += fresh;
     for (int i = r->nprog - 1; i >= 0 && r->prog_pass[i] == pass; i--)
         if (r->prog[i][0] == (uint32_t)vs && r->prog[i][1] == (uint32_t)fs) return;
-    if (r->nprog < LOST_PROGS)
-        r->prog[r->nprog][0] = (uint32_t)vs, r->prog[r->nprog][1] = (uint32_t)fs, r->prog_pass[r->nprog++] = pass;
+    if (r->nprog < LOST_PROGS) {
+        r->prog[r->nprog][0] = (uint32_t)vs, r->prog[r->nprog][1] = (uint32_t)fs, r->prog_new[r->nprog] = fresh;
+        r->prog_pass[r->nprog++] = pass;
+    }
 }
+static uint64_t stat_img_bytes;  // (the minute's line in backend_execute: the bytes copied into images)
+void vk_lost_upload(bool image, uint64_t bytes, uint32_t w, uint32_t h, int fmt) {
+    LostRec *r = &lost_rec[cur_sub];
+    if (!image) {
+        r->up_bufs++, r->up_buf_bytes += bytes;
+        return;
+    }
+    r->up_imgs++, r->up_img_bytes += bytes;
+    stat_img_bytes += bytes;
+    if ((uint64_t)w * h > (uint64_t)r->big_w * r->big_h) r->big_w = w, r->big_h = h, r->big_fmt = fmt;
+}
+void vk_lost_window_pass(uint32_t w, uint32_t h, int fmt) { lost_pass(w, h, (VkFormat)fmt, 1, (VkFormat)-1, 1); }
 static void lost_report(const char *where);
 volatile int g_fake_lost;  // (test) MHGU_CONTROL "devicelost": the next submission with a pass says the device was lost
 
@@ -536,16 +579,23 @@ static void lost_report(const char *where) {
         if (!r) continue;
         LOG("[vk]  submission %llu%s: %u passes, %u draws, %u clears drawn, %u copies (%u of depth)\n", (unsigned long long)q,
             q <= done ? " (finished)" : "", r->passes, r->draws, r->drawn_clears, r->copies, r->depth_copies);
+        if (r->up_bufs || r->up_imgs || r->new_progs)
+            LOG("[vk]   uploads: %u into buffers (%llu KB), %u into images (%llu KB, the biggest %ux%u, format %d); %u program(s) "
+                "drawn for the first time this session (marked +)\n", r->up_bufs, (unsigned long long)(r->up_buf_bytes >> 10),
+                r->up_imgs, (unsigned long long)(r->up_img_bytes >> 10), r->big_w, r->big_h, r->big_fmt, r->new_progs);
         for (int i = 0; i < r->npass; i++) {
             const LostPass *p = &r->pass[i];
-            LOG("[vk]   pass %d: %ux%u, colour %d x%u, depth %d, %ux, %u draws\n", i, p->w, p->h, p->color, p->ncolor, p->depth,
-                p->samples, p->draws);
+            if (p->depth == -1)
+                LOG("[vk]   pass %d: %ux%u, the window image (the 3D picture, the HUD and the overlay drawn on it)\n", i, p->w, p->h);
+            else
+                LOG("[vk]   pass %d: %ux%u, colour %d x%u, depth %d, %ux, %u draws\n", i, p->w, p->h, p->color, p->ncolor, p->depth,
+                    p->samples, p->draws);
         }
         for (int i0 = 0; i0 < r->nprog;) {  // (a line a pass, 12 at most)
-            char progs[12 * 20 + 1];
+            char progs[12 * 21 + 1];
             int k = 0, i = i0;
             for (; i < r->nprog && i < i0 + 12 && r->prog_pass[i] == r->prog_pass[i0]; i++)
-                k += snprintf(progs + k, sizeof progs - k, " %x/%x", r->prog[i][0], r->prog[i][1]);
+                k += snprintf(progs + k, sizeof progs - k, " %x/%x%s", r->prog[i][0], r->prog[i][1], r->prog_new[i] ? "+" : "");
             if (r->prog_pass[i0] == 255) LOG("[vk]   programs (vertex/fragment code), a later pass:%s\n", progs);
             else LOG("[vk]   programs (vertex/fragment code), pass %d:%s\n", r->prog_pass[i0], progs);
             i0 = i;
@@ -1052,6 +1102,7 @@ static void vc_slice_copy(VcEnt *e, uint64_t n) {
     VkSpan s = vk_transient_copy(g, n, 16);
     VkBufferCopy rg = {s.off, off, n};
     vkCmdCopyBuffer(vk_upload_cmd(), s.buf, e->buf, 1, &rg);
+    vk_lost_upload(false, n, 0, 0, 0);
     if (HITCH_ON) hitch_add(HC_VC_SAFETY, plat_now_ns() - t0, n);
     stat_copy_bytes += n, stat_vc_net_bytes += n;
     e->full_off = off + n < e->size ? (uint32_t)(off + n) : 0;
@@ -1210,6 +1261,7 @@ static bool vcache(uint64_t addr, uint64_t size, VkBuffer *buf) {
                 VkSpan s = vk_transient_copy((uint8_t *)G2H((uint32_t)addr) + rg[k].dstOffset, rg[k].size, 16);
                 rg[k].srcOffset = s.off;
                 vkCmdCopyBuffer(vk_upload_cmd(), s.buf, e->buf, 1, &rg[k]);
+                vk_lost_upload(false, rg[k].size, 0, 0, 0);
                 stat_copy_bytes += rg[k].size, stat_vc_pages_bytes += rg[k].size;
                 if (vc_safety() == 2) vc_sums_copied(e, rg[k].dstOffset, rg[k].dstOffset + rg[k].size);
             }
@@ -1222,6 +1274,7 @@ static bool vcache(uint64_t addr, uint64_t size, VkBuffer *buf) {
         if (HITCH_ON) hitch_add(HC_VC_COPY, plat_now_ns() - t0, size);
         VkBufferCopy rg = {s.off, 0, size};
         vkCmdCopyBuffer(vk_upload_cmd(), s.buf, e->buf, 1, &rg);
+        vk_lost_upload(false, size, 0, 0, 0);
         stat_copy_bytes += size, stat_vc_whole_bytes += size;
         stat_vc_refresh++;
         if (vc_safety() == 2) vc_sums_copied(e, 0, size);
@@ -6920,6 +6973,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
                            .imageOffset = {rg[0], rg[1], array ? 0 : rg[2]},
                            .imageExtent = {(uint32_t)rg[3], (uint32_t)rg[4], array ? 1 : nz}};
     vkCmdCopyBufferToImage(cb, s.buf, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    vk_lost_upload(true, out_row * hb * nz, (uint32_t)rg[3], (uint32_t)rg[4], b->format);
 }
 
 static void copy_texture_to_buffer(const TexRef *src, uint64_t dst) {
@@ -7341,6 +7395,24 @@ void backend_execute(uint64_t handle) {
     if (vk_frame_counter() != frame) {  // (the first submission of each frame: the longest gap is a stutter)
         if (frame_t && now - frame_t > stat_frame_max) stat_frame_max = now - frame_t;
         frame = vk_frame_counter(), frame_t = now;
+    }
+    // (1.0.1, without MHGU_VK_STATS: its counters are never reset then) once a minute, what the frames cost this thread
+    // and what they copied: the translating per frame, the waits for the GPU per frame (they grow when the GPU is what
+    // limits the rate: a GPU slowed by the heat), the vertex cache's copies (whole ranges again and again when what the
+    // frames draw from no longer fits) and the textures'. With the [perf] heat line, a player's "the FPS fall after a
+    // while" (M10 of 1.0) shows its cause in the log.
+    static uint64_t m_t, m_frame, m_exec, m_wait, m_vcw, m_vcp, m_vcfull, m_copy, m_tex;
+    if (!stats && now - m_t >= 60000000000ull) {
+        uint64_t frames = vk_frame_counter() - m_frame;
+        if (m_t && frames)
+            LOG("[vk] the minute: %llu frames; translating %.1f ms a frame, waiting for the GPU %.1f ms a frame; copied: vertex "
+                "cache %.0f MB whole ranges, %.0f MB written pages (%llu draws past its most), %.0f MB in all, textures %.0f MB (into images)\n",
+                (unsigned long long)frames, (stat_exec_ns - m_exec) / 1e6 / frames, (stat_wait_ns - m_wait) / 1e6 / frames,
+                (stat_vc_whole_bytes - m_vcw) / 1048576.0, (stat_vc_pages_bytes - m_vcp) / 1048576.0,
+                (unsigned long long)(stat_vc_full - m_vcfull), (stat_copy_bytes - m_copy) / 1048576.0,
+                (stat_img_bytes - m_tex) / 1048576.0);
+        m_t = now, m_frame = vk_frame_counter(), m_exec = stat_exec_ns, m_wait = stat_wait_ns, m_vcw = stat_vc_whole_bytes;
+        m_vcp = stat_vc_pages_bytes, m_vcfull = stat_vc_full, m_copy = stat_copy_bytes, m_tex = stat_img_bytes;
     }
     if (stats && now - last > 2000000000ull) {
         last = now;

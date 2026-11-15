@@ -806,6 +806,7 @@ static void upload_pending(TexBackend *b) {
     VkBufferImageCopy rg = {.bufferOffset = s.off, .bufferRowLength = stride / 4,
                             .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
     vkCmdCopyBufferToImage(vk_upload_cmd(), s.buf, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
+    vk_lost_upload(true, (uint64_t)stride * h, w, h, b->format);
 }
 
 // ---- an upload's work: bands of guest memory, each hashed and then copied into staging memory
@@ -1112,7 +1113,11 @@ static uint64_t plan(NvnTexture *t, TexBackend *b, const uint8_t *mem, int mode,
                     if (a + j.len > qhi) qhi = a + j.len;
                 } else run_job(&j);
             }
-            if (s.ptr) vkCmdCopyBufferToImage(cb, s.buf, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
+            if (s.ptr) {
+                vkCmdCopyBufferToImage(cb, s.buf, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
+                vk_lost_upload(true, (uint64_t)rg.imageExtent.width * rg.imageExtent.height * (b->bcn ? b->bcn_tb : 4),
+                               rg.imageExtent.width, rg.imageExtent.height, b->format);
+            }
         }
     }
     if (qhi) up_range(qlo, qhi);
