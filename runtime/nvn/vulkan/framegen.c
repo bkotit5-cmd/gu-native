@@ -352,8 +352,15 @@ static struct {
     uint32_t gpu_n;
     int last_n;
     int state, told_state;    // 0 off / 1 making; the last one logged
+    const char *told_why;     // (and, not making, the reason logged: another one is logged too)
     uint64_t told_at;
     int told_lines;
+    // (a phone) the screen's refresh rate as the presents see it, a new one taken once it holds for 15 game frames, and
+    // when it last changed (from what)
+    double rate_hz, rate_from, rate_new;
+    uint64_t rate_at;
+    int rate_held, rate_lines;
+    const char *pause_why;    // (the reason a pause gave: kept while it lasts)
     // the game's own rate while pictures are made (a phone whose GPU can't do both: none made for a while)
     uint64_t last_real_ns, pause_until;
     double avg_ns;            // the time between game frames, smoothed
@@ -642,11 +649,14 @@ static void minute_line(uint64_t now) {
     fg.gpu_sum = fg.gpu_max = 0, fg.gpu_n = 0;
 }
 
-// a change between making pictures and not, with the reason (at most one a 5 s, 60 lines)
+// a change between making pictures and not, or of the reason none is made (the first one too: the FPS limit not half the
+// refresh rate from the start said so only after pictures had been made once), with the reason (at most one a 5 s, 60
+// lines)
 static void fg_tell(int making, const char *why, uint64_t now) {
     fg.state = making;
-    if (making == fg.told_state || fg.told_lines >= 60 || (fg.told_at && now - fg.told_at < 5000000000ull)) return;
-    fg.told_state = making, fg.told_at = now, fg.told_lines++;
+    bool same = making ? fg.told_state == 1 : fg.told_state == 0 && fg.told_why && !strcmp(why, fg.told_why);
+    if (same || fg.told_lines >= 60 || (fg.told_at && now - fg.told_at < 5000000000ull)) return;
+    fg.told_state = making, fg.told_why = making ? NULL : why, fg.told_at = now, fg.told_lines++;
     LOG("[framegen] %s%s\n", making ? "making pictures" : "not making pictures: ", making ? "" : why);
 }
 
@@ -736,6 +746,29 @@ TexBackend *vk_framegen_frame(TexBackend *real, int n, int *follow) {
         return NULL;
     }
     fg.last_n = n;
+#ifdef __ANDROID__
+    {   // The screen's refresh rate: a change logged, whether the app asked for it (FrameGen or the FPS limit changed:
+        // GameActivity.pickRefreshRate logs its own "[app] display mode" line) or not (a Galaxy S25 Ultra's panel went
+        // 60 -> 120 -> 60 Hz by itself 3 minutes into a 30 FPS run), and named by a pause that follows it. Taken once it
+        // holds for 15 game frames
+        double hz = vk_pacing_refresh_hz();
+        if (hz <= 0) {
+        } else if (fg.rate_hz <= 0) {
+            fg.rate_hz = hz;
+        } else if (fabs(hz - fg.rate_hz) <= fg.rate_hz * .03) {
+            fg.rate_held = 0;
+        } else {
+            fg.rate_held = fg.rate_held > 0 && fabs(hz - fg.rate_new) <= fg.rate_new * .03 ? fg.rate_held + 1 : 1;
+            fg.rate_new = hz;
+            if (fg.rate_held >= 15) {
+                if (fg.rate_lines++ < 40)
+                    LOG("[framegen] the screen's refresh rate changed: %.0f Hz now, %.0f Hz before (the FPS limit %.0f, %d "
+                        "vsync(s) a game frame)\n", hz, fg.rate_hz, (double)config_live_fps(), n);
+                fg.rate_from = fg.rate_hz, fg.rate_hz = hz, fg.rate_at = now, fg.rate_held = 0;
+            }
+        }
+    }
+#endif
     // when none is made: the history starts again (the next pair must be two frames in a row)
     const char *why = NULL;
     int menu = touch_frame_menu();
@@ -743,7 +776,8 @@ TexBackend *vk_framegen_frame(TexBackend *real, int n, int *follow) {
     else if (overlay_menu_open()) why = "the settings menu is open", fg.n_settings++;
     else if (menu) why = menu & 2 ? "the title or the main menu" : "a menu of the game's", fg.n_menu++;
     else if (!eval && fg.pauses >= 3) why = "the game can't keep its frame rate with it: off until the game starts again", fg.n_slow++;
-    else if (!eval && now < fg.pause_until) why = "the game fell behind its frame rate with it: paused for 20 s", fg.n_slow++;
+    else if (!eval && now < fg.pause_until)
+        why = fg.pause_why ? fg.pause_why : "the game fell behind its frame rate with it: paused for 20 s", fg.n_slow++;
     // The game's own rate while pictures are made: when the time between its frames stays 12 % over the limit's for 3 s
     // (a phone whose GPU can't draw the game and the made pictures both), none is made for 20 s, and after the third
     // time not again until the game starts again. A load's hitch alone is far from 3 s of it.
@@ -757,10 +791,17 @@ TexBackend *vk_framegen_frame(TexBackend *real, int n, int *follow) {
         if ((double)fg.slow * want >= 3e9) {
             fg.pauses++, fg.slow = 0, fg.avg_ns = 0;
             fg.pause_until = now + 20000000000ull;
-            LOG("[framegen] the game falls behind its %.0f FPS with the made pictures (%.1f ms a frame): %s\n", cap,
-                (double)dt / 1e6, fg.pauses >= 3 ? "none made until the game starts again" : "none made for 20 s");
-            why = fg.pauses >= 3 ? "the game can't keep its frame rate with it: off until the game starts again"
-                                 : "the game fell behind its frame rate with it: paused for 20 s";
+            bool rate = fg.rate_at && now - fg.rate_at < 10000000000ull;  // (the screen's refresh rate changed just before)
+            char after[96] = "";
+            if (rate)
+                snprintf(after, sizeof after, ", %.1f s after the screen's refresh rate changed (%.0f -> %.0f Hz)",
+                         (now - fg.rate_at) / 1e9, fg.rate_from, fg.rate_hz);
+            LOG("[framegen] the game falls behind its %.0f FPS with the made pictures (%.1f ms a frame%s): %s\n", cap,
+                (double)dt / 1e6, after, fg.pauses >= 3 ? "none made until the game starts again" : "none made for 20 s");
+            fg.pause_why = rate ? "the game fell behind its frame rate with it, right after the screen's refresh rate changed: "
+                                  "paused for 20 s"
+                                : "the game fell behind its frame rate with it: paused for 20 s";
+            why = fg.pauses >= 3 ? "the game can't keep its frame rate with it: off until the game starts again" : fg.pause_why;
             fg.n_slow++;
         }
     } else if (why || fg.state != 1) {

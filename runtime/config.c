@@ -78,6 +78,8 @@ float g_fov_scale = 1.0f;
 uint32_t g_ui_size[2] = {1280, 720};
 float g_ui_anchor_aspect = 16.0f / 9.0f;
 uint32_t g_fsr_output[2];
+int g_scaled_3d;
+const char *g_fsr_unavailable;
 float g_fsr_lod_bias;
 const char *g_fsr4_fallback;
 const char *g_xess_fallback;
@@ -104,6 +106,11 @@ static const char DEFAULT_INI[] =
     "; Between 10 and 100 (any percent; the 3D picture is never smaller than 320x180)\n"
     "; Default: 100\n"
     "RenderScale = 100\n"
+    "\n"
+    "; How a 3D picture smaller than the screen (RenderScale below 100, a smaller RenderResolution) is scaled up to it:\n"
+    "; Smooth (blended, softer) or Sharp (nearest: each of its pixels a sharp block). Not used with FSR\n"
+    "; Default: Smooth\n"
+    "UpscaleFilter = Smooth\n"
     "\n"
     "; Set to 16:9 to preserve the game's native aspect ratio\n"
     "; Default: Auto\n"
@@ -879,6 +886,8 @@ const ConfigSetting g_settings[] = {
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
     {"Display", "RenderScale", SET_INT, F(render_scale), 0, RENDER_SCALE_MIN, 100, NULL, NULL, true, ERR_SIZE},
+    {"Display", "UpscaleFilter", SET_CHOICE, F(upscale_sharp), 0, 0, 0, "Smooth|linear|bilinear,Sharp|nearest|point", NULL,
+     false, ERR_MISC},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
@@ -1739,6 +1748,15 @@ void config_load(void) {
         LOG("[config] RenderResolution: the 3D picture at %dx%d (screen %dx%d)\n", w, h, tw, th);
         if (g_config.low_end && !g_config.fsr && h < th) lowend_hud(h, tw, th, aspect);  // (as a percent's)
 #endif
+    }
+    {   // ([Display] UpscaleFilter's: FSR off and a 3D picture smaller than at 100%, what the filter scales up; the HUD at
+        // the screen's size over it (fsr.c's plain scaling) or in it (a phone without Low-end mode, a smaller
+        // RenderResolution: exec.c vk_present_draw))
+        int fw, fh;
+        fit_aspect(tw, th, aspect, &fw, &fh);
+        g_scaled_3d = !g_config.fsr && (w < fw || h < fh);
+        if (g_scaled_3d && g_config.upscale_sharp)
+            LOG("[config] UpscaleFilter Sharp: the %dx%d 3D picture scaled up by its nearest pixels\n", w, h);
     }
     if (render_auto && g_config.fsr && g_config.render_scale < 100)
         LOG("[config] RenderScale %d%% not used: FSR is on (FSRQuality sets the 3D size)\n", g_config.render_scale);

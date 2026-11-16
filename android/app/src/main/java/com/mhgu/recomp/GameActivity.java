@@ -73,6 +73,7 @@ public class GameActivity extends SDLActivity {
         Diag.logToGame(this);  // (the phone and the app into log.txt, off this thread)
         Diag.watch(this);      // (and what changes while the game runs: the network, the heat, power saving)
         watching = true;
+        watchRefreshRate();
     }
 
     private boolean watching;
@@ -80,6 +81,8 @@ public class GameActivity extends SDLActivity {
     @Override
     protected void onDestroy() {
         if (watching) Diag.unwatch(this);
+        if (rateListener != null) ((DisplayManager) getSystemService(DISPLAY_SERVICE)).unregisterDisplayListener(rateListener);
+        rateListener = null;
         super.onDestroy();
     }
 
@@ -456,6 +459,52 @@ public class GameActivity extends SDLActivity {
         if (activity instanceof GameActivity) activity.runOnUiThread(((GameActivity) activity)::pickRefreshRate);
     }
 
+    private static volatile boolean frameGen;  // ([Graphics] FrameGen: the refresh rate at twice the limit, pickRefreshRate)
+
+    /** [Graphics] FrameGen se prendió o se apagó (runtime/ui.c): la pantalla elige de nuevo su tasa de refresco. */
+    public static void setFrameGen(boolean on) {
+        if (frameGen == on) return;
+        frameGen = on;
+        SDLActivity activity = mSingleton;
+        if (activity instanceof GameActivity) activity.runOnUiThread(((GameActivity) activity)::pickRefreshRate);
+    }
+
+    // (1.0.1) The screen's refresh rate as it changes, the system's own switches too (a Galaxy S25 Ultra's panel went
+    // 60 -> 120 -> 60 Hz by itself 3 minutes into a 30 FPS run with frame generation): an event in log.txt, with the rate
+    // pickRefreshRate asked for. At most 40 a session (a panel that changes its rate by itself all the time)
+    private DisplayManager.DisplayListener rateListener;
+    private volatile float rateAsked;
+    private float rateSeen;
+    private int rateEvents;
+
+    private void watchRefreshRate() {
+        try {
+            final DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
+            Display display = Build.VERSION.SDK_INT >= 30 ? getDisplay() : getWindowManager().getDefaultDisplay();
+            if (dm == null || display == null) return;
+            final int id = display.getDisplayId();
+            rateSeen = display.getRefreshRate();
+            rateListener = new DisplayManager.DisplayListener() {
+                @Override public void onDisplayAdded(int displayId) {}
+                @Override public void onDisplayRemoved(int displayId) {}
+                @Override public void onDisplayChanged(int displayId) {
+                    if (displayId != id || rateEvents >= 40) return;
+                    Display d = dm.getDisplay(id);
+                    if (d == null) return;
+                    float rate = d.getRefreshRate();
+                    if (Math.abs(rate - rateSeen) < .5f) return;
+                    rateEvents++;
+                    Diag.event("the screen's refresh rate is now " + rate + " Hz, " + rateSeen + " Hz before (asked for "
+                               + rateAsked + " Hz)" + (rateEvents == 40 ? " (no more of these this session)" : ""));
+                    rateSeen = rate;
+                }
+            };
+            dm.registerDisplayListener(rateListener, null);  // (on this thread, the interface's)
+        } catch (Exception e) {
+            Log.w(TAG, "refresh rate listener: " + e);
+        }
+    }
+
     /**
      * Cuánto antes de un vsync hay que entregar un búfer para que se vea en él (Display.getPresentationDeadlineNanos):
      * el margen de los presents con hora (runtime/nvn/vulkan/present_pacing.c). 0 si no se sabe. Como el del MH4U.
@@ -500,25 +549,34 @@ public class GameActivity extends SDLActivity {
     /**
      * La tasa de refresco más baja que alcanza para el límite de FPS, nunca menos de 60: una pantalla a 120 Hz con el juego
      * a 60 gasta batería y calienta el teléfono sin mostrar nada más. Sin límite conocido, la más alta.
+     * Con la generación de cuadros ([Graphics] FrameGen, 1.0.1): la más baja que sea el doble del límite o más, si la
+     * pantalla tiene una (límite 60: 120 Hz; 30: 60 Hz), porque la imagen hecha entre dos del juego necesita el límite a la
+     * mitad de la tasa o menos; si no tiene, la de siempre. Sin FrameGen, exactamente la de antes.
      */
     private void pickRefreshRate() {
         try {
             Display display = Build.VERSION.SDK_INT >= 30 ? getDisplay() : getWindowManager().getDefaultDisplay();
             if (display == null) return;
-            Display.Mode current = display.getMode(), best = null, fastest = current;
+            Display.Mode current = display.getMode(), best = null, fastest = current, doubled = null;
             float want = frameCap > 0 ? Math.max(frameCap, 60) - .5f : Float.MAX_VALUE;
+            float twice = frameGen && frameCap > 0 ? 2 * frameCap - .5f : Float.MAX_VALUE;  // (FrameGen off: never)
             for (Display.Mode m : display.getSupportedModes()) {
                 if (m.getPhysicalWidth() != current.getPhysicalWidth() || m.getPhysicalHeight() != current.getPhysicalHeight()) continue;
                 if (m.getRefreshRate() > fastest.getRefreshRate()) fastest = m;
                 if (m.getRefreshRate() >= want && (best == null || m.getRefreshRate() < best.getRefreshRate())) best = m;
+                if (m.getRefreshRate() >= twice && (doubled == null || m.getRefreshRate() < doubled.getRefreshRate())) doubled = m;
             }
             if (best == null) best = fastest;
+            if (doubled != null) best = doubled;
             WindowManager.LayoutParams lp = getWindow().getAttributes();
             lp.preferredDisplayModeId = best.getModeId();
             lp.preferredRefreshRate = best.getRefreshRate();
             getWindow().setAttributes(lp);
+            rateAsked = best.getRefreshRate();
+            String fg = !frameGen || frameCap <= 0 ? "" : doubled != null ? ", frame generation: twice the limit or more"
+                                                                          : ", frame generation: no rate twice the limit";
             Diag.event("display mode " + best.getPhysicalWidth() + "x" + best.getPhysicalHeight() + " @ " + best.getRefreshRate()
-                       + " Hz (the FPS limit " + frameCap + ")");
+                       + " Hz (the FPS limit " + frameCap + fg + ")");
         } catch (Exception e) {
             Log.w(TAG, "refresh rate: " + e);
         }

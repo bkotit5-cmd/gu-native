@@ -1508,9 +1508,10 @@ static NvnTexture *frame_mask(void) {
     return mask_first && nmask < nmax ? mask_first : NULL;
 }
 
-// H -> H' scaled (frames without FSR). (A desktop's plain scaling keeps the player's MSAA: H brought up to date with
-// its multisampled image first, as anything that reads it is, exec.c vk_ms_resolve; nothing to do when it is)
-static void scale_to_stand(NvnTexture *h, NvnTexture *hs) {
+// H -> H' scaled (frames without FSR), linearly or ([Display] UpscaleFilter Sharp) by its nearest pixels. (A desktop's
+// plain scaling keeps the player's MSAA: H brought up to date with its multisampled image first, as anything that reads
+// it is, exec.c vk_ms_resolve; nothing to do when it is)
+static void scale_to_stand(NvnTexture *h, NvnTexture *hs, VkFilter filter) {
     TexBackend *s = vk_tex(h, true), *d = hs->backend;
 #ifndef __ANDROID__
     vk_ms_resolve(s);
@@ -1519,7 +1520,7 @@ static void scale_to_stand(NvnTexture *h, NvnTexture *hs) {
     vk_full_barrier(cb);
     VkImageBlit r = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .srcOffsets = {{0, 0, 0}, {(int32_t)s->width, (int32_t)s->height, 1}},
                      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .dstOffsets = {{0, 0, 0}, {(int32_t)d->width, (int32_t)d->height, 1}}};
-    vkCmdBlitImage(cb, s->image, VK_IMAGE_LAYOUT_GENERAL, d->image, VK_IMAGE_LAYOUT_GENERAL, 1, &r, VK_FILTER_LINEAR);
+    vkCmdBlitImage(cb, s->image, VK_IMAGE_LAYOUT_GENERAL, d->image, VK_IMAGE_LAYOUT_GENERAL, 1, &r, filter);
     vk_full_barrier(cb);
 }
 
@@ -1723,9 +1724,12 @@ static void hud_start(const char *why) {
                  (unsigned long long)g_present_count + 1, (void *)shot_taken);
         shot_taken = NULL;
     }
-    if (!frame_fsr && !((hud_fuse & 2) && vk_color_fill_later(hs->backend, vk_tex(g_h, true), 0))) {
-        scale_to_stand(g_h, hs);
-        if (hud_fuse & 2) vk_color_fill_check(hs->backend, vk_tex(g_h, true), 0);  // (the first time: the draw compared with it)
+    // ([Display] UpscaleFilter Sharp, FSR off: the nearest pixels, by the blit always - the draw that can stand in for it,
+    // MHGU_PERF_HUDSTART_FUSE, is the linear blit's, and its first comparison is made against that one)
+    const bool sharp = plain_only && config_live_upscale_sharp();
+    if (!frame_fsr && (sharp || !((hud_fuse & 2) && vk_color_fill_later(hs->backend, vk_tex(g_h, true), 0)))) {
+        scale_to_stand(g_h, hs, sharp ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
+        if ((hud_fuse & 2) && !sharp) vk_color_fill_check(hs->backend, vk_tex(g_h, true), 0);  // (the first time: the draw compared with it)
     }
     {  // every change between FSR and plain scaling, with the reason (always logged; at most 500 lines)
         static int last = -1, nlog;
@@ -2000,9 +2004,29 @@ NvnTexture *vk_fsr_present(NvnTexture *t) {
     return show;
 }
 
+// FSR chosen where it can't run (device.c: a Vulkan 1.1 GPU; vk_fsr_init: what FSR 3.1 needs missing, or its prep shader):
+// the 3D picture keeps the size its quality gave it (config.c) and is scaled up plainly, as Low-end mode's and a
+// RenderScale below 100's are, under the HUD at full size (UpscaleFilter: Smooth or Sharp), and the textures' LOD bias
+// is plain scaling's again (none). Up to 1.0.1 a phone drew the whole frame, HUD and text too, at that size, stretched,
+// with FSR's bias (gu-native: buwok's Mali-G57 on Vulkan 1.1, Ultra performance: 820x360 at 2460x1080, LOD bias -1.58).
+// Native AA (the 3D picture at the output's size): nothing to scale
+static void plain_fallback(const char *why) {
+    g_config.fsr = 0;
+    g_fsr_unavailable = why;
+    g_fsr_lod_bias = 0;
+    if (rw >= ow && rh >= oh) {
+        LOG("[fsr] not available on this GPU (%s): the 3D picture at %ux%u as it is\n", why, rw, rh);
+        return;
+    }
+    plain_only = true;
+    g_fsr_on = true;
+    LOG("[fsr] not available on this GPU (%s): the FSR quality's size, %ux%u, is scaled up plainly to %ux%u, the HUD at "
+        "full size\n", why, rw, rh, ow, oh);
+}
+
 void vk_fsr_init(void) {
 #ifdef __ANDROID__
-    if (!g_fsr_output[0] || (!g_config.fsr && !g_config.low_end)) return;
+    if (!g_fsr_output[0] || (!g_config.fsr && !g_config.low_end && !g_fsr_unavailable)) return;
 #else  // (a desktop: config.c sets the output for plain scaling at any RenderScale below 100, Low-end mode or not)
     if (!g_fsr_output[0]) return;
 #endif
@@ -2011,6 +2035,10 @@ void vk_fsr_init(void) {
     // (unset: 3; a Vulkan 1.1 driver by its GPU, device.c vk_v11_switches)
     hud_fuse = getenv("MHGU_PERF_HUDSTART_FUSE") ? atoi(getenv("MHGU_PERF_HUDSTART_FUSE")) : vk_v11_switches() == V11_ALL ? 3 : 0;
     if (hud_fuse) LOG("[perf] MHGU_PERF_HUDSTART_FUSE=%d\n", hud_fuse);
+    if (g_fsr_unavailable) {  // (device.c: FSR off on this GPU)
+        plain_fallback(g_fsr_unavailable);
+        return;
+    }
     if (!g_config.fsr) {  // (RenderScale below 100: config.c)
         plain_only = true;
         g_fsr_on = true;
@@ -2022,7 +2050,8 @@ void vk_fsr_init(void) {
     if (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK || !caps.fsr3ComputePrerequisites ||
         !g_vk.fsr_storage_wo_format) {
         LOG("[fsr] this GPU lacks what FSR 3.1 needs (subgroup operations, storage formats, storage writes without a "
-            "format): FSR off, the picture is scaled from %ux%u\n", rw, rh);
+            "format): FSR off\n");
+        plain_fallback("what FSR 3.1 needs is missing");
         return;
     }
     if (g_config.fsr_objmotion) {  // (device.c enables both where the GPU has them)
@@ -2033,7 +2062,12 @@ void vk_fsr_init(void) {
             LOG("[fsr] object motion needs vertexPipelineStoresAndAtomics and fragmentStoresAndAtomics, which this GPU lacks: "
                 "camera motion only (the reactive mask still covers moving objects)\n");
     }
-    if (!prep_init()) { LOG("[fsr] the prep shader could not be built: FSR off\n"); g_fsr_objvel = false; return; }
+    if (!prep_init()) {
+        LOG("[fsr] the prep shader could not be built: FSR off\n");
+        g_fsr_objvel = false;
+        plain_fallback("its prep shader could not be built");
+        return;
+    }
     g_fsr_on = true;
     camjit_set(false, rw, rh, 8);
     if (g_config.fsr_upscaler == FSR_UP_4) {

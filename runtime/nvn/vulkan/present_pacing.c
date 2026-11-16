@@ -121,6 +121,10 @@ static int cadence(void) {
     return (d < 0 ? -d : d) <= 0.02 * cap ? k : 1;
 }
 
+// (frame generation's log, nvn/vulkan/framegen.c) the display's refresh rate as the presents see it (its period, asked
+// and measured); 0 while not known
+double vk_pacing_refresh_hz(void) { return pp.ext && pp.sc && pp.period > 0 ? 1e9 / (double)pp.period : 0; }
+
 // (frame generation, nvn/vulkan/framegen.c) the vsyncs a game frame takes now, as the presents are timed: n >= 2 only on
 // the timed swapchain with the grid known, else 1 (no picture is made then)
 int vk_pacing_cadence(void) {

@@ -46,6 +46,7 @@
 #include "overlay.h"
 #include "padmap.h"
 #include "rt.h"
+#include "settings_panel.h"
 #include "textinput.h"
 #include "touch.h"
 #ifdef __ANDROID__
@@ -325,6 +326,10 @@ static void control_poll(void) {
                 int v[7] = {0};            // the colour filter as if set in the menu (tests: runtime/colour_filter.h);
                 int n = sscanf(line, "%*s %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]);
                 config_colour_test(n >= 1 ? v : NULL);  // "colour" alone: the saved values again
+                continue;
+            }
+            if (!strcmp(cmd, "upscale")) {  // upscale 0|1: [Display] UpscaleFilter Smooth / Sharp from the next frame, as
+                config_upscale_test(atoi(arg));  // if saved in the menu (tests: the same scene both ways)
                 continue;
             }
             if (!strcmp(cmd, "fgeval")) {  // fgeval <n> [frames]: n quality samples of frame generation (nvn/vulkan/framegen.c)
@@ -970,6 +975,8 @@ void host_input_event(const SDL_Event *e) {
         if (pad_down || menu_mouse()) menu_pointer_hidden = true;
     }
     if (e->type == SDL_EVENT_FINGER_UP && textinput_active()) textinput_tap();  // (the screen keyboard, if hidden)
+    if (e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+        settings_panel_credits_tap();  // (the credits shown at the start close at a tap: runtime/settings_panel.cpp)
     if (touch_event(e)) return;  // (fingers: the touch controls, or the settings menu's mouse: runtime/touch.cpp)
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
 #ifndef __ANDROID__

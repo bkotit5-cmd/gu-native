@@ -70,6 +70,19 @@ static void activity_call(const char *method) {  // (a static void method of Gam
 }
 #endif
 #ifdef __ANDROID__
+// [Graphics] FrameGen on or off to GameActivity.setFrameGen: the screen's refresh rate is picked again (twice the FPS
+// limit or more with it on, where the screen has such a rate)
+static void frame_gen_to_activity(bool on) {
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "setFrameGen", "(Z)V") : NULL;
+    if (m) (*env)->CallStaticVoidMethod(env, cls, m, (jboolean)(on ? JNI_TRUE : JNI_FALSE));
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionDescribe(env); (*env)->ExceptionClear(env); }
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+}
 static void frame_cap_to_activity(float fps) {
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
@@ -390,6 +403,9 @@ int ui_run(void) {
         static float screen_for = -1;  // (the screen's refresh rate follows the FPS limit: GameActivity.setFrameCap)
         float fps_now = config_live_fps();
         if (fps_now != screen_for) screen_for = fps_now, frame_cap_to_activity(fps_now);
+        static int screen_fg = -1;  // (and frame generation's: twice the limit, GameActivity.setFrameGen)
+        int fg_now = config_live_frame_gen() ? 1 : 0;
+        if (fg_now != screen_fg) screen_fg = fg_now, frame_gen_to_activity(fg_now);
 #else
         // (a desktop: the system's dialogs, runtime/pc_actions.c; the licenses are a page of the menu itself)
         if (action == 4) pc_choose_game_folder();
