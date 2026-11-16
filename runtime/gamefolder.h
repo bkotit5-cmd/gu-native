@@ -20,15 +20,16 @@ int gamefolder_language(void);
 // Android: true when it can be played, with its UTF-8 spelling and the runtime's; else why says what is wrong.
 bool gamefolder_check_picked(const char *picked, int language, char *utf8, size_t utf8_size, char *native, size_t native_size,
                              char *why, size_t why_size);
-// true when why (from gamefolder_problem, in that language) says mhgugame.dll is missing: the screen then offers the
-// guide's PC step that makes it
+// true when why (from gamefolder_problem, in that language) says mhgugame.dll is missing or from another version: all
+// else is right, and the screen offers to build it (runtime/pc_builder.c)
 bool gamefolder_lib_missing(const char *why, int language);
 // Keeps the folder (UTF-8) for the next start: game_folder.txt beside the settings. The one kept ("" when none).
 void gamefolder_remember(const char *utf8);
 void gamefolder_saved(char *utf8, size_t size);
 // The game folder screen (runtime/launcher.cpp): 1 a folder that can be played was chosen (native: the runtime's
-// spelling, kept in game_folder.txt), 0 the player left, -1 it couldn't make its window
-int launcher_choose_folder(const char *problem, char *native, size_t native_size);
+// spelling, kept in game_folder.txt), 0 the player left, -1 it couldn't make its window. folder: the folder the problem
+// is about ("" when none is known); builder: open straight in its builder (F1, System, Game code)
+int launcher_choose_folder(const char *problem, const char *folder, bool builder, char *native, size_t native_size);
 #ifdef __cplusplus
 }
 #endif

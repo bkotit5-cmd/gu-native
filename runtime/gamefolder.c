@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "pc_builder.h"
 #include "platform.h"
 #include "settings_locale.h"
 
@@ -32,13 +33,15 @@ static bool is_file(const char *p) {
 }
 static const char *T(int lang, const char *en) { return settings_text(lang, en); }
 
-// mhgugame.dll missing: the download never brings it (it is made from the player's own copy, the guide's PC step 2)
-static const char NO_LIB[] = "mhgugame.dll is missing from that folder. The download doesn't include it, on purpose: it is the "
-                             "game code, made once on this PC from your own copy with the guide's tool (step 2 of its PC "
-                             "setup): python build_game.py --pc <your folder>.";
-static const char NO_LIB_PC[] = "mhgugame.dll, the game code for PC, is missing from that folder: the download doesn't include "
-                                "it. Run the guide's tool on it again with --pc: python build_game.py --pc <your folder>. It "
-                                "keeps libmhgugame.so and only adds the PC's.";
+// mhgugame.dll missing or from another version: the download never brings it (it is made from the player's own copy:
+// the game folder screen's Build the game code on this PC, runtime/pc_builder.c, or the guide's tool by hand)
+static const char NO_LIB[] = "mhgugame.dll, the game code for PC, is missing from that folder. The download doesn't include "
+                             "it, on purpose: it is made once on this PC from your own copy. Build the game code on this PC "
+                             "makes it here.";
+static const char NO_LIB_PC[] = "mhgugame.dll, the game code for PC, is missing from that folder (the phone's, libmhgugame.so, "
+                                "is there and stays as it is). Build the game code on this PC makes it here.";
+static const char OLD_LIB[] = "This mhgugame.dll is from another version. Build the game code on this PC makes it again for this "
+                              "one.";
 
 int gamefolder_language(void) {
     // (the settings' Language when they say Spanish; before the first run, the system's)
@@ -119,8 +122,7 @@ void gamefolder_problem(const char *dir, int lang, char *why, size_t size) {
         fclose(f);
         id[strcspn(id, "\r\n ")] = 0;
     }
-    if (strcmp(id, GAMELIB_ID))
-        snprintf(why, size, "%s", T(lang, "This mhgugame.dll is from another version. Make it again with this version's tool."));
+    if (strcmp(id, GAMELIB_ID)) snprintf(why, size, "%s", T(lang, OLD_LIB));
 }
 
 // ---- the system's folder dialog (SDL3: on Windows it runs on a thread of its own and calls back from there)
@@ -186,17 +188,20 @@ bool gamefolder_find(char *out, size_t size) {
         }
     }
 #endif
+    // (F1, System, Game code, Build the game code: this start opens the builder for the folder, runtime/pc_builder.c)
+    bool builder = pcb_take_open_request();
     const char *env = getenv("MHGU_DATA_DIR");
-    if (env && *env) return snprintf(out, size, "%s", env) < (int)size;  // (as given: runtime/main.c checks it)
+    if (env && *env && !builder) return snprintf(out, size, "%s", env) < (int)size;  // (as given: runtime/main.c checks it)
     int lang = gamefolder_language();
-    char why[700] = "", saved[1100] = "", native[1100];
+    char why[700] = "", saved[1100] = "", native[1100], folder[1100] = "";
     // the folders it can be in already: the one chosen before, data beside the executable, the executable's own
     char cand[3][1100];
     int n = 0;
-    if (read_saved(saved, sizeof saved) && plat_path_from_utf8(saved, cand[n], sizeof cand[n])) n++;
+    if (env && *env) snprintf(cand[n++], sizeof cand[0], "%s", env);
+    else if (read_saved(saved, sizeof saved) && plat_path_from_utf8(saved, cand[n], sizeof cand[n])) n++;
     char exe[1100];
     exe_dir(exe, sizeof exe);
-    if (exe[0]) {
+    if (exe[0] && !(env && *env)) {
         snprintf(cand[n++], sizeof cand[0], "%s/data", exe);
         snprintf(cand[n++], sizeof cand[0], "%s", exe);
     }
@@ -206,8 +211,9 @@ bool gamefolder_find(char *out, size_t size) {
         snprintf(r, sizeof r, "%s/romfs", cand[i]);
         if (!is_dir(e) && !is_dir(r)) continue;  // (not the game's folder)
         gamefolder_problem(cand[i], lang, why, sizeof why);
-        if (!why[0]) return snprintf(out, size, "%s", cand[i]) < (int)size;
-        break;  // (the player's folder, with something wrong: say what, and let them choose again)
+        if (!why[0] && !builder) return snprintf(out, size, "%s", cand[i]) < (int)size;
+        snprintf(folder, sizeof folder, "%s", cand[i]);  // (the player's folder: the builder's, or what is wrong with it)
+        break;
     }
     if (!SDL_Init(SDL_INIT_VIDEO)) {  // (dialogs and message boxes)
         plat_error_box(why[0] ? why : "The game files were not found.");
@@ -215,7 +221,7 @@ bool gamefolder_find(char *out, size_t size) {
     }
     // the game folder screen, in the settings menu's look (runtime/launcher.cpp); the system's boxes below only if it
     // can't make its window
-    int chosen = launcher_choose_folder(why, native, sizeof native);
+    int chosen = launcher_choose_folder(why, folder, builder && folder[0], native, sizeof native);
     if (chosen == 1) return snprintf(out, size, "%s", native) < (int)size;
     if (chosen == 0) return false;
     char text[1400];
@@ -267,7 +273,7 @@ bool gamefolder_check_picked(const char *picked, int lang, char *utf8, size_t ut
 }
 
 bool gamefolder_lib_missing(const char *why, int lang) {
-    return why && (!strcmp(why, T(lang, NO_LIB)) || !strcmp(why, T(lang, NO_LIB_PC)));
+    return why && (!strcmp(why, T(lang, NO_LIB)) || !strcmp(why, T(lang, NO_LIB_PC)) || !strcmp(why, T(lang, OLD_LIB)));
 }
 
 void gamefolder_remember(const char *utf8) { write_saved(utf8); }
