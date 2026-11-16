@@ -855,6 +855,11 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   them from a server show them nowhere (PC, a real server's answer: 11 of its 18 networks were these; the hub list showed
   the other 7, Hunter Search none), and a server answers 18 at most, so they hid hubs. The LAN still answers for them. A
   network is looked at 1 s after it is made (its advertise data comes then) and again at each change.
+  Each link logs a line a minute while it carries game packets (`link_stats_log`): how many went and came by UDP and by
+  the TCP link, and the largest of each (the game's bytes; a datagram adds 28, and 16 more through the hub server). Small
+  datagrams passing (the 2 s hellos keep UDP in use) while large ones are lost would show as large ones sent on one side
+  and none that large received on the other: for hubs that can't be entered on mobile data (#242). A PC hub with a
+  stand-in station: the game's own packets to a joining node were 140 bytes at most.
 - Crossplay with emulators (S36, 1.0; `[Multiplayer] Crossplay` = Off | Rooms | Ryujinx, the Multiplayer page's first
   section, `settings_panel.cpp crossplay_rows`): ldn.c's nn::ldn drives an `XBackend` (net.h) instead of the port's link:
   create, scan, connect, the game's datagrams (`ldn_send`), and the backend calls back `ldn_x_info` / `ldn_x_lost` /
