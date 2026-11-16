@@ -178,6 +178,8 @@ typedef struct {
     int xroom_host_port;      // [Multiplayer] RoomHostPort: its UDP port; 0 the rooms' usual 24872
     int send_all_rewards;     // [Quest Rewards] SendAllRewards: choosing Send to the Item Box at a quest's rewards sends
                               // every reward that fits at once (runtime/hle/rewards.c); off, one at a time as the game does
+    int gather_all;           // [Gathering] GatherAll (1.0.1): one gather gives all a gathering point had left, through the
+                              // game's own steps (runtime/hle/gather.c); off, one item a gather as the game does
     int touch_cam_smooth;     // [Touch] CameraSmoothing (1.0.1, gu-native #244): a drag's turn of the camera spread over a
                               // moment, 0 (off, as before) to 100 (runtime/touch.cpp cam_smooth)
     int camera_shake;         // [Controls] CameraShake (1.0.1, #244): the hunt camera shakes while the game rumbles, 0 (off)
@@ -358,6 +360,7 @@ int config_live_grass(void);            // [Performance] Grass
 int config_live_effects(void);          // [Performance] Effects
 int config_live_reverb(void);           // [Audio] Reverb
 int config_live_send_all_rewards(void); // [Quest Rewards] SendAllRewards (runtime/hle/rewards.c)
+int config_live_gather_all(void);       // [Gathering] GatherAll (runtime/hle/gather.c)
 // [Colour] (runtime/colour_filter.h ColourAdjust; the window image's pass, nvn/vulkan/exec.c): the saved values, or while
 // the settings menu is open the ones being adjusted there (config_colour_preview), so the picture shows them at once
 struct ColourAdjust;
