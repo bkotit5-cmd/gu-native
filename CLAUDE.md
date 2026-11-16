@@ -288,6 +288,13 @@ A test build (`MHGU_DEV=1`) reads two files in `Android/data/com.mhgu.recomp/fil
     (`overlay.cpp frame_once`): the render thread draws the copy it has. Nothing moving (a finger, the run, the lock-on's
     pulse, the menu pad's fade) gives no key; once a second a frame is built anyway. `=2` is a check: those frames are built
     and compared with the copy, and a difference is logged. The log counts built and reused frames each minute.
+    A phone's FPS plate (`[Performance] ShowStats`) may be on such a frame too (after 1.0.1, `MHGU_PERF_STATS_REUSE`, on;
+    `=0` builds them as before): its measures are taken every frame (`perfstats_tick`), and the frame is drawn again only
+    while the plate would say what the copy says (`perfstats_same`: its runs' texts and colours, the display's size and
+    where the editor put it; the figures change twice a second). The Moto g06 at quest 101's camp (Low-end 40 %, 60 FPS,
+    the plate on): 0 of ~3,470 frames a minute drawn again before, ~3,300 now; the overlay's share of the game thread (the
+    one that builds it) 3.8 % -> 0.3 % (simpleperf, about 0.4 ms a frame), the frame rate the same there (the GPU is what
+    holds it); `=2` compared 6,659 such frames, none differed. A PC's plate (the sampler's lines) is built every frame.
   - `MHGU_PERF_MENU_PRESENT=1` (Android): while the settings menu holds the game (`overlay_frame`), the held picture is
     presented again only when the menu's draw lists changed byte for byte (`snap_same`), when the window needs it
     (`vk_present_needed`: back from the background, a new size, VSync) and once a second; the menu is still built 60 times
@@ -686,7 +693,9 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   folders in 11.4 s, 11.8 with an `fstatat` of every file, 12.9 with a `stat` by the whole path (1.0.1's scan), and 7.9 s
   with 2 threads, 5.5 with 4, 2.9 with 8, 1.9 with 16: the daemon answers several at once. Up to 1.0.1 the count listed
   every folder too (`plat_count_files`), so a start listed them twice: the RG406V from the log's first line to `[romfs]`
-  24.9-25.4 s, now 3.1-3.2 s (its line: `listed in 2323 ms by 8 threads, as the game started`). `MHGU_ROMFS_CHECK=1` lists
+  24.9-25.4 s, now 3.1-3.2 s (its line: `listed in 2323 ms by 8 threads, as the game started`); the Moto g06 18.7-19.4 s
+  (the count 8.3-8.4 s, the relocation below 3.8, the second listing 5.6-6.5) -> 3.2-3.7 s, listed in 2.3-2.4 s (16
+  threads there: 2.7 s, no better). `MHGU_ROMFS_CHECK=1` lists
   it again with one thread as the game starts and compares the two trees (every folder, every file's path and size; the
   RG406V: the same 37,851 entries). Windows keeps its own count and listing.
 - Relocating main (`loader.c relocate`): each of its imports from the sdk was found by walking all of the modules' 21,000
@@ -821,6 +830,26 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   64,000 plus 3,900 binary searches on the update thread; with it, 4,500 misses a second on the update thread, all in the
   second way, and the render thread's too few to log.
   `MHGU_PERF_DISPATCH_STATS=1` logs each thread's misses every 10 s, either way.
+- Where the time goes (opt101's profile, the Moto g06 at quest 101's camp standing, warm caches; `/proc` thread times over
+  100 s windows, `gpuprof`, simpleperf with a profileable test APK): at the owner's settings (Low-end 40 %, 60 FPS,
+  Shadows / Bloom / Grass off, the FPS plate on) 57.7-58.1 FPS, the frame intervals' p50 17.1 ms; the GPU's frame 14.5-16.5
+  ms, so the GPU is what holds it: the 656x288 scene passes about 9 ms (the main one 3.6-4.0), the HUD on its 1640x720
+  stand-in 2.3-2.5, the game's brightness draw into the window texture's stand-in 1.4-1.6 and the window image's pass (the
+  game's picture copied in, the overlay) 1.6-1.8. The CPU: 2.25-2.30 cores; the game's update thread (`Thread-4`, it also
+  builds the overlay) 67-68 % of a core, 76-79 % of it the game's own code and its waits, the rest the runtime's dispatch,
+  libc, the kernel; the translating thread (`submit`) 49-54 % of a core (varying that much between runs of one build):
+  the runtime 37-39 % of it (`stage_set`, `draw`, `rt_dispatch`, `guest_copy`, `exec_list`), the Mali driver recording
+  35-36 %, libc 15 % (`memmove`: the vertex cache's written pages, 8.1 GB a minute, ~2.3 MB a frame, and the uniform
+  copies); the Mali driver's own thread 21 %, the game's job thread 35-36 %, the mixer 12 %. The defaults (100 %, Shadows,
+  Bloom and Grass on): 18.4 FPS, the GPU's frame 48-56 ms (the main pass 15.6 at 1640x720, ~30 passes), the CPU idle.
+  Tried and left out (opt101), with why: the vertex cache's runs of written pages as one `vkCmdCopyBuffer` with a region
+  each instead of a command each (no gain measured: the translating thread's driver time a little higher, within the runs'
+  spread); `MHGU_PERF_FMTLIST=1` (the same pass times: render targets keep the flag and no list) and a test giving render
+  targets their format and twin as the list too (the Mali-G52's probe: a 1640x720 RGBA8 target is 4,786,240 bytes mutable
+  with no list, 5,233,728 with one, so compressed then; the passes took as long, 2.3-2.5 / 1.4-1.6 / 1.6-1.7 ms). Not
+  tried: the game's brightness draw and the window image's copy are two full-screen passes at the output size (3 ms of the
+  Moto's 15); drawing the game's draw straight into the window image would need it turned for the panel and the overlay
+  after it.
 - Locks and write tracking, counted (`MHGU_HITCHLOG=1`, `MHGU_WT_STATS=1`), the RG406V at Low-end 60 in quest 101's camp: the
   renderer's lock waited for 3 times in 2 minutes, vkAcquireNextImageKHR 0.08 ms a frame, no wait for the frames in flight,
   1.8 write faults a second (2 blocks armed a second, 4,500 queries): nothing there to gain.
