@@ -11,7 +11,8 @@
 // Control frames: u32 size (of what follows), u8 type, payload; little endian. The first frame of a connection is a
 // request, whose payload starts with a header: "MHGS", u16 server protocol, u16 link protocol (the port's
 // PROTO_VERSION: only hubs of the same one are listed or joined), room[16] (the first 16 bytes of SHA-256 of the
-// matchmaking key, all zero without a key).
+// matchmaking key, all zero without a key). Other games use link protocols of their own on the same server (README.md,
+// Other games): the server keeps each one's hubs apart.
 //
 // Everything a client sends is untrusted: sizes are capped, NetworkInfo is checked before it is listed, requests are
 // rate limited per IP address, connections and hubs per IP address are limited, and the relay only ever forwards
@@ -412,7 +413,7 @@ func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, in
 	s.hubs[h.id] = h
 	st.hubs++
 	s.mu.Unlock()
-	s.vlog("hub %016x up (%d players)", h.id, h.info[niNodeCount])
+	s.vlog("hub %016x up (link protocol %#04x, %d players)", h.id, proto, h.info[niNodeCount])
 	defer func() {
 		s.mu.Lock()
 		delete(s.hubs, h.id)
