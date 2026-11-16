@@ -309,6 +309,41 @@ static const char *builtin_src(const char *name, int *stage) {
                "layout(location = 0) out vec4 o;\n"
                "void main() { o = vec4(texture(t, uv).rgb, 1.0); }\n";
     }
+    // present.frag with the colour filter ([Colour], runtime/colour_filter.h; exec.c vk_present_draw), and present.hdr with
+    // it and the HDR output's encoding (HDR10: BT.2020, SMPTE ST 2084). Push constants after the vertex stage's 32 bytes:
+    // the filter's three rows (rgb weights, offset), g.x its gamma exponent; h (HDR): x the paper white in 10000s of nits,
+    // y where the SDR white goes (in paper whites), z the knee above which the picture's light is spread up to y
+    if (!strcmp(name, "present.color") || !strcmp(name, "present.hdr")) {
+        *stage = STAGE_FRAGMENT;
+        if (name[8] == 'c')
+            return "#version 450\n"
+                   "layout(set = 0, binding = 0) uniform sampler2D t;\n"
+                   "layout(location = 0) in vec2 uv;\n"
+                   "layout(location = 0) out vec4 o;\n"
+                   "layout(push_constant) uniform P { layout(offset = 32) vec4 r0; vec4 r1; vec4 r2; vec4 g; } pc;\n"
+                   "void main() {\n"
+                   "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
+                   "  o = vec4(clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0), 1.0);\n"
+                   "}\n";
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D t;\n"
+               "layout(location = 0) in vec2 uv;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "layout(push_constant) uniform P { layout(offset = 32) vec4 r0; vec4 r1; vec4 r2; vec4 g; vec4 h; } pc;\n"
+               "vec3 pq(vec3 l) {\n"
+               "  vec3 p = pow(max(l, vec3(0.0)), vec3(0.1593017578125));\n"
+               "  return pow((0.8359375 + 18.8515625 * p) / (1.0 + 18.6875 * p), vec3(78.84375));\n"
+               "}\n"
+               "void main() {\n"
+               "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
+               "  vec3 s = clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0);\n"
+               "  vec3 l = pow(s, vec3(2.2));\n"  // (the light, in paper whites: an SDR screen's gamma)
+               "  float m = max(l.r, max(l.g, l.b));\n"
+               "  if (m > pc.h.z) { float x = (m - pc.h.z) / (1.0 - pc.h.z); l *= (m + (pc.h.y - 1.0) * x * x) / m; }\n"
+               "  l = mat3(0.6274039, 0.0690973, 0.0163914, 0.3292830, 0.9195404, 0.0880133, 0.0433131, 0.0113623, 0.8955953) * l;\n"
+               "  o = vec4(pq(l * pc.h.x), 1.0);\n"
+               "}\n";
+    }
     if (!strcmp(name, "clear.vert")) {
         *stage = STAGE_VERTEX;
         return "#version 450\n"

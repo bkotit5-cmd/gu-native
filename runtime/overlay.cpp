@@ -1118,6 +1118,38 @@ static void frame_once(void *cpu) {
 
 // ------------------------------------------------------------------ drawing (render thread)
 static VkRenderPass g_pass;
+// An HDR10 window image ([Colour] HDR, nvn/vulkan/device.c): ImGui's fragment shader with its colour encoded for it, the
+// white at the paper white (BT.709 to BT.2020, SMPTE ST 2084; the SDR picture's gamma, 2.2, as the game's picture gets in
+// nvn/vulkan/shaders.c present.hdr, without the highlights' expansion). It blends in that encoding: an edge's soft pixels
+// a little different from SDR's, the colours the same.
+static float g_hdr_paper;
+static std::vector<uint32_t> g_hdr_frag;  // (its SPIR-V: ImGui keeps the pointer while it runs)
+extern "C" uint32_t *vk_glsl_to_spirv(const char *src, int stage, const char *name, size_t *nwords);  // (shaders.c)
+static bool hdr_shader(float paper) {
+    char src[1400];
+    snprintf(src, sizeof src,
+             "#version 450 core\n"
+             "layout(location = 0) out vec4 fColor;\n"
+             "layout(set = 0, binding = 0) uniform texture2D _Texture;\n"
+             "layout(set = 1, binding = 0) uniform sampler _Sampler;\n"
+             "layout(location = 0) in struct { vec4 Color; vec2 UV; } In;\n"
+             "vec3 pq(vec3 l) {\n"
+             "  vec3 p = pow(max(l, vec3(0.0)), vec3(0.1593017578125));\n"
+             "  return pow((0.8359375 + 18.8515625 * p) / (1.0 + 18.6875 * p), vec3(78.84375));\n"
+             "}\n"
+             "void main() {\n"
+             "  vec4 c = In.Color * texture(sampler2D(_Texture, _Sampler), In.UV.st);\n"
+             "  vec3 l = mat3(0.6274039, 0.0690973, 0.0163914, 0.3292830, 0.9195404, 0.0880133, 0.0433131, 0.0113623, 0.8955953) * pow(max(c.rgb, vec3(0.0)), vec3(2.2));\n"
+             "  fColor = vec4(pq(l * %.6f), c.a);\n"
+             "}\n",
+             (double)paper);
+    size_t n = 0;
+    uint32_t *spv = vk_glsl_to_spirv(src, 1 /* STAGE_FRAGMENT */, "overlay.hdr.frag", &n);
+    if (!spv) return false;
+    g_hdr_frag.assign(spv, spv + n);
+    free(spv);
+    return true;
+}
 
 static void vk_check(VkResult r) {
     if (r < 0) LOG("[forge] ImGui Vulkan error %d\n", (int)r);
@@ -1127,7 +1159,8 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
 #ifndef MHGU_NULL_BACKEND
     if (!g_enabled) return;
     g_disp_w = t->width, g_disp_h = t->height;
-    if (t->pass != g_pass) {  // (the window's render pass: made once, again only if the window's format changes)
+    if (t->pass != g_pass || t->hdr_paper != g_hdr_paper) {  // (the window's render pass: made once, again only if the
+                                                             // window's format changes; or the HDR's white)
         if (g_pass) {
             g_ready = false;
             ImGui_ImplVulkan_Shutdown();
@@ -1147,6 +1180,17 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         info.PipelineInfoMain.Subpass = 0;
         info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         info.CheckVkResultFn = vk_check;
+        if (t->hdr_paper > 0) {
+            if (hdr_shader(t->hdr_paper)) {
+                info.CustomShaderFragCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+                info.CustomShaderFragCreateInfo.codeSize = g_hdr_frag.size() * 4;
+                info.CustomShaderFragCreateInfo.pCode = g_hdr_frag.data();
+                LOG("[forge] overlay in HDR10: its white at %.0f nits\n", (double)t->hdr_paper * 10000);
+            } else {
+                LOG("[forge] the overlay's HDR shader did not compile: drawn as SDR\n");
+            }
+        }
+        g_hdr_paper = t->hdr_paper;
         if (!ImGui_ImplVulkan_Init(&info)) {
             LOG("[forge] ImGui's Vulkan renderer did not start: no overlay\n");
             g_enabled = false;

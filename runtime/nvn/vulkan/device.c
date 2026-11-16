@@ -17,8 +17,10 @@
 #include <unistd.h>
 #ifdef __ANDROID__
 #include <android/api-level.h>  // (create_swapchain: Android 10's libvulkan)
+#include <jni.h>  // (vk_screen_hdr_nits)
 #endif
 
+#include "../../colour_filter.h"
 #include "../../overlay.h"
 #include "fsr.h"
 #include "fsr4.h"
@@ -83,6 +85,25 @@ static void disable_overwolf_layers(void) {
 }
 
 static uint32_t instance_api;  // the Vulkan version asked of the instance
+// HDR output ([Colour] HDR, runtime/colour_filter.h): VK_EXT_swapchain_colorspace asked of the instance only when it is on
+// (nothing changes for anyone else), and the window image made HDR10 (A2B10G10R10 or A2R10G10B10 with ST 2084) when the
+// surface offers it; where it doesn't, or the swapchain can't be made so, it is made as always (SDR) and the log says
+// why. sc_hdr: the swapchain in use is HDR10 (exec.c vk_present_draw encodes the picture for it, overlay.cpp the overlay).
+static bool hdr_ext, sc_hdr;
+static const char *hdr_why;  // (the menu: why the picture stays SDR with HDR on; NULL: it is HDR, or HDR is off)
+static float hdr_peak = -2;  // the screen's peak for HDR10 in nits (0 unknown, -1 none, -2 not asked yet)
+// MHGU_HDR_TEST=1 (tests, a screen without HDR): the HDR10 encoding drawn into the SDR window image all the same (the
+// picture looks wrong on the screen; a screenshot holds the PQ values, to check them), the screenshots left as they are
+static bool hdr_test;
+bool vk_window_hdr(void) { return sc_hdr || hdr_test; }
+const char *vk_hdr_fallback(void) { return g_config.hdr ? hdr_why : NULL; }
+// The overlay in an HDR10 window image: its white at the paper white of the start (overlay.cpp compiles its shader for
+// it; 0: SDR)
+static float overlay_hdr_paper(void) {
+    if (!vk_window_hdr()) return 0;
+    return hdr_params(g_config.hdr_brightness, 0, 0).paper;
+}
+
 extern bool maxwell_no_int64;   // (nvn/maxwell/translate.c)
 
 static uint32_t msaa_floor(uint32_t s);
@@ -109,6 +130,34 @@ void vk_no_driver_box(const char *detail) {
 #else
     (void)detail;
 #endif
+}
+
+// The screen's HDR10, as Android says (GameActivity.hdrScreenNits): its peak in nits, 0 if it has HDR10 without saying
+// its peak, -1 if it has none. A desktop: 0 (the monitor may have it: Windows' HDR switch decides; the swapchain tells).
+float vk_screen_hdr_nits(void) {
+#ifdef __ANDROID__
+    if (hdr_peak > -2) return hdr_peak;
+    float r = -1;
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (act) {
+        jclass cls = (*env)->GetObjectClass(env, act);
+        jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "hdrScreenNits", "()F") : NULL;
+        if (m && !(*env)->ExceptionCheck(env)) r = (*env)->CallStaticFloatMethod(env, cls, m);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env), r = -1;
+        if (cls) (*env)->DeleteLocalRef(env, cls);
+        (*env)->DeleteLocalRef(env, act);
+    }
+    hdr_peak = r;
+    LOG("[vk] the screen's HDR10: %s (%.0f nits)\n", r < 0 ? "none" : "yes", r > 0 ? r : 0.0);
+    return r;
+#else
+    return 0;
+#endif
+}
+float vk_window_hdr_peak(void) {
+    float n = vk_screen_hdr_nits();
+    return n > 0 ? n : 0;
 }
 
 static void create_instance(void) {
@@ -138,6 +187,17 @@ static void create_instance(void) {
         if (!strcmp(ip[i].extensionName, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)) surface_caps2 = true;
     free(ip);
     if (surface_caps2) ext[n_ext++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
+    if (g_config.hdr) {  // (HDR output on: the colour spaces it needs, if the loader has them)
+        vkEnumerateInstanceExtensionProperties(NULL, &ni, NULL);
+        ip = calloc(ni ? ni : 1, sizeof *ip);
+        vkEnumerateInstanceExtensionProperties(NULL, &ni, ip);
+        for (uint32_t i = 0; i < ni; i++)
+            if (!strcmp(ip[i].extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME)) hdr_ext = true;
+        free(ip);
+        if (hdr_ext) ext[n_ext++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
+        else hdr_why = "The graphics driver has no HDR colour spaces.";
+        LOG("[vk] HDR output on: %s\n", hdr_ext ? "VK_EXT_swapchain_colorspace asked for" : "the loader has no VK_EXT_swapchain_colorspace, SDR");
+    }
     // MHGU_VK11=1: work as Vulkan 1.1 on a newer driver (tests what a 1.1 driver gets)
     instance_api = getenv("MHGU_VK11") ? VK_API_VERSION_1_1
                    : g_config.fsr && g_config.fsr_upscaler == FSR_UP_4 ? VK_API_VERSION_1_3 : VK_API_VERSION_1_2;  // (FSR 4's shaders use SPIR-V 1.6)
@@ -1211,6 +1271,7 @@ static int turn_wanted(const VkSurfaceCapabilitiesKHR *caps) {
 }
 #endif
 
+static bool hdr_failed;  // (an HDR10 swapchain was refused once: SDR for the session)
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
 #ifdef __ANDROID__
@@ -1274,6 +1335,23 @@ static void create_swapchain(void) {
     VkSurfaceFormatKHR sf = fmts[0];
     for (uint32_t i = 0; i < nf; i++)
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) { sf = fmts[i]; break; }
+    // HDR output ([Colour] HDR): an HDR10 format if the surface offers one; else the one above, and why in the log (once)
+    VkSurfaceFormatKHR sdr = sf;
+    bool want_hdr = false;
+    if (hdr_ext && !hdr_failed) {
+        for (uint32_t i = 0; i < nf && !want_hdr; i++)
+            if (fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT &&
+                (fmts[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || fmts[i].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32))
+                sf = fmts[i], want_hdr = true;
+        static int nlog;
+        if (!want_hdr && !nlog++) {
+            char list[400] = "";
+            for (uint32_t i = 0; i < nf; i++)
+                snprintf(list + strlen(list), sizeof list - strlen(list), "%s%d/%d", i ? ", " : "", fmts[i].format, fmts[i].colorSpace);
+            LOG("[vk] HDR output on, but the surface offers no HDR10 format (format/colour space: %s): SDR\n", list);
+            hdr_why = "This screen or its driver offers no HDR10 picture.";
+        }
+    }
     uint32_t count = caps.minImageCount + 1 < 3 ? 3 : caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
     if (count > 8) count = caps.minImageCount > 8 ? caps.minImageCount : 8;
@@ -1311,8 +1389,27 @@ static void create_swapchain(void) {
     FullScreenExclusiveInfo fse = {.sType = VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT,
                                    .fullScreenExclusive = FULL_SCREEN_EXCLUSIVE_DISALLOWED};
     if (no_exclusive) ci.pNext = &fse;
+    if (want_hdr) {  // (HDR10 refused: made as always, and HDR not tried again this session)
+        VkResult hr = vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain);
 #ifdef __ANDROID__
-    VkResult cr = vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain);
+        if (hr == VK_ERROR_SURFACE_LOST_KHR || hr == VK_ERROR_NATIVE_WINDOW_IN_USE_KHR) {  // (the app went to the background)
+            LOG("[vk] vkCreateSwapchainKHR (HDR10): %d (app in the background?)\n", hr);
+            if (old) vkDestroySwapchainKHR(g_vk.dev, old, NULL);
+            g_vk.swapchain = VK_NULL_HANDLE;
+            return;
+        }
+#endif
+        if (hr != VK_SUCCESS) {
+            LOG("[vk] the HDR10 swapchain (format %d) could not be made (%d): SDR\n", sf.format, hr);
+            hdr_failed = true, want_hdr = false, hdr_why = "The HDR picture could not be made on this phone.";
+            sf = sdr;
+            ci.imageFormat = sf.format, ci.imageColorSpace = sf.colorSpace;
+            ci.oldSwapchain = VK_NULL_HANDLE;  // (retired by the call that failed: destroyed below, as always)
+            g_vk.swapchain = VK_NULL_HANDLE;
+        }
+    }
+#ifdef __ANDROID__
+    VkResult cr = g_vk.swapchain && want_hdr ? VK_SUCCESS : vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain);
     if (cr != VK_SUCCESS) {
         LOG("[vk] vkCreateSwapchainKHR: %d (app in the background?)\n", cr);
         if (old) vkDestroySwapchainKHR(g_vk.dev, old, NULL);
@@ -1320,8 +1417,11 @@ static void create_swapchain(void) {
         return;
     }
 #else
-    VK_CHECK(vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain));
+    if (!want_hdr) VK_CHECK(vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain));
 #endif
+    sc_hdr = want_hdr;
+    if (want_hdr) hdr_why = NULL;
+    hdr_test = !sc_hdr && getenv("MHGU_HDR_TEST") != NULL;
     for (uint32_t i = 0; i < g_vk.sc_count; i++) {
         vkDestroyFramebuffer(g_vk.dev, sc_fb[i], NULL);
         vkDestroyImageView(g_vk.dev, g_vk.sc_views[i], NULL);
@@ -1359,8 +1459,8 @@ static void create_swapchain(void) {
                                       .pAttachments = &g_vk.sc_views[i], .width = phys.width, .height = phys.height, .layers = 1};
         VK_CHECK(vkCreateFramebuffer(g_vk.dev, &fi, NULL, &sc_fb[i]));
     }
-    LOG("[vk] swapchain %ux%u, %u images (asked for %u, least %u), format %d%s%s\n", ext.width, ext.height, g_vk.sc_count, count,
-        caps.minImageCount, sf.format, swapchain_paced ? ", FIFO with presents timed to the display" : "",
+    LOG("[vk] swapchain %ux%u, %u images (asked for %u, least %u), format %d%s%s%s\n", ext.width, ext.height, g_vk.sc_count, count,
+        caps.minImageCount, sf.format, sc_hdr ? ", HDR10" : "", swapchain_paced ? ", FIFO with presents timed to the display" : "",
         sc_turn == 1 ? ", drawn turned 90 degrees for the panel" : sc_turn == 3 ? ", drawn turned 270 degrees for the panel" : "");
 #ifdef __ANDROID__
     vk_pacing_swapchain();  // (the display's period, the cadence anew)
@@ -1500,7 +1600,33 @@ static bool frame_begin(void) {
 }
 
 // A screenshot being written: the window image's pixels (B8G8R8A8 or R8G8B8A8), made RGBA and saved as PNG.
-typedef struct { char path[300]; uint8_t *px; uint32_t w, h; bool bgr; int turn; } ShotJob;
+typedef struct { char path[300]; uint8_t *px; uint32_t w, h; bool bgr; int turn; int hdr; float paper; } ShotJob;
+// (hdr: 1 A2B10G10R10, 2 A2R10G10B10, with ST 2084) a pixel of an HDR10 window image as SDR RGBA8: PQ decoded, BT.2020
+// to BT.709, divided by the paper white, clipped, and the SDR gamma (2.2)
+static void shot_from_hdr(ShotJob *j) {
+    uint64_t n = (uint64_t)j->w * j->h;
+    uint32_t *px = (uint32_t *)j->px;
+    for (uint64_t i = 0; i < n; i++) {
+        uint32_t v = px[i];
+        float c[3] = {(v & 1023) / 1023.0f, ((v >> 10) & 1023) / 1023.0f, ((v >> 20) & 1023) / 1023.0f}, l[3];
+        if (j->hdr == 2) { float t = c[0]; c[0] = c[2]; c[2] = t; }
+        for (int k = 0; k < 3; k++) {
+            float e = powf(c[k], 1 / 78.84375f), num = e - 0.8359375f;
+            l[k] = powf((num > 0 ? num : 0) / (18.8515625f - 18.6875f * e), 1 / 0.1593017578125f) / j->paper;
+        }
+        float r = 1.6604910f * l[0] - 0.5876411f * l[1] - 0.0728499f * l[2];
+        float g = -0.1245505f * l[0] + 1.1328999f * l[1] - 0.0083494f * l[2];
+        float b = -0.0181508f * l[0] - 0.1005789f * l[1] + 1.1187297f * l[2];
+        float o[3] = {r, g, b};
+        uint32_t out = 0xFF000000u;
+        for (int k = 0; k < 3; k++) {
+            float x = o[k] < 0 ? 0 : o[k] > 1 ? 1 : o[k];
+            out |= (uint32_t)(powf(x, 1 / 2.2f) * 255 + 0.5f) << (8 * k);
+        }
+        px[i] = out;
+    }
+    j->bgr = false;
+}
 static void *shot_thread(void *arg) {
     ShotJob *j = arg;
     if (j->px && j->turn) {  // (drawn turned for the panel: the window's w x h from the image's h x w, MHGU_PERF_PREROTATE)
@@ -1511,6 +1637,7 @@ static void *shot_thread(void *arg) {
         free(j->px);
         j->px = (uint8_t *)dst;
     }
+    if (j->px && j->hdr) shot_from_hdr(j);
     if (j->px) {
         uint64_t n = (uint64_t)j->w * j->h;
         for (uint64_t i = 0; j->bgr && i < n; i++) { uint8_t t = j->px[i * 4]; j->px[i * 4] = j->px[i * 4 + 2]; j->px[i * 4 + 2] = t; }
@@ -1589,6 +1716,8 @@ static void frame_end(const char *shot_path, bool new_frame) {
         if (!j) { LOG("[vk] saving %s failed: out of memory\n", shot_path); return; }
         j->w = g_vk.sc_extent.width, j->h = g_vk.sc_extent.height, j->turn = sc_turn;
         j->bgr = g_vk.sc_format == VK_FORMAT_B8G8R8A8_UNORM || g_vk.sc_format == VK_FORMAT_B8G8R8A8_SRGB;
+        j->hdr = !sc_hdr ? 0 : g_vk.sc_format == VK_FORMAT_A2R10G10B10_UNORM_PACK32 ? 2 : 1;
+        j->paper = sc_hdr ? overlay_hdr_paper() : 0;
         j->px = malloc((size_t)j->w * j->h * 4);
         snprintf(j->path, sizeof j->path, "%s", shot_path);
         pthread_t th;
@@ -1656,7 +1785,7 @@ void backend_present(NvnTexture *t) {
         if (vh > wh) vh = wh, vw = wh * a;
         vk_present_draw(vk_cmd(), b, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
         OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
-                            g_vk.sc_extent.width, g_vk.sc_extent.height, sc_turn};
+                            g_vk.sc_extent.width, g_vk.sc_extent.height, sc_turn, overlay_hdr_paper()};
         overlay_draw(vk_cmd(), &ot);  // (Forge plugins' ImGui overlay, over the game: runtime/overlay.cpp)
         char path[300];
         extern char g_shot_request[256];  // (runtime/host_input.c: MHGU_CONTROL "shot <name>")
@@ -1745,7 +1874,7 @@ bool vk_present_again(void) {
         void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, float vw, float vh);  // (exec.c)
         vk_present_draw(vk_cmd(), b, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
         OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
-                            g_vk.sc_extent.width, g_vk.sc_extent.height, sc_turn};
+                            g_vk.sc_extent.width, g_vk.sc_extent.height, sc_turn, overlay_hdr_paper()};
         overlay_draw(vk_cmd(), &ot);
         frame_end(NULL, false);
     } else {

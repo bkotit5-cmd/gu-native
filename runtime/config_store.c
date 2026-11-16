@@ -2,6 +2,7 @@
 // each consumer reads hot values atomically on its own thread.
 #include "config.h"
 #include "diag.h"
+#include "colour_filter.h"
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <errno.h>
@@ -35,6 +36,53 @@ static float get_float(SDL_AtomicInt *slot) {
     int bits = SDL_GetAtomicInt(slot); float value; memcpy(&value, &bits, sizeof value); return value;
 }
 static SDL_AtomicInt live_gen;  // (each publish: config_live_generation)
+// [Colour] as the window image's pass reads it each frame (config_live_colour): the saved values, or the settings menu's
+// draft while it is open (config_colour_preview)
+static SDL_SpinLock colour_lock;
+static ColourAdjust colour_saved, colour_draft;
+static int hdr_saved[2], hdr_draft[2];  // HDRBrightness, HDRHighlights
+static bool colour_previewing;
+static bool colour_testing;  // (config_colour_test)
+static ColourAdjust colour_test;
+static ColourAdjust colour_of(const Config *c) {
+    ColourAdjust a = {c->colour_hue, c->colour_temperature, c->colour_tint, c->colour_brightness, c->colour_contrast,
+                      c->colour_saturation, c->colour_gamma};
+    return a;
+}
+static void publish_colour(const Config *c) {
+    ColourAdjust a = colour_of(c);
+    SDL_LockSpinlock(&colour_lock);
+    colour_saved = a, hdr_saved[0] = c->hdr_brightness, hdr_saved[1] = c->hdr_highlights;
+    SDL_UnlockSpinlock(&colour_lock);
+}
+void config_live_colour(ColourAdjust *out) {
+    SDL_LockSpinlock(&colour_lock);
+    *out = colour_testing ? colour_test : colour_previewing ? colour_draft : colour_saved;
+    SDL_UnlockSpinlock(&colour_lock);
+}
+void config_colour_test(const int *v) {
+    SDL_LockSpinlock(&colour_lock);
+    colour_testing = v != NULL;
+    if (v) {
+        ColourAdjust a = {v[0], v[1], v[2], v[3], v[4], v[5], v[6]};
+        colour_test = a;
+    }
+    SDL_UnlockSpinlock(&colour_lock);
+}
+void config_live_hdr(int *brightness, int *highlights) {
+    SDL_LockSpinlock(&colour_lock);
+    const int *v = colour_previewing ? hdr_draft : hdr_saved;
+    *brightness = v[0], *highlights = v[1];
+    SDL_UnlockSpinlock(&colour_lock);
+}
+void config_colour_preview(const Config *draft) {
+    ColourAdjust a = {0};
+    if (draft) a = colour_of(draft);
+    SDL_LockSpinlock(&colour_lock);
+    colour_previewing = draft != NULL;
+    if (draft) colour_draft = a, hdr_draft[0] = draft->hdr_brightness, hdr_draft[1] = draft->hdr_highlights;
+    SDL_UnlockSpinlock(&colour_lock);
+}
 static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key: read by the network threads (runtime/net/ldn.c)
 static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key];
 static XplayLive live_xplay;  // (under live_ldn_lock too: config_live_crossplay)
@@ -106,6 +154,7 @@ static void publish_live(const Config *c, bool all) {
         live_xplay = x;
         SDL_UnlockSpinlock(&live_ldn_lock);
     }
+    publish_colour(c);
     SDL_AddAtomicInt(&live_gen, 1);
 }
 // Counts the live settings' publishes (a save, the start): what is drawn from them may change when it moves
@@ -267,7 +316,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
 // What config_save writes: a setting of the table (setting) or a Quest<number>, RecentServer<n> or RecentKey<n> entry
 // (setting NULL)
 typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
-// (every setting of g_settings, 136 now, 137 on a desktop, the quests set apart, the servers and keys remembered)
+// (every setting of g_settings, 146 now, 147 on a desktop, the quests set apart, the servers and keys remembered)
 #define ENTRY_MAX (HP_QUESTS_MAX + 192 + 2 * LDN_RECENT)
 // A RecentServer<n> / RecentKey<n> line's key, normalized: what config_save writes again or leaves out
 static bool recent_key(const char *normalized) {

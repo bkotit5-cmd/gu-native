@@ -182,6 +182,20 @@ typedef struct {
                               // moment, 0 (off, as before) to 100 (runtime/touch.cpp cam_smooth)
     int camera_shake;         // [Controls] CameraShake (1.0.1, #244): the hunt camera shakes while the game rumbles, 0 (off)
                               // to 100 (runtime/hle/mousecam.c shake)
+    // The colour filter and the HDR output (runtime/colour_filter.h; the menu's Graphics & Audio > Colour). Each one's
+    // default is 0 (neutral, off), so none needs a value in CONFIG_DEFAULT_VALUES either
+    int colour_hue;           // [Colour] Hue: degrees, -180..180
+    int colour_temperature;   // [Colour] Temperature: -100..100 (+ warmer)
+    int colour_tint;          // [Colour] Tint: -100..100 (+ magenta, - green)
+    int colour_brightness;    // [Colour] Brightness: -100..100
+    int colour_contrast;      // [Colour] Contrast: -100..100
+    int colour_saturation;    // [Colour] Saturation: -100..100
+    int colour_gamma;         // [Colour] Gamma: -100..100 (+ brighter mid-tones)
+    int hdr;                  // [Colour] HDR: the window image in HDR10 where the screen and the driver offer it (a start-up
+                              // setting: nvn/vulkan/device.c; falls back to SDR, logged, where they don't)
+    int hdr_brightness;       // [Colour] HDRBrightness: -100..100, the paper white 203 nits times 2^(x/100)
+    int hdr_highlights;       // [Colour] HDRHighlights: -100..100, how far the picture's brightest part goes towards the
+                              // screen's peak (0: half of the way)
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -332,6 +346,17 @@ int config_live_grass(void);            // [Performance] Grass
 int config_live_effects(void);          // [Performance] Effects
 int config_live_reverb(void);           // [Audio] Reverb
 int config_live_send_all_rewards(void); // [Quest Rewards] SendAllRewards (runtime/hle/rewards.c)
+// [Colour] (runtime/colour_filter.h ColourAdjust; the window image's pass, nvn/vulkan/exec.c): the saved values, or while
+// the settings menu is open the ones being adjusted there (config_colour_preview), so the picture shows them at once
+struct ColourAdjust;
+void config_live_colour(struct ColourAdjust *out);
+void config_live_hdr(int *brightness, int *highlights);  // [Colour] HDRBrightness, HDRHighlights (the preview's too)
+// (the settings menu, its thread) the colour being adjusted, from the draft, every frame the menu is open; NULL as it
+// closes: the saved values again (a change not saved goes with the menu)
+void config_colour_preview(const Config *draft);
+// (tests: the control file's "colour", runtime/host_input.c) the seven values in ColourAdjust's order, over the saved ones
+// and the menu's; NULL: none
+void config_colour_test(const int *values);
 void config_live_test(const Config *c);  // (config.c: a test run's overrides of Shadows, Bloom, Grass, FPS; not saved)
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size);  // [Multiplayer] Server, Key
 int config_live_online_notice(void);  // [Multiplayer] OnlineNoticeShown
