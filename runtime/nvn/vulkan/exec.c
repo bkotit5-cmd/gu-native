@@ -1340,6 +1340,11 @@ static int compile_workers(void) {
 #define PC_EVERY_NS 120000000000ull  // (at most one save in this long: a Mali's file is about 20 MB)
 #define PC_MIN_NEW 64
 static _Atomic uint64_t pc_told, pc_hit, pc_new, pc_saved_ns;
+// (the start's line) the pipelines built in under 4 ms: on a driver that can't say (no creation feedback: a PowerVR, Vulkan
+// 1.1) what its cache had shows only as time - a player there saw the start build everything again at every launch
+// (Discord, BXM-8-256: 3,255 builds in 150 s with a 130 MB cache, 570 s from an empty one)
+#define PC_FAST_NS 4000000ull
+static _Atomic uint64_t pc_fast;
 static _Atomic int pc_start_done, pc_due_queued;
 static void pcache_built(VkPipelineCreationFeedbackFlags f) {
     bool told = (f & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) != 0;
@@ -1383,12 +1388,19 @@ static void queue_caught_up(JobQueue *q) {
     if (q->watch != 1 || q->head || q->lhead || q->busy) return;
     q->watch = 0;
     uint64_t told = atomic_load(&pc_told), hit = atomic_load(&pc_hit);
-    char had[96] = "";
+    char had[96] = "", took[200] = "";
     if (told)
         snprintf(had, sizeof had, " (the driver's pipeline cache had %llu of the %llu pipelines)", (unsigned long long)hit,
                  (unsigned long long)told);
-    LOG("[shader] the builds queued at the start are done: %llu in %.1f s%s\n", (unsigned long long)q->watch_jobs,
-        (plat_now_ns() - q->watch_t0) / 1e9, had);
+    // (the workers' time since the start, by kind: programs - SPIR-V from its cache, the driver's modules - and pipelines,
+    // those built in under 4 ms counted; MHGU_VK_STATS's 2 s lines empty these counts as they go)
+    uint64_t np = atomic_load(&stat_job_n[1]), pn = atomic_load(&stat_job_n[2]);
+    if (np || pn)
+        snprintf(took, sizeof took, "; programs %llu in %.1f s, pipelines %llu in %.1f s, %llu of them in under 4 ms",
+                 (unsigned long long)np, atomic_load(&stat_job_ns[1]) / 1e9, (unsigned long long)pn,
+                 atomic_load(&stat_job_ns[2]) / 1e9, (unsigned long long)atomic_load(&pc_fast));
+    LOG("[shader] the builds queued at the start are done: %llu in %.1f s%s%s\n", (unsigned long long)q->watch_jobs,
+        (plat_now_ns() - q->watch_t0) / 1e9, had, took);
     atomic_store(&pc_start_done, 1);
 }
 
@@ -4489,6 +4501,7 @@ static void build_pipeline(void *arg) {
         if (n++ < 10) LOG("[vk] pipeline creation failed: %d\n", r);
     } else {
         pcache_built(fb.flags);
+        if (plat_now_ns() - t0 < PC_FAST_NS) atomic_fetch_add(&pc_fast, 1);
     }
     atomic_fetch_add(&stat_compiles, 1);
     job_stat(2, t0);
