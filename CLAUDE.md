@@ -77,6 +77,11 @@ What a log carries (1.0.1, "ask for more than we think we need": one log should 
 - `runtime/hle/rewards.c`: Gameplay, Send all rewards to the box (`[Quest Rewards] SendAllRewards`, off; Alfonso's idea): the
   Quest Rewards menu's Send to the Item Box runs the game's own per-item step for every reward at once. Test only on a
   test save; the log's `[rewards]` line says what was sent and what stayed.
+- `runtime/hle/gather.c`: Gameplay, Gather everything in one press (`[Gathering] GatherAll`, off; 1.0.1, the owner's idea):
+  every gathering point and every corpse's carve point is a cPop; the hunter's one step per gather (0x4e07c4) runs again
+  on the same point while it has gathers left, with the game's counting, skills, rolls, tool breaks and messages. It
+  stops on a full pouch (the game's swap window), an item at its max (the point gets that gather back) or no tool left.
+  Its header comment has the game's whole path; `[gather]` in the log, `MHGU_GATHER_LOG=1` for each give.
 - `native/`: CMake and `build_native.sh`. `deps/`: scripts for SDL3, shaderc and FFmpeg.
 
 ## Building

@@ -946,6 +946,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(bonus_content);
     SAME(village_in_hub);
     SAME(send_all_rewards);
+    SAME(gather_all);
     SAME(colour_hue);  // (Graphics & Audio > Colour)
     SAME(colour_temperature);
     SAME(colour_tint);
@@ -2558,8 +2559,25 @@ void shortcut_row(std::vector<Row> &r) {
                           "y el nombre que quieras. El ícono propio de la app queda como está.");
 }
 void reset_rewards() { s.draft.send_all_rewards = config_defaults().send_all_rewards; }
+// 1.0.1, the owner's idea: one gather at a gathering point gives all it had left (runtime/hle/gather.c; MH4U for Android
+// has the same option, name and texts). Off: one item a gather, as the game does.
+void gather_rows(std::vector<Row> &r) {
+    header(r, "gather.header", en_es("Gathering", "Recolección"));
+    add_bool(r, "gather.all", en_es("Gather everything in one press", "Recolectar todo de un toque"),
+             &s.draft.gather_all, ini("GatherAll"));
+    r.back().help = en_es("One gather at a gathering point (herbs, mushrooms, honey, bugs, bones, ore...) or one carve gives "
+                          "everything it had left at once, with the game's own rules: your gathering and carving skills, and "
+                          "pickaxes and bug nets that can break. It stops if the pouch fills up: the rest stays. Off: one "
+                          "item each time, as the game does it.",
+                          "Una recolección en un punto (hierbas, hongos, miel, insectos, huesos, minerales...) o un tallado "
+                          "da de una vez todo lo que le quedaba, con las reglas del juego: tus habilidades de recolección y "
+                          "de tallado, y las piquetas y redes que se pueden romper. Se detiene si la bolsa se llena: lo "
+                          "demás queda. Apagado: un objeto cada vez, como lo hace el juego.");
+}
+void reset_gather() { s.draft.gather_all = config_defaults().gather_all; }
 // The qol group's places (MENU.md 3.3, 3.5, 3.6): Send all under After a quest on Gameplay; the import on DLC and event
 // quests and the shortcut on System (Android: a desktop's has no such screens, its README says where the files go)
+MENU_ENTRY("gameplay", 65, gather_rows, reset_gather);
 MENU_ENTRY("gameplay", 70, rewards_rows, reset_rewards);
 #ifdef __ANDROID__
 MENU_ENTRY("mods/dlc", 10, extra_import_row);

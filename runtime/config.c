@@ -673,6 +673,13 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "SendAllRewards = Off\n"
     "\n"
+    "[Gathering]\n"
+    "; One gather at a gathering point (herbs, mushrooms, honey, bugs, bones, ore...) or one carve gives everything it had\n"
+    "; left at once, through the game's own steps for each one: the gathering and carving skills, the pickaxes and bug nets\n"
+    "; that can break. It stops when the pouch is full (the rest stays). Off: one item a gather or carve, as the game does\n"
+    "; Default: Off\n"
+    "GatherAll = Off\n"
+    "\n"
     "[Discord]\n"
     "; Show what you're doing in the game on your Discord profile (Discord must be running on this computer):\n"
     "; where you are, the quest's monsters and how many hunters are with you\n"
@@ -1029,6 +1036,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, true),
     {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_VILLAGE},
     ON_OFF("Quest Rewards", "SendAllRewards", send_all_rewards, false),  // (runtime/hle/rewards.c reads it as it acts)
+    ON_OFF("Gathering", "GatherAll", gather_all, false),  // (runtime/hle/gather.c reads it as it acts)
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
     ON_OFF("Bonus Content", "BonusContent", bonus_content, true),
