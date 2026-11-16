@@ -190,6 +190,13 @@ screen's **Build on this phone** when the game code is missing or from another v
   left as it was if the system refuses): Zig 0.13's clang compiles one very large MH4U function into one of a few
   objects depending on where its memory is (the same object 16 times out of 16 in a shell on the RG406V with it; inside
   the app two MH4U builds still differed in that one function, so it doesn't rule that out).
+- **Start over** (1.0.1, Discord: a half-done build to clear): the builder screen's button (`BuilderService.startOver`, shown
+  while `halfDone`: a work folder, a run cut or that failed or was cancelled; never during a build), asked first. The work
+  folder (the translated C, the objects, `inputs.txt`, Zig's cache) is renamed aside in one step (`work.trash-<time>`) and
+  deleted on a thread of its own, and `state.txt` goes, so the next build starts from the beginning and no run finds half a
+  folder; the downloaded tools stay unless the player picks "Start over and delete the tools" (the whole builder folder, as
+  `builder.trash-<time>`). A deletion cut short is finished at the next start over or build (`dropTrash`). The game folder and
+  a library already made are not touched.
 - **Heat and battery** (`BuilderService.watchHeat`, every 5 s): thermal status moderate, only two compilers run (the
   others SIGSTOP'd); severe or worse, the whole build waits until light; 15 % battery or less and not charging, it waits.
   Compilers at once: the free memory / 300 MB, at most the cores, half after a run that stopped while compiling.

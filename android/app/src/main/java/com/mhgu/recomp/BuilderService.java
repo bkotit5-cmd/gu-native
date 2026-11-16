@@ -101,6 +101,46 @@ public class BuilderService extends Service {
         return s.startsWith("running") ? s : null;
     }
 
+    /** Something of a build to start over from: its work folder, or a run that stopped or was cut. */
+    static boolean halfDone(Context c) {
+        return !job.active() && (work(c).exists() || interrupted(c) != null || job.status.equals("failed") || job.status.equals("cancelled"));
+    }
+
+    /**
+     * Start over (the builder screen's button, 1.0.1; Discord): a build half done is forgotten, so the next one starts from
+     * the beginning - its work folder (the translated code, the compiled objects, the stamp inputs.txt that lets a run go on
+     * from there, Zig's cache) and state.txt go; with tools, the downloaded Python and Zig too (the whole builder folder).
+     * Never while a build runs. The folder is renamed aside first, in one step, so no run can find half of it, and deleted
+     * on a thread of its own; what a cut deletion leaves (a ".trash-" folder) is deleted at the next start over or build.
+     * The game folder, its files and a library already made are not touched.
+     */
+    static boolean startOver(Context c, boolean tools) {
+        if (job.active()) return false;
+        File root = BuilderTools.root(c), what = tools ? root : work(c);
+        File trash = new File(tools ? c.getFilesDir() : root, (tools ? "builder" : "work") + ".trash-" + System.currentTimeMillis());
+        if (what.exists() && !what.renameTo(trash)) BuilderTools.deleteTree(what);
+        stateFile(c).delete();
+        synchronized (job.tail) { job.tail.clear(); }
+        job.status = "idle";
+        job.stage = "tools";
+        job.detail = "";
+        job.done = job.total = 0;
+        job.errorStage = job.errorText = job.library = "";
+        Log.i(TAG, "builder: started over (" + (tools ? "the tools deleted too" : "the tools kept") + ")");
+        changed();
+        Context app = c.getApplicationContext();
+        new Thread(() -> dropTrash(app), "builder-trash").start();
+        return true;
+    }
+
+    /** The folders a start over set aside, deleted (one cut short by the app's end: the next time). */
+    static void dropTrash(Context c) {
+        for (File dir : new File[] {c.getFilesDir(), BuilderTools.root(c)}) {
+            File[] list = dir.listFiles();
+            if (list != null) for (File f : list) if (f.isDirectory() && f.getName().contains(".trash-")) BuilderTools.deleteTree(f);
+        }
+    }
+
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
@@ -151,6 +191,7 @@ public class BuilderService extends Service {
                     + (totalMemory() >> 20) + " MB");
             say(log, "game " + game);
             BuilderTools.writeText(stateFile(this), "running\n" + game);
+            dropTrash(this);  // (a start over's folder set aside and not deleted yet: the app was closed meanwhile)
             BuilderTools.ensure(this, new BuilderTools.Progress() {
                 @Override
                 public void step(String what, long done, long total) {
