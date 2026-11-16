@@ -65,10 +65,50 @@ public class GameActivity extends SDLActivity {
             overridePendingTransition(0, 0);
             return;
         }
+        Diag.install(this);  // (1.0.1: the versions seen, a Java crash's stack for Share log)
         prepareFiles();
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         pickRefreshRate();
+        Diag.logToGame(this);  // (the phone and the app into log.txt, off this thread)
+        Diag.watch(this);      // (and what changes while the game runs: the network, the heat, power saving)
+        watching = true;
+    }
+
+    private boolean watching;
+
+    @Override
+    protected void onDestroy() {
+        if (watching) Diag.unwatch(this);
+        super.onDestroy();
+    }
+
+    // (1.0.1, diag) the system's memory warnings and the window's mode, as events in log.txt with the session's time
+    @Override
+    public void onTrimMemory(int level) {
+        if (watching) Diag.event("the system trims memory: " + Diag.trimLevel(level));
+        super.onTrimMemory(level);
+    }
+
+    @Override
+    public void onLowMemory() {
+        if (watching) Diag.event("the system is out of memory (onLowMemory)");
+        super.onLowMemory();
+    }
+
+    @Override
+    public void onMultiWindowModeChanged(boolean on, android.content.res.Configuration config) {
+        if (watching) Diag.event(on ? "split screen / a window of its own" : "full screen again");
+        super.onMultiWindowModeChanged(on, config);
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration config) {
+        if (watching)
+            Diag.event("the configuration changed: " + config.screenWidthDp + "x" + config.screenHeightDp + " dp, "
+                       + (config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE ? "landscape" : "portrait")
+                       + ", " + config.densityDpi + " dpi");
+        super.onConfigurationChanged(config);
     }
 
     @Override
@@ -382,7 +422,7 @@ public class GameActivity extends SDLActivity {
                 }
                 if (on) lanLock.acquire();
                 else if (lanLock.isHeld()) lanLock.release();
-                Log.i(TAG, "LAN: Wi-Fi broadcasts " + (on ? "on" : "off"));
+                Diag.event("LAN: Wi-Fi broadcasts " + (on ? "on" : "off"));
             }
         } catch (RuntimeException e) {
             Log.w(TAG, "LAN: " + e);
@@ -451,7 +491,8 @@ public class GameActivity extends SDLActivity {
             lp.preferredDisplayModeId = best.getModeId();
             lp.preferredRefreshRate = best.getRefreshRate();
             getWindow().setAttributes(lp);
-            Log.i(TAG, "display mode " + best.getPhysicalWidth() + "x" + best.getPhysicalHeight() + " @ " + best.getRefreshRate());
+            Diag.event("display mode " + best.getPhysicalWidth() + "x" + best.getPhysicalHeight() + " @ " + best.getRefreshRate()
+                       + " Hz (the FPS limit " + frameCap + ")");
         } catch (Exception e) {
             Log.w(TAG, "refresh rate: " + e);
         }
