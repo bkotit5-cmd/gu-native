@@ -467,7 +467,11 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   on forward (the stick held full up: the camera steers) until the stick or the lit circle is touched again, the weapon
   comes out, a menu opens or the hunter isn't played (an area change too: `run_end` logs why under MHGU_TOUCH_LOG). It locks
   for a thumb that landed anew (not in the circle) or came back inside the rim since a lock ended (`run_armed`). X holds the run's R back for 400 ms: a thumb at the rim through a sheathe started R in the same update
-  as an X + A, and the game read R + X + A (#151). Off: a Run button (`run_button` in touch_layout.txt: the old left-side
+  as an X + A, and the game read R + X + A (#151). But X + A in a run whose R was held 400 ms already (a sprint) keeps R
+  (`run_t0`): sprinting with R held and pressing X + A is the game's R + X + A, the Charge Blade's draw into the axe
+  (sheathed X + A alone does nothing for it; 0.1.8 gave it, 0.1.9 to 1.0 didn't: Discord, 1.0.1). X alone still lets R go
+  (with R held the draw attack is the same one). `MHGU_LOG_MOVES` shows it: 0010:000 the axe draw, 0010:033 the
+  forward slash. Off: a Run button (`run_button` in touch_layout.txt: the old left-side
   `run` line every saved layout has is dropped), held only, dimmed with the weapon out, hidden in menus; slid onto an attack
   it is that attack; in a corner layout saved before it, it starts in the band's hollow.
   `[Touch] GuardSlide` (off by default): a thumb from Guard keeps R as it slides onto the attacks (`Finger.keep`), and is
