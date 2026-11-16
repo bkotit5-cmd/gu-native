@@ -198,6 +198,10 @@ When it says it is ready, `libmhgugame.so` and `libmhgugame.id` are in your fold
    python build_game.py --android C:\MHGU
    ```
 
+   This goes in the black window that `cmd` opened (the Command Prompt), not inside Python's own window (IDLE, or one
+   titled Python 3.x with `>>>`): there it only answers `SyntaxError`. No command at all: double-click `build_game.py`,
+   drag your game folder into the window it opens and press Enter.
+
 The first time, it downloads Google's Android compiler (about 1.8 GB). Then it works on its own: about 6 minutes on a fast PC,
 longer on a slower one. When it says **Done**, your folder has two new files:
 
@@ -551,6 +555,7 @@ dots, **Add games**.
 | `python` is not recognized | Install Python again, tick **Add python.exe to PATH**, and open a new terminal |
 | "Failed to build installable wheels" for lz4 | The tool from 0.1.9 on reads the game code without the lz4 package when your Python can't install it: download it again |
 | `FileNotFoundError` with `hle_symbols.txt`, or the tool can't find its own files | The tool was run outside its download. Unzip all of **Source code (zip)** and run `build_game.py` from its `tools` folder, without moving it |
+| `SyntaxError: invalid syntax` right after typing `python build_game.py ...` | It was typed inside Python's own window (IDLE, or the one with `>>>`). Close it and type it in the black window `cmd` opens (step 4), or double-click `build_game.py` and drag your folder into it |
 | "there is no exefs/main" | The path must be the folder that holds `exefs` and `romfs` |
 | "This exefs is not version 1.4.0" | Use the `exefs` with the 1.4.0 update |
 | "romfs is incomplete" | Use the base game's `romfs` with the update applied. It has 35,531 files |
@@ -719,6 +724,10 @@ The program has no game code in it, so you create yours from your own copy. It r
    ```
    python build_game.py --pc C:\MHGU
    ```
+
+   This goes in the black window that `cmd` opened (the Command Prompt), not inside Python's own window (IDLE, or one
+   titled Python 3.x with `>>>`): there it only answers `SyntaxError`. No command at all: double-click `build_game.py`,
+   drag your game folder into the window it opens and press Enter.
 
 The first time, it downloads llvm-mingw, the compiler for the PC game (about 150 MB). Then it works on its own: about 10
 minutes on a fast PC, and up to an hour on one with 2 cores. When it says **Done**, your folder has two new files:
@@ -914,6 +923,7 @@ To open `%APPDATA%`, type it in File Explorer's address bar and press Enter.
 |---|---|
 | `python` is not recognized | Install Python again, tick **Add python.exe to PATH**, and open a new terminal |
 | `FileNotFoundError` with `hle_symbols.txt`, or the tool can't find its own files | The tool was run outside its download. Unzip all of **Source code (zip)** and run `build_game.py` from its `tools` folder, without moving it |
+| `SyntaxError: invalid syntax` right after typing `python build_game.py ...` | It was typed inside Python's own window (IDLE, or the one with `>>>`). Close it and type it in the black window `cmd` opens (step 4), or double-click `build_game.py` and drag your folder into it |
 | "there is no exefs/main" | The path must be the folder that holds `exefs` and `romfs` |
 | "This exefs is not version 1.4.0" | Use the `exefs` with the 1.4.0 update |
 | "romfs is incomplete" | Use the base game's `romfs` with the update applied. It has 35,531 files |
