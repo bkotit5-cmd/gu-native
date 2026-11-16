@@ -211,6 +211,28 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "SmoothGradients = Off\n"
     "\n"
+    "[Colour]\n"
+    "; The colour of the game's picture: the 3D, its HUD and its menus (not the touch controls or this port's menu).\n"
+    "; Every one is 0 by default: the picture exactly as the game draws it\n"
+    "; Hue: the colours turned round, in degrees, between -180 and 180\n"
+    "Hue = 0\n"
+    "; Temperature: warmer (+) or cooler (-); Tint: magenta (+) or green (-); between -100 and 100\n"
+    "Temperature = 0\n"
+    "Tint = 0\n"
+    "; Brightness, Contrast, Saturation (-100: grey) and Gamma (+: brighter mid-tones), between -100 and 100\n"
+    "Brightness = 0\n"
+    "Contrast = 0\n"
+    "Saturation = 0\n"
+    "Gamma = 0\n"
+    "; HDR output, on a screen that can show it: the game's picture made brighter where it is bright. Needs a restart;\n"
+    "; where the screen or the driver can't, the picture stays as it is and the log says why\n"
+    "; Default: Off\n"
+    "HDR = Off\n"
+    "; With HDR: the picture's white (0: 203 nits; 100 twice as bright, -100 half) and how far its brightest parts go\n"
+    "; towards the screen's peak (-100: not at all, 100: all the way), between -100 and 100\n"
+    "HDRBrightness = 0\n"
+    "HDRHighlights = 0\n"
+    "\n"
     "[Performance]\n"
 #ifdef __ANDROID__
     "; Framerate cap\n"
@@ -815,6 +837,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_UPDATES "Invalid update setting."
 #define ERR_DRAW "Draw distance must be 0-10 (0: no limit)."
 #define ERR_KEYS "Invalid keybind."
+#define ERR_COLOUR "Colour values must be -100 to 100 (Hue -180 to 180)."
 #define F(x) offsetof(Config, x)
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 #define KEYS(key, bind) {"Keybinds", key, SET_KEYS, F(binds[bind]), 0, 0, 0, NULL, NULL, false, ERR_KEYS}
@@ -844,6 +867,16 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
+    {"Colour", "Hue", SET_INT, F(colour_hue), 0, -180, 180, NULL, NULL, false, ERR_COLOUR},
+    {"Colour", "Temperature", SET_INT, F(colour_temperature), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
+    {"Colour", "Tint", SET_INT, F(colour_tint), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
+    {"Colour", "Brightness", SET_INT, F(colour_brightness), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
+    {"Colour", "Contrast", SET_INT, F(colour_contrast), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
+    {"Colour", "Saturation", SET_INT, F(colour_saturation), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
+    {"Colour", "Gamma", SET_INT, F(colour_gamma), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
+    ON_OFF("Colour", "HDR", hdr, true),
+    {"Colour", "HDRBrightness", SET_INT, F(hdr_brightness), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
+    {"Colour", "HDRHighlights", SET_INT, F(hdr_highlights), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, FPS_MAX, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),

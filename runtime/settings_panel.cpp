@@ -1,5 +1,6 @@
 #include "settings_panel.h"
 #include "config.h"
+#include "colour_filter.h"
 #include "menu_confirm.h"
 #include "settings_locale.h"
 #include "settings_icons.h"
@@ -44,6 +45,8 @@
 #ifndef __ANDROID__
 // (nvn/vulkan/device.c) the Vulkan devices that can run the game and the one in use, for the GPU row
 extern "C" int vk_gpu_list(const char **names, int max, int *in_use);
+extern "C" float vk_screen_hdr_nits(void);      // (nvn/vulkan/device.c: the screen's HDR10; -1 none)
+extern "C" const char *vk_hdr_fallback(void);   // (why the picture stays SDR with HDR on; NULL: it doesn't)
 #endif
 extern "C" bool host_input_real_pad(void);  // (runtime/host_input.c)
 extern "C" bool host_input_keyboard_mouse(void);  // (runtime/host_input.c: a phone's keyboard and mouse, S14)
@@ -3075,6 +3078,87 @@ void reset_graphics_picture_80() {
     s.draft.mute_in_background = f.mute_in_background;
 }
 MENU_ENTRY("graphics/picture", 80, rows_graphics_picture_80, reset_graphics_picture_80);
+// Graphics & Audio > Colour (1.0.1, the owner's item 9: a filter of our own, runtime/colour_filter.h, and the HDR output):
+// the game's whole picture as it reaches the screen (the 3D, its HUD, its menus), not the touch controls or this menu.
+// Every control at 0 is the picture as the game draws it, byte for byte. The picture follows the rows while the menu is
+// open (config_colour_preview, report); Save keeps them, closing without saving puts the saved ones back.
+MENU_PAGE("graphics/colour", "Colour", "graphics", 85);
+std::string colour_value(int v, const char *unit = "") {
+    char b[32];
+    snprintf(b, sizeof b, v > 0 ? "+%d%s" : "%d%s", v, unit);
+    return b;
+}
+void colour_number(std::vector<Row> &r, const char *id, const char *name, int *p, const char *key, int high,
+                   const char *unit, const char *help) {
+    number(r, id, name, p, -high, high, 5, ini(key));
+    r.back().value = colour_value(*p, unit);
+    r.back().help = tr(help);
+}
+bool colour_draft_neutral() {
+    const Config &c = s.draft;
+    return !c.colour_hue && !c.colour_temperature && !c.colour_tint && !c.colour_brightness && !c.colour_contrast &&
+           !c.colour_saturation && !c.colour_gamma;
+}
+void colour_draft_reset() {
+    Config &c = s.draft;
+    c.colour_hue = c.colour_temperature = c.colour_tint = c.colour_brightness = c.colour_contrast = c.colour_saturation =
+        c.colour_gamma = 0;
+}
+void rows_graphics_colour_10(std::vector<Row> &r) {
+    Config &c = s.draft;
+    note(r, "colour.note", tr("Changes the game's picture, its HUD and its menus; the touch controls and this menu stay as they are. Each change shows at once; Save keeps it."));
+    colour_number(r, "colour.hue", "Hue", &c.colour_hue, "Hue", COLOUR_HUE_MAX, "\xC2\xB0",
+                  "Turns every colour of the game's picture round the colour wheel, in degrees. 0: the game's own colours.");
+    colour_number(r, "colour.temp", "Temperature", &c.colour_temperature, "Temperature", COLOUR_MAX, "",
+                  "Warmer (+: more orange) or cooler (-: more blue) whites and colours.");
+    colour_number(r, "colour.tint", "Tint", &c.colour_tint, "Tint", COLOUR_MAX, "",
+                  "Magenta (+) or green (-), to correct a screen that leans to one of them.");
+    colour_number(r, "colour.bright", "Brightness", &c.colour_brightness, "Brightness", COLOUR_MAX, "",
+                  "Raises or lowers the whole picture, its dark parts too.");
+    colour_number(r, "colour.contrast", "Contrast", &c.colour_contrast, "Contrast", COLOUR_MAX, "",
+                  "More (+) or less (-) difference between the dark and the bright parts.");
+    colour_number(r, "colour.sat", "Saturation", &c.colour_saturation, "Saturation", COLOUR_MAX, "",
+                  "More vivid (+) or paler (-) colours; -100 is black and white.");
+    colour_number(r, "colour.gamma", "Gamma", &c.colour_gamma, "Gamma", COLOUR_MAX, "",
+                  "Brightens (+) or darkens (-) the middle tones and leaves black and white where they are: to see into a dark cave without washing the picture out.");
+    action(r, "colour.reset", tr("Reset colour"), []() { colour_draft_reset(); }, !colour_draft_neutral());
+    r.back().help = tr("Puts every colour control back to 0: the picture exactly as the game draws it.");
+}
+void reset_graphics_colour_10() { colour_draft_reset(); }
+MENU_ENTRY("graphics/colour", 10, rows_graphics_colour_10, reset_graphics_colour_10);
+// The HDR output: shown where the screen has HDR10 (Android says so: vk_screen_hdr_nits), or where it is on already; a
+// desktop's monitor may have it whatever can be told before the start (Windows' HDR switch), so there it always shows
+bool shown_graphics_colour_50() {
+#ifdef __ANDROID__
+    return s.draft.hdr || g_config.hdr || vk_screen_hdr_nits() >= 0;
+#else
+    return true;
+#endif
+}
+void rows_graphics_colour_50(std::vector<Row> &r) {
+    Config &c = s.draft;
+    header(r, "hdr.head", "HDR");
+    add_bool(r, "hdr", "HDR output", &c.hdr, ini("HDR"));
+    r.back().help = tr("On a screen with HDR, the bright parts of the game's picture (the sky, fire, lightning) shine brighter than the rest, as in HDR video. The game draws an ordinary picture, so this spreads its light out; it adds no detail. Needs a restart. Where the screen or its driver can't, the picture stays as it is.");
+    if (const char *why = vk_hdr_fallback(); why && c.hdr) {  // (on since the start, and the picture stayed SDR)
+        r.back().value = tr("On (not available)");
+        r.back().help = tr(why);
+    }
+    if (!c.hdr)
+        return;
+    number(r, "hdr.bright", "HDR brightness", &c.hdr_brightness, -COLOUR_MAX, COLOUR_MAX, 10, ini("HDRBrightness"));
+    char nits[32];
+    snprintf(nits, sizeof nits, "%.0f nits", HDR_PAPER_NITS * exp2(c.hdr_brightness / 100.0));
+    r.back().value = nits;
+    r.back().help = tr("The picture's white in HDR: higher if the game looks dim next to the rest of the phone.");
+    colour_number(r, "hdr.high", "HDR highlights", &c.hdr_highlights, "HDRHighlights", COLOUR_MAX, "",
+                  "How far the brightest parts go towards the screen's peak: -100 not at all (the ordinary picture), 100 all the way.");
+}
+void reset_graphics_colour_50() {
+    Config f = config_defaults(), &c = s.draft;
+    c.hdr = f.hdr, c.hdr_brightness = f.hdr_brightness, c.hdr_highlights = f.hdr_highlights;
+}
+MENU_ENTRY("graphics/colour", 50, rows_graphics_colour_50, reset_graphics_colour_50, shown_graphics_colour_50);
 // Graphics & Audio > Screen and HUD (the Display tab of 0.1.9: a phone's window is the screen, at its own resolution)
 #ifndef __ANDROID__
 void rows_graphics_screen_10(std::vector<Row> &r) {
@@ -5765,6 +5849,7 @@ void report(bool *open) {
 #endif
     capture_wheel = is_capturing && s.capture_bind >= 0;  // (the capture view doesn't scroll)
     textinput_menu_keyboard(*open && s.view == View::Keyboard && s.keyboard.phone);  // (its key asked for it: textinput.c)
+    config_colour_preview(*open ? &s.draft : nullptr);  // (Graphics & Audio > Colour: the picture follows the draft now)
     if (!*open)
         s.editing = false;
 }
@@ -6318,6 +6403,7 @@ void settings_panel_before_frame(bool open) {
     }
 }
 void settings_panel_idle(void) {
+    config_colour_preview(nullptr);  // (closed: the saved colour)
     s.editing = false;
     textinput_menu_keyboard(false);
     is_dirty = false;

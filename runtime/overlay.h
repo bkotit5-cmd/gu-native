@@ -58,6 +58,8 @@ typedef struct {
     VkRenderPass pass;
     uint32_t width, height;
     int turn;  // the window image drawn turned for the panel: 0, 1 (90 degrees) or 3 (270) quarter turns (device.c sc_turn)
+    float hdr_paper;  // an HDR10 window image ([Colour] HDR, runtime/colour_filter.h): the overlay's white, in 10000s of
+                      // nits (its shader encodes for it); 0: SDR, as always
 } OverlayTarget;
 void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t);
 

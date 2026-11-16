@@ -432,6 +432,32 @@ public class GameActivity extends SDLActivity {
     }
 
     /**
+     * El HDR10 de la pantalla (runtime/nvn/vulkan/device.c vk_screen_hdr_nits, la salida HDR de Opciones > Gráficos y audio >
+     * Color): el brillo pico que la pantalla pide para HDR, en nits; 0 si tiene HDR10 sin decir el pico; -1 si no tiene.
+     * Solo se pregunta: nada de la ventana ni del sistema cambia.
+     */
+    public static float hdrScreenNits() {
+        SDLActivity activity = mSingleton;
+        if (activity == null) return -1;
+        try {
+            Display display = Build.VERSION.SDK_INT >= 30 ? activity.getDisplay() : activity.getWindowManager().getDefaultDisplay();
+            if (display == null) return -1;
+            boolean hdr10 = false;
+            Display.HdrCapabilities caps = display.getHdrCapabilities();
+            int[] types = caps != null ? caps.getSupportedHdrTypes() : null;
+            if (Build.VERSION.SDK_INT >= 34 && display.getMode() != null) types = display.getMode().getSupportedHdrTypes();
+            if (types != null)
+                for (int t : types)
+                    if (t == Display.HdrCapabilities.HDR_TYPE_HDR10 || t == Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS) hdr10 = true;
+            if (!hdr10) return -1;
+            float peak = caps != null ? caps.getDesiredMaxLuminance() : 0;
+            return peak > 0 && peak < 10000 ? peak : 0;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
      * La tasa de refresco más baja que alcanza para el límite de FPS, nunca menos de 60: una pantalla a 120 Hz con el juego
      * a 60 gasta batería y calienta el teléfono sin mostrar nada más. Sin límite conocido, la más alta.
      */

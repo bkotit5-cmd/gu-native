@@ -33,6 +33,7 @@
 #include <time.h>
 #include <unistd.h>  // ftruncate (mingw pulls it in through another header; POSIX does not)
 
+#include "../../colour_filter.h"
 #include "../../kernel.h"
 #include "fsr.h"
 #include "shaders.h"
@@ -7112,12 +7113,18 @@ VkRenderPass vk_window_pass(void);
 int vk_window_turn(void);
 static VkPipelineLayout present_layout;
 static VkDescriptorSetLayout present_set_layout;
+// The colour filter and the HDR output (runtime/colour_filter.h): their own layout, the vertex stage's 32 bytes as above
+// and the fragment's after them. Neutral colour in SDR draws with present_pipeline(0), as before.
+static VkPipelineLayout present_fx_layout;
+#define PRESENT_FX_BYTES 80  // (three rows, the gamma, the HDR's numbers: five vec4)
 
-static VkPipeline present_pipeline(void) {
-    static VkPipeline p;
-    static VkRenderPass made_for;
+// kind 0: the picture as it is (present.frag); 1: with the colour filter (present.color); 2: filter and HDR10 encoding
+// (present.hdr)
+static VkPipeline present_pipeline(int kind) {
+    static VkPipeline pipes[3];
+    static VkRenderPass made_for[3];
     VkRenderPass rp = vk_window_pass();
-    if (p && made_for == rp) return p;
+    if (pipes[kind] && made_for[kind] == rp) return pipes[kind];
     if (!present_layout) {
         VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
         VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
@@ -7127,11 +7134,18 @@ static VkPipeline present_pipeline(void) {
                                          .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_layout));
     }
+    if (kind && !present_fx_layout) {
+        VkPushConstantRange r[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 32}, {VK_SHADER_STAGE_FRAGMENT_BIT, 32, PRESENT_FX_BYTES}};
+        VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                         .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 2, .pPushConstantRanges = r};
+        VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_fx_layout));
+    }
+    VkPipeline *pp = &pipes[kind];
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
          .module = vk_builtin_shader("present.vert"), .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-         .module = vk_builtin_shader("present.frag"), .pName = "main"}};
+         .module = vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag"), .pName = "main"}};
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                                                  .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
@@ -7149,10 +7163,11 @@ static VkPipeline present_pipeline(void) {
     VkGraphicsPipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2,
                                        .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vs,
                                        .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds,
-                                       .pColorBlendState = &cb, .pDynamicState = &dy, .layout = present_layout, .renderPass = rp};
-    VK_CHECK(vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, &p));
-    made_for = rp;
-    return p;
+                                       .pColorBlendState = &cb, .pDynamicState = &dy,
+                                       .layout = kind ? present_fx_layout : present_layout, .renderPass = rp};
+    VK_CHECK(vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, pp));
+    made_for[kind] = rp;
+    return *pp;
 }
 
 // Scanout shows the bytes the game wrote: sRGB images are read through a UNORM view (no decode).
@@ -7164,17 +7179,40 @@ static VkImageView raw_view(TexBackend *b) {
 }
 
 // Inside the window image's render pass (device.c): the game image into (vx, vy, vw, vh).
+bool vk_window_hdr(void);         // (device.c) the window image is HDR10
+float vk_window_hdr_peak(void);   // (device.c) the screen's peak in nits; 0: not known
 void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, float vw, float vh) {
     if (!b || !b->image || (b->aspect & ~VK_IMAGE_ASPECT_COLOR_BIT)) return;
-    VkPipeline p = present_pipeline();
+    // The colour filter ([Colour]) and the HDR output: a few operations in this same draw (runtime/colour_filter.h); all
+    // neutral in SDR, the pipeline and the draw are the ones of before
+    ColourAdjust colour;
+    config_live_colour(&colour);
+    const bool hdr = vk_window_hdr();
+    const int kind = hdr ? 2 : colour_neutral(&colour) ? 0 : 1;
+    VkPipeline p = present_pipeline(kind);
+    VkPipelineLayout layout = kind ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
     VkDescriptorImageInfo ii = {vk_default_sampler(true), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
     VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
     vkUpdateDescriptorSets(g_vk.dev, 1, &w, 0, NULL);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, present_layout, 0, 1, &ds, 0, NULL);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &ds, 0, NULL);
     ss.known &= ~SS_SETS;  // (not draw's sets any more)
+    if (kind) {
+        ColourMatrix m;
+        colour_matrix(&colour, &m);
+        float fx[PRESENT_FX_BYTES / 4] = {0};
+        memcpy(fx, m.row, sizeof m.row);
+        fx[12] = m.gamma;
+        if (hdr) {
+            int hb, hh;
+            config_live_hdr(&hb, &hh);
+            HdrParams h = hdr_params(hb, hh, vk_window_hdr_peak());
+            fx[16] = h.paper, fx[17] = h.top, fx[18] = h.knee;
+        }
+        vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, PRESENT_FX_BYTES, fx);
+    }
     VkViewport vp = {vx, vy, vw, vh, 0, 1};
     // (the window image drawn turned for the panel, device.c MHGU_PERF_PREROTATE: the rectangle turned with it, and the
     // shader samples the picture turned back)
@@ -7184,7 +7222,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     else if (turn == 3) vp = (VkViewport){vy, W - vx - vw, vh, vw, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &vp);
     float pv[8] = {nvn_window_origin() == 0 ? 1.0f : 0.0f, (float)turn, 0, 0, 0, 0, 1, 1};  // (flip, turn, crop origin / size)
-    vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
+    vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
     vkCmdDraw(cb, 3, 1, 0, 0);
 }
 

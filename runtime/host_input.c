@@ -320,6 +320,12 @@ static void control_poll(void) {
             }
 #endif
             if (!strcmp(cmd, "gpuprof")) { extern volatile int g_gpuprof_request; g_gpuprof_request = 1; continue; }
+            if (!strcmp(cmd, "colour")) {  // colour <hue> <temperature> <tint> <brightness> <contrast> <saturation> <gamma>:
+                int v[7] = {0};            // the colour filter as if set in the menu (tests: runtime/colour_filter.h);
+                int n = sscanf(line, "%*s %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]);
+                config_colour_test(n >= 1 ? v : NULL);  // "colour" alone: the saved values again
+                continue;
+            }
             if (!strcmp(cmd, "devicelost")) { extern volatile int g_fake_lost; g_fake_lost = 1; continue; }  // (tests: exec.c lost_report)
             if (!strcmp(cmd, "submitoom")) {  // submitoom <n>: the next n tries to submit refused for memory (tests: exec.c submit_again)
                 extern volatile int g_fake_oom;

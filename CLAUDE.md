@@ -377,6 +377,23 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   48 levels, so the system keeps turning there. A 180-degree turn of the phone makes the swapchain again (a `SUBOPTIMAL` checks the
   transform, 4 a second at most). `prerotate 0|1|2` in the control file switches it in a running game (2: at 270 too), for
   comparing the same held frame both ways.
+- The colour filter (1.0.1, Graphics & Audio > Colour; `[Colour]` Hue, Temperature, Tint, Brightness, Contrast, Saturation,
+  Gamma, each 0 by default, `runtime/colour_filter.h`): our own, a 3x4 matrix and a gamma folded into the window image's
+  one draw of the game's picture (`exec.c vk_present_draw`, `shaders.c present.color`), no pass of its own. All 0: the
+  pipeline and the draw of before (`present_pipeline(0)`), byte for byte. It changes the game's picture (3D, HUD, the game's
+  menus), never the overlay drawn after it (touch controls, this menu): the menu stays readable whatever the sliders say.
+  While the menu is open the picture follows its draft (`config_colour_preview` from `report`); closed without saving, the
+  saved values come back. The control file's `colour h t ti b c s g` sets them for a test (`colour` alone: the saved ones).
+  PC (RX 6800 XT, 1920x1080): see the 1.0.1 post group's report for the window pass's cost with and without.
+- HDR output (1.0.1, `[Colour] HDR`, off; HDRBrightness, HDRHighlights): only with it on is `VK_EXT_swapchain_colorspace`
+  asked of the instance; the swapchain is HDR10 (A2B10G10R10 or A2R10G10B10, `HDR10_ST2084`) when the surface offers it,
+  else made as always and the log and the menu say why (`hdr_why`); a refused HDR10 swapchain is not tried again that
+  session. The game's SDR picture is expanded (`colour_filter.h hdr_params`: white at 203 nits x 2^(HDRBrightness/100),
+  the light above half of the white spread towards the screen's peak, `GameActivity.hdrScreenNits`), BT.2020, PQ
+  (`present.hdr`); the overlay gets ImGui's fragment shader with the same encoding at the paper white of the start
+  (`overlay.cpp hdr_shader`). The row shows on Android only where `Display.getHdrCapabilities` lists HDR10 or HDR10+.
+  Screenshots of an HDR10 window are decoded back to SDR (`shot_from_hdr`). `MHGU_HDR_TEST=1` draws the HDR encoding
+  into an SDR window (a test of the shaders where no HDR screen is at hand). Not yet seen on an HDR phone.
 - The hunter has one class per weapon: never compare against one vtable. Virtual 94 tells a hunter of any weapon and whether the
   weapon is out (`runtime/hle/weapon.c`). The `sPlayer` slot can hold another object that points to the hunter.
 - Don't trust an offset measured in one session: check it in another one.
