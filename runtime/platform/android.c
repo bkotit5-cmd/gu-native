@@ -905,7 +905,10 @@ static void log_device_more(void) {
         char kind[48];
         if (name) snprintf(kind, sizeof kind, "%s", name);
         else snprintf(kind, sizeof kind, "0x%x:0x%x", p < 32 ? impl[p] : 0, p < 32 ? part[p] : 0);
-        o += snprintf(line + o, sizeof line - o, "%s cores %s %s %ld-%ld MHz", clusters++ ? "," : "", rel, kind, low / 1000, top / 1000);
+        char lows[16] = "?", tops[16] = "?";  // (one that can't be read says "?", not a number)
+        if (low > 0) snprintf(lows, sizeof lows, "%ld", low / 1000);
+        if (top > 0) snprintf(tops, sizeof tops, "%ld", top / 1000);
+        o += snprintf(line + o, sizeof line - o, "%s cores %s %s %s-%s MHz", clusters++ ? "," : "", rel, kind, lows, tops);
     }
     if (!clusters) snprintf(line + o, sizeof line - o, " no cpufreq policies readable");
     fprintf(stderr, "%s\n", line);
@@ -932,6 +935,15 @@ JNIEXPORT jboolean JNICALL Java_com_mhgu_recomp_Diag_nativeLine(JNIEnv *env, jcl
     fputs(line, stderr);
     (*env)->ReleaseStringUTFChars(env, text, s);
     return JNI_TRUE;
+}
+
+// (1.0.1, diag) The battery's temperature, tenths of a degree C, as the Java side gets it (Diag.java: each
+// ACTION_BATTERY_CHANGED while the game runs): the heat line's where its sysfs file can't be read (platform/android_perf.c)
+static atomic_int g_battery_tenths = INT_MIN;
+int diag_battery_tenths(void) { return atomic_load_explicit(&g_battery_tenths, memory_order_relaxed); }
+JNIEXPORT void JNICALL Java_com_mhgu_recomp_Diag_nativeBattery(JNIEnv *env, jclass cls, jint tenths) {
+    (void)env, (void)cls;
+    atomic_store_explicit(&g_battery_tenths, tenths, memory_order_relaxed);
 }
 
 // (1.0.1, diag) The same, as an event of the session's: "[app] 0:12:34: <text>" (Diag.event)

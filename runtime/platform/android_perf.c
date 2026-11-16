@@ -437,6 +437,44 @@ static long read_long(const char *path) {
     return atol(p);
 }
 
+#define GPU_READ(p) read_long(p)
+#include <dirent.h>
+
+// (1.0.1, diag) The GPU's clock in MHz, -1 when no source here can be read: Adreno's kgsl (Hz), the kernel's gpu_clock
+// (MHz: Samsung's, some Qualcomm's), MediaTek's GED (KHz, "idx, freq"), a Mali's misc device (Hz), and else the first
+// devfreq device whose name says it is the GPU (mali, gpu, g3d, kgsl, pvr: Hz; a Unisoc's or a MediaTek's Mali is one).
+// The source found is kept; none found is looked for again only every tenth time.
+static long gpu_mhz(void) {
+    static char path[160];
+    static int scale;  // what turns the file's number into MHz: 1 MHz, 1000 KHz, 1000000 Hz
+    static int misses;
+    if (!path[0]) {
+        if (misses++ % 10) return -1;
+        static const struct { const char *p; int scale; } known[] = {
+            {"/sys/class/kgsl/kgsl-3d0/gpuclk", 1000000}, {"/sys/kernel/gpu/gpu_clock", 1},
+            {"/sys/kernel/ged/hal/current_freqency", 1000}, {"/sys/class/misc/mali0/device/cur_freq", 1000000}};
+        for (size_t i = 0; i < sizeof known / sizeof known[0] && !path[0]; i++)
+            if (GPU_READ(known[i].p) > 0) snprintf(path, sizeof path, "%s", known[i].p), scale = known[i].scale;
+        DIR *d = path[0] ? NULL : opendir("/sys/class/devfreq");
+        for (struct dirent *e; d && (e = readdir(d)) != NULL;) {
+            const char *n = e->d_name;
+            if (!strstr(n, "mali") && !strstr(n, "gpu") && !strstr(n, "g3d") && !strstr(n, "kgsl") && !strstr(n, "pvr")) continue;
+            if (strstr(n, "bw") || strstr(n, "bus")) continue;  // (a GPU's memory bus, as Qualcomm's gpubw: not its clock)
+            char p[160];
+            snprintf(p, sizeof p, "/sys/class/devfreq/%s/cur_freq", n);
+            if (GPU_READ(p) > 0) { snprintf(path, sizeof path, "%s", p); scale = 1000000; break; }
+        }
+        if (d) closedir(d);
+        if (!path[0]) return -1;
+    }
+    long v = GPU_READ(path);
+    return v > 0 ? v / scale : -1;
+}
+
+// (1.0.1, diag) the battery's temperature as the app's Java side last had it (Diag.java, ACTION_BATTERY_CHANGED, through
+// platform/android.c Diag.nativeBattery): where the sysfs file can't be read (a Galaxy, a Moto). INT_MIN: not known.
+extern int diag_battery_tenths(void);
+
 static void heat_line(void) {
     static AThermalManager *tm;
     static bool tm_tried;
@@ -452,8 +490,11 @@ static void heat_line(void) {
         float h = fn.thermal_headroom(tm, 0);  // (1.0: the system slows the phone down; NaN: not known)
         if (h == h) o += snprintf(line + o, sizeof line - o, ", headroom %.2f", h);
     }
+    // (1.0.1: a value that can't be read says "?", never a number: -1 read as -0.1 C or "allowed 0" before)
     long bt = read_long("/sys/class/power_supply/battery/temp");
+    if (bt == -1 || bt <= -400 || bt >= 1500) bt = diag_battery_tenths();  // (read_long: -1 when unreadable)
     if (bt > -400 && bt < 1500) o += snprintf(line + o, sizeof line - o, ", battery %.1f C", bt / 10.0);
+    else o += snprintf(line + o, sizeof line - o, ", battery ? C");
     // the CPU clusters (a policy per cluster: policy0, policy4, policy6, policy7...), MHz now / allowed / its most
     int nclu = 0;
     for (int c = 0; c < 16 && o < (int)sizeof line - 40; c++) {
@@ -465,23 +506,15 @@ static void heat_line(void) {
         long cap = read_long(p);
         snprintf(p, sizeof p, "/sys/devices/system/cpu/cpufreq/policy%d/cpuinfo_max_freq", c);
         long top = read_long(p);
-        o += snprintf(line + o, sizeof line - o, "%s%ld/%ld/%ld", nclu++ ? ", " : "; CPU MHz now/allowed/most: ", cur / 1000,
-                      cap / 1000, top / 1000);
+        char capt[16] = "?", topt[16] = "?";
+        if (cap > 0) snprintf(capt, sizeof capt, "%ld", cap / 1000);
+        if (top > 0) snprintf(topt, sizeof topt, "%ld", top / 1000);
+        o += snprintf(line + o, sizeof line - o, "%s%ld/%s/%s", nclu++ ? ", " : "; CPU MHz now/allowed/most: ", cur / 1000, capt, topt);
     }
-    // the GPU: Adreno's kgsl (Hz), MediaTek's GED (KHz), a Mali's devfreq (Hz)
-    static const char *const gpu[][2] = {{"/sys/class/kgsl/kgsl-3d0/gpuclk", "/sys/class/kgsl/kgsl-3d0/max_gpuclk"},
-                                         {"/sys/kernel/ged/hal/current_freqency", NULL},
-                                         {"/sys/class/misc/mali0/device/cur_freq", "/sys/class/misc/mali0/device/max_freq"},
-                                         {"/sys/class/devfreq/13000000.mali/cur_freq", "/sys/class/devfreq/13000000.mali/max_freq"}};
-    for (size_t g = 0; g < sizeof gpu / sizeof gpu[0] && o < (int)sizeof line - 40; g++) {
-        long cur = read_long(gpu[g][0]);
-        if (cur <= 0) continue;
-        long top = gpu[g][1] ? read_long(gpu[g][1]) : -1;
-        double div = g == 1 ? 1e3 : 1e6;  // (GED: KHz)
-        o += snprintf(line + o, sizeof line - o, "; GPU MHz now %.0f", cur / div);
-        if (top > 0) o += snprintf(line + o, sizeof line - o, ", allowed %.0f", top / div);
-        break;
-    }
+    // the GPU's clock (gpu_mhz: the first source this phone lets an app read; "?" when none)
+    long gpu = gpu_mhz();
+    if (gpu > 0) o += snprintf(line + o, sizeof line - o, "; GPU MHz now %ld", gpu);
+    else o += snprintf(line + o, sizeof line - o, "; GPU MHz ?");
     LOG("%s\n", line);
 }
 

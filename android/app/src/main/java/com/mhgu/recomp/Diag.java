@@ -85,6 +85,7 @@ final class Diag {
     // ---- into log.txt (runtime/platform/android.c): false while the log is not the game's yet, or no game library
     private static native boolean nativeLine(String line);
     private static native boolean nativeEvent(String text);
+    private static native void nativeBattery(int tenths);  // (the minute's heat line, where sysfs can't be read)
 
     static boolean line(String s) {
         try {
@@ -273,7 +274,8 @@ final class Diag {
         for (int i = 0; i < 32; i++) {
             String top = readLine("/sys/devices/system/cpu/cpu" + i + "/cpufreq/cpuinfo_max_freq");
             if (top.isEmpty() && i >= n) break;
-            String clock = top.isEmpty() ? "?" : (Long.parseLong(top) / 1000) + " MHz";
+            long khz = top.matches("[0-9]+") ? Long.parseLong(top) : -1;  // (not readable, or 0: "?")
+            String clock = khz > 0 ? (khz / 1000) + " MHz" : "? MHz";
             if (clock.equals(lastClock)) { run++; continue; }
             if (lastClock != null) clusters.append(' ').append(run).append(" x ").append(lastClock).append(',');
             lastClock = clock;
@@ -636,6 +638,14 @@ final class Diag {
                 String a = i.getAction();
                 if (a == null) return;
                 switch (a) {
+                    case Intent.ACTION_BATTERY_CHANGED: {
+                        int t = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                        try {
+                            nativeBattery(t);
+                        } catch (UnsatisfiedLinkError ignored) {
+                        }
+                        break;
+                    }
                     case PowerManager.ACTION_POWER_SAVE_MODE_CHANGED:
                         PowerManager pm = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
                         event("power saving " + (pm != null && pm.isPowerSaveMode() ? "ON" : "off"));
@@ -650,6 +660,7 @@ final class Diag {
             }
         };
         IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_BATTERY_CHANGED);  // (sticky: its last one comes at once)
         f.addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
         f.addAction(Intent.ACTION_POWER_CONNECTED);
         f.addAction(Intent.ACTION_POWER_DISCONNECTED);
