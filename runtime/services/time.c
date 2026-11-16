@@ -90,7 +90,14 @@ static void timezone_service(Service *s, IpcReq *req, IpcResp *resp) {
         resp_size(resp, 4);
         break;
     }
-    default: LOG("[time] ITimeZoneService cmd %u (ok)\n", req->cmd); resp_size(resp, 0x10);
+    default: {
+        // (1.0.1: once per command. The game asks one of these many times a second in some places: 58,000 lines, 97 % of a
+        // 4.9 MB log that Share log then cut, its start and all - #bug-reports "Screen split")
+        static uint64_t told;
+        if (req->cmd >= 64 || !(__atomic_fetch_or(&told, 1ull << req->cmd, __ATOMIC_RELAXED) & (1ull << req->cmd)))
+            LOG("[time] ITimeZoneService cmd %u (ok; logged once)\n", req->cmd);
+        resp_size(resp, 0x10);
+    }
     }
 }
 
@@ -109,7 +116,12 @@ static void static_service(Service *s, IpcReq *req, IpcResp *resp) {
         resp->copy_handles[resp->ncopy++] = g_shmem_handle;
         break;
     case 100: case 101: OUT(uint8_t, 0) = 0; resp_size(resp, 1); break;
-    default: LOG("[time] IStaticService cmd %u (ok)\n", req->cmd); resp_size(resp, 0x10);
+    default: {
+        static uint64_t told;  // (once per command, as ITimeZoneService's)
+        if (req->cmd >= 64 || !(__atomic_fetch_or(&told, 1ull << req->cmd, __ATOMIC_RELAXED) & (1ull << req->cmd)))
+            LOG("[time] IStaticService cmd %u (ok; logged once)\n", req->cmd);
+        resp_size(resp, 0x10);
+    }
     }
 }
 
