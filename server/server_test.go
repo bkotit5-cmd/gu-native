@@ -115,6 +115,38 @@ func TestKeysAndVersions(t *testing.T) {
 	}
 }
 
+// Another game's hubs on the same server (MH4U for Android: link protocols 0x3401 USA, 0x3402 Europe, README.md): its
+// listing is this port's NetworkInfo in the five bytes the server checks and its own fields elsewhere, so it is listed,
+// updated and joined as any hub, and only for its own link protocol: MHGU's players never see it, nor it theirs.
+func TestOtherGameLinkProtocols(t *testing.T) {
+	s := start(t, nil)
+	_, gu := host(t, s, 0, 1)
+	listing := make([]byte, netInfoSize)
+	copy(listing, "M4HB")
+	listing[niNetType] = 2
+	listing[niNodeMax] = 4
+	listing[niNodeCount] = 1
+	copy(listing[0x80:], "Night hunts")
+	c := dial(t, s)
+	send(t, c, tHost, header(0x3401, 0), listing)
+	m4 := binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	if l := list(t, s, 0x3401, 0); len(l) != 1 || l[m4] == nil || !bytes.Equal(l[m4], listing) {
+		t.Fatalf("MH4U USA list %v", l)
+	}
+	if l := list(t, s, 0x3402, 0); len(l) != 0 {
+		t.Fatal("the other region sees the hub")
+	}
+	if l := list(t, s, 2, 0); len(l) != 1 || l[gu] == nil {
+		t.Fatalf("MHGU list %v", l)
+	}
+	// a JOIN of another link protocol is told the hub doesn't exist
+	j := dial(t, s)
+	send(t, j, tJoin, header(2, 0), u64(m4))
+	if code := binary.LittleEndian.Uint32(expect(t, j, tError)); code != errNotFound {
+		t.Fatalf("error %d", code)
+	}
+}
+
 // More hubs than ListMax: each answer is a random choice of hubs with a free place (full ones only when those run
 // out), sorted (the fullest first), and repeated searches see more than ListMax of them.
 func TestListRandomChoice(t *testing.T) {
