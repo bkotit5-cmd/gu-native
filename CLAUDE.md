@@ -678,8 +678,22 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   under 2 minutes to over 6, looking hung (PC tests on the shared hard disk, 2026-11-16; 1.0 the same, and not 1.0.1's size check,
   whose thread starts after that line). In the cache: 2-3 s, listed ~0.1 s. The line says how long the listing took (`its folder
   listed in N ms`). A folder that can't be listed (denied) is named and left out; mingw's `opendir` let it in empty, silently.
-  Android and Linux still `stat` each file: 1 to 11 s between the two lines on the phones' `/storage/emulated/0` (logcat, 1.0.1),
-  flash with nothing to seek.
+  Android and Linux (`scan_par`, opt101): the folder is listed by 8 threads (`MHGU_PERF_ROMFS=<n>` another count, `=0` one
+  thread and 1.0.1's walk), and once: main.c's count of the files (`romfs_prescan`, which refuses an incomplete romfs before
+  the game starts) keeps the tree, and the game's first `fsp-srv` call takes it instead of listing the folder again. On
+  Android's shared storage each folder's listing waits on the system's FUSE daemon (MediaProvider), the attributes coming
+  with it: a test program on the RG406V (the shell's same `/storage/emulated/0`, warm or not alike) listed the game's 2,321
+  folders in 11.4 s, 11.8 with an `fstatat` of every file, 12.9 with a `stat` by the whole path (1.0.1's scan), and 7.9 s
+  with 2 threads, 5.5 with 4, 2.9 with 8, 1.9 with 16: the daemon answers several at once. Up to 1.0.1 the count listed
+  every folder too (`plat_count_files`), so a start listed them twice: the RG406V from the log's first line to `[romfs]`
+  24.9-25.4 s, now 3.1-3.2 s (its line: `listed in 2323 ms by 8 threads, as the game started`). `MHGU_ROMFS_CHECK=1` lists
+  it again with one thread as the game starts and compares the two trees (every folder, every file's path and size; the
+  RG406V: the same 37,851 entries). Windows keeps its own count and listing.
+- Relocating main (`loader.c relocate`): each of its imports from the sdk was found by walking all of the modules' 21,000
+  symbols (`loader_find_symbol`), 3.9 s of a Moto g06's start and 1.4 s of an RG406V's. The relocation pass now looks names
+  up in an index of the modules' defined symbols, the first of each name in module and symbol order, the walk's answer
+  (`symidx_build`; 0.04 s on the RG406V). `MHGU_PERF_SYMIDX=0`: the walk; `=2`: both, compared (the RG406V: 1,835
+  lookups, none differ). A Forge plugin's relocation, later, still walks.
 - `Config` gets its defaults by position: `CONFIG_DEFAULT_VALUES` in `config.c`. A new field in `config.h` needs its value there, in its
   place, or every later field moves (two added once turned most touch buttons off).
 - The shadow maps are one 1024x3072 depth atlas (three cascades), the first pass of a hunt's frame: 47 draws, 2.8 ms of a Moto g06's 18.6.
