@@ -3844,7 +3844,7 @@ std::string profile_what(int n) {
 // a button. The MH4U port's the same row
 void button_images_row(std::vector<Row> &r) {
     action(r, "touch.images", tr("Button images"), []() { ui_request_pictures(); });
-    r.back().help = tr("Copy pictures of your own (PNG, JPG or WebP) to put on the touch buttons, then pick one in the layout editor with Picture. What you add is your own responsibility.");
+    r.back().help = tr("Copy pictures of your own (PNG, JPG or WebP) to put on the touch controls, then pick one in the layout editor with Picture: it is drawn instead of the control, as it is (its transparent parts stay clear), and darker while pressed. What you add is your own responsibility.");
 }
 void control_profile_row(std::vector<Row> &r) {
     action(r, "touch.profiles", tr("Control profiles"), []() {

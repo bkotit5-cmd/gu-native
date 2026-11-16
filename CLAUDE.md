@@ -1027,8 +1027,12 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   full) is handed to `overlay_retire_texture`, destroyed a second later and read again when shown; the overlay makes no texture
   past the pool and leaves out the draws of one with no descriptor (`snap_textureless`). The backend's `AddTexture` returns no
   set when the allocation fails (a two-line change in `third_party/cimgui/imgui/backends/imgui_impl_vulkan.cpp`). Since 1.0.1
-  the stick (its base; `image_knob` its knob), the d-pads and the sprint lock's circle take pictures too, and a control's
-  picture may go without the round frame behind it, whole and uncut (`bare <key>`, the window's Frame button).
+  every control the editor places takes a picture (`image_ok`): the round buttons, the stick (its base; `image_knob` its
+  knob), both d-pads, the sprint lock's circle, the item bar's arrows, the attacks' pill (drawn along it, tilted: `pic_pill`),
+  the corner band (in its box: `pic_band`) and the menu pad; and a picture is the control's whole look (`pic_only`, the
+  owner's call: "que solo quede el png"): whole, fitted in the control's square, no disc, ring, badge or glow; pressed, 8 %
+  smaller and 25 % darker; a d-pad's or the menu pad's leans toward the direction pressed; a state that lasts (the run
+  locked, the lock-on following) pulses it. 1.0.1's first test builds' `bare <key>` lines are read and left out.
 - Phone tests of the touch controls without the player's save: `MHGU_SAVE_DIR` to a copy and `MHGU_CONFIG` to a copy of the ini
   (`Controls = On`). On the Moto g06 adb can't read the app's save files (the app's uid, rw-rw----): copy a save from another phone's backup.
   A folder the game made in an `MHGU_SAVE_DIR` (a new game's save_0) is the app's and adb can't remove it.
@@ -1133,8 +1137,8 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
     band, stick, d-pads, menu pad, arrows, settings, Lock-on or aim); in play a tap latches what it presses (`State.latched`,
     `latch_btn`, ORed in `recompute_held`), lit with a closed padlock, the next tap lets go; all let go with the controls
     hidden, the editor, the background, or the control leaving the screen (Run in a menu, the ranged layout's).
-  - Pictures (S06): the port keeps its one button style; `image <key> <file>` puts a player's picture on a round button
-    (`image_ok`), its letter's badge kept. Read with SDL's PNG/BMP loader, at most 256 px, as ImGui user textures
+  - Pictures (S06): `image <key> <file>` puts a player's picture on a control (`image_ok`), drawn instead of the control
+    (1.0.1; up to 1.0 on the round buttons only, cut round on the button's disc, its letter badged over it). Read with SDL's PNG/BMP loader, at most 256 px, as ImGui user textures
     (`pic_texture`: `RegisterUserTexture`, `GetTexRef`, uploaded by the overlay with the font). Added by the editor's Add
     pictures or the settings' Button images: Android's `PicturesActivity` (any picture Android decodes, made PNG at 256 px),
     a desktop's file dialog (`pc_import_pictures`, PNG and BMP).

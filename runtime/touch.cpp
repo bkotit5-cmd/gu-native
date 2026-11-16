@@ -450,10 +450,9 @@ struct Layout {
     float fps_x, fps_y;                      // the FPS counter's middle, in the screen's width and height; < 0 its own
                                              // place, at the top (fps_counter in the file)
     char image[C_COUNT][IMAGE_NAME];         // the player's own picture on a control: a file in the profiles' images
-                                             // folder (image <key> <file>); "" none. The stick's: its base
+                                             // folder (image <key> <file>); "" none. The stick's: its base. Drawn in
+                                             // place of the control's whole look (pic_only)
     char knob[IMAGE_NAME];                   // the stick's knob's (image_knob <file>)
-    uint64_t bare;                           // controls whose picture is drawn as it is, without the button's round
-                                             // frame behind it, uncut (bare <key>)
 };
 // The layout editor's panel: its middle where the player dragged it (fractions of the screen's width from the left and
 // of its height from the top; below 0 its usual place, a little above the middle) and its size (EPANEL_MIN to 100 %).
@@ -539,7 +538,8 @@ void parse_layout(const std::string &text, Layout *l, EditPanel *ep) {
             int c = ctl_by_key(name);
             if (!strcmp(key, "hidden") && c >= 0) { l->off |= 1ull << c; continue; }
             if (!strcmp(key, "hold") && c >= 0) { l->hold |= 1ull << c; continue; }
-            if (!strcmp(key, "bare") && c >= 0) { l->bare |= 1ull << c; continue; }
+            if (!strcmp(key, "bare")) continue;  // (1.0.1's first test builds: a picture without the button's frame.
+                                                 // Every picture is drawn alone now: the line is read and left out)
             if (!strcmp(key, "image") && c >= 0) {  // (image <key> <file>: the name, to the line's end)
                 const char *f = strstr(line, name) + strlen(name);
                 while (*f == ' ' || *f == '\t') f++;
@@ -617,12 +617,11 @@ bool save_layout_file(const char *path, const Layout &l, const EditPanel *ep) {
                "the screen's width and height; -1 -1 its own place)\n", PROFILES_N);
     fprintf(f, "layout_kind %d\nprofile %d\nfps_counter %.4f %.4f\n", l.kind, l.profile, l.fps_x, l.fps_y);
     fprintf(f, "# controls hidden (emulator-style), held by a tap (hold), with the player's own picture (image <key> <file>;\n"
-               "# the stick's knob: image_knob <file>), drawn without the button's frame (bare)\n");
+               "# the stick's knob: image_knob <file>)\n");
     for (int i = 0; i < C_LAID; i++) {
         if (l.kind == KIND_EMU && (l.off >> i & 1)) fprintf(f, "hidden %s\n", DEFS[i].key);
         if (l.hold >> i & 1) fprintf(f, "hold %s\n", DEFS[i].key);
         if (l.image[i][0]) fprintf(f, "image %s %s\n", DEFS[i].key, l.image[i]);
-        if (l.bare >> i & 1) fprintf(f, "bare %s\n", DEFS[i].key);
     }
     if (l.knob[0]) fprintf(f, "image_knob %s\n", l.knob);
     if (ep) {
@@ -1774,13 +1773,10 @@ bool holdable(int i) {
     return !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_SETTINGS || i == C_LOCKON ||
              i == C_ITEML || i == C_ITEMR || i == C_RUNLOCK || i == C_AMMO_UP || i == C_AMMO_DOWN || i == C_RAIM);
 }
-// A picture of the player's (Layout.image) can be on any round button: not on the pill or the band, the stick, the
-// d-pads, the menu pad or the sprint lock's circle
-// (a picture of the player's: any round button, and since 1.0.1 the stick - its base, and its knob apart -, the d-pads
-// and the sprint lock's circle; not the attacks' pill or band, nor the menu pad)
-bool image_ok(int i) {
-    return i >= 0 && i < C_LAID && !(i == C_ATTACK || i == C_CORNER || i == C_MPAD);
-}
+// A picture of the player's (Layout.image) can be on every control the editor places (1.0.1, the owner's call: the round
+// buttons as in 1.0, and the stick - its base, and its knob apart -, both d-pads, the sprint lock's circle, the item bar's
+// arrows, the attacks' pill and corner band, the menu pad), drawn in place of the control's whole look (pic_only)
+bool image_ok(int i) { return i >= 0 && i < C_LAID; }
 
 // ---- the layout editor: the touch controls and the game's HUD. A panel in two rows: what is picked (smaller, bigger,
 // hide or show a part - or a control of the emulator-style layout -, back to its default, held by a tap, a picture of
@@ -2037,10 +2033,9 @@ void prof_tap(State &s, float x, float y) {
 // ---- the pictures' window (the editor's Image button, a round button picked): the pictures in the profiles' images
 // folder, a page of them; one tapped goes on the button. None takes it off; Add pictures opens the screen that copies
 // the player's own in (Android's ImportActivity, a desktop's file dialog: runtime/pc_actions.c); the folder is read again
-// while the window is open. The pictures are the player's own, and their responsibility. Frame (1.0.1, Discord): the
-// button's round frame behind its picture, or none and the picture whole (Layout.bare); For (the stick's alone): its
-// base's picture or its knob's
-enum { IA_NONE, IA_PREV, IA_NEXT, IA_FRAME, IA_KNOB, IA_ADD, IA_CLOSE, IA_COUNT };
+// while the window is open. The pictures are the player's own, and their responsibility. A picture is the control's
+// whole look (pic_only: 1.0.1). For (the stick's alone): its base's picture or its knob's
+enum { IA_NONE, IA_PREV, IA_NEXT, IA_KNOB, IA_ADD, IA_CLOSE, IA_COUNT };
 const int IMG_PAGE = 12;  // (two rows of six)
 void img_window(float w, float h, Rect *win, Rect tile[IMG_PAGE], Rect btn[IA_COUNT], float *say_y) {
     float ww = std::min(w * .96f, 1.75f * h), wh = .74f * h, x0 = (w - ww) * .5f, y0 = (h - wh) * .5f;
@@ -2108,10 +2103,7 @@ void img_tap(State &s, float x, float y) {
         s.img_btn = i;
         tap_due();
         if (i == IA_NONE && c >= 0) img_target(s, c)[0] = 0, s.img_open = false;
-        else if (i == IA_FRAME && c >= 0) {
-            s.layout.bare ^= 1ull << c;
-            rt_logf("[touch] layout editor: %s's picture %s\n", DEFS[c].key, s.layout.bare >> c & 1 ? "without its frame" : "in its frame");
-        } else if (i == IA_KNOB && c == C_STICK) {
+        else if (i == IA_KNOB && c == C_STICK) {
             s.img_knob = !s.img_knob;
             img_page_of(s);
         } else if (i == IA_PREV) s.img_page = (s.img_page + pages - 1) % pages;
@@ -4301,15 +4293,13 @@ void corner_band(ImDrawList *dl, ImFont *font, Geo g, int mask, float a) {
 // the d-pad's directions: right, left, up, down (the part's bits)
 const float DPAD_DIR[4][2] = {{1, 0}, {-1, 0}, {0, -1}, {0, 1}};
 // the direction pressed: its quarter of the well lit, and a gold arc outside the rim, which shows round the thumb
-void dpad_lit(ImDrawList *dl, ImVec2 c, float r, int part, float a, bool well = true) {
+void dpad_lit(ImDrawList *dl, ImVec2 c, float r, int part, float a) {
     for (int i = 0; i < 4; i++) {
         if (!(part & (1 << i))) continue;
         float an = atan2f(DPAD_DIR[i][1], DPAD_DIR[i][0]);
-        if (well) {  // (not over a picture of the player's: the arcs alone)
-            dl->PathLineTo(c);
-            dl->PathArcTo(c, r * .84f, an - PI * .25f, an + PI * .25f, 14);
-            dl->PathFillConvex(fade(IM_COL32(92, 62, 22, 255), a * .9f));
-        }
+        dl->PathLineTo(c);
+        dl->PathArcTo(c, r * .84f, an - PI * .25f, an + PI * .25f, 14);
+        dl->PathFillConvex(fade(IM_COL32(92, 62, 22, 255), a * .9f));
         dl->PathArcTo(c, r * 1.1f, an - PI * .23f, an + PI * .23f, 14);
         dl->PathStroke(fade(GLOW, a * .85f), ImDrawFlags_None, r * .07f);
         dl->PathArcTo(c, r * 1.2f, an - PI * .18f, an + PI * .18f, 12);
@@ -4535,83 +4525,100 @@ ImTextureData *pic_texture(const char *name) {
     p.tex = t;
     return t;
 }
-// A picture in a circle of radius r (its middle square), or in a rectangle (r 0: the whole picture, fitted)
-void pic_in_circle(ImDrawList *dl, ImTextureData *t, ImVec2 c, float r, float a) {
-    float w = (float)t->Width, h = (float)t->Height, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
-    if (w > h) u0 = (w - h) * .5f / w, u1 = 1 - u0;
-    else if (h > w) v0 = (h - w) * .5f / h, v1 = 1 - v0;
-    dl->AddImageRounded(t->GetTexRef(), ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ImVec2(u0, v0), ImVec2(u1, v1),
-                        fade(IM_COL32(255, 255, 255, 255), a), r);
-}
 void pic_in_rect(ImDrawList *dl, ImTextureData *t, const Rect &b, float a) {
     float bw = b.x1 - b.x0, bh = b.y1 - b.y0, k = std::min(bw / (float)t->Width, bh / (float)t->Height);
     float w = t->Width * k, h = t->Height * k, x0 = b.x0 + (bw - w) * .5f, y0 = b.y0 + (bh - h) * .5f;
     dl->AddImage(t->GetTexRef(), ImVec2(x0, y0), ImVec2(x0 + w, y0 + h), ImVec2(0, 0), ImVec2(1, 1), fade(IM_COL32(255, 255, 255, 255), a));
 }
-// A picture without the button's frame (Layout.bare, the player's choice in the pictures' window): whole, fitted in the
-// control's square, nothing behind it; pressed, a little smaller with a glow round it
-void pic_bare(ImDrawList *dl, ImTextureData *t, ImVec2 c, float r, bool lit, float a) {
-    float k = lit ? .94f : 1.0f;
-    pic_in_rect(dl, t, Rect{c.x - r * k, c.y - r * k, c.x + r * k, c.y + r * k, true}, a);
-    if (lit) dl->AddCircle(c, r * 1.02f, fade(GLOW, a * .7f), 40, r * .06f);
+// ---- a control drawn as the player's picture (1.0.1, the owner's call: "que solo quede el png"). The picture alone,
+// whole and uncut, fitted in the control's square (its shape kept), with nothing of the port's look - no disc, ring,
+// frame, letter badge or glow; up to 1.0.1's first test builds it sat cut round on the button's bronze disc, its letter
+// badged over it. A press shows on the picture itself: pressed (press 1), a little smaller and darker; a state that
+// lasts (the run locked, the lock-on following) pulses it. Without a picture every control is drawn as before
+const float PIC_PRESS_SCALE = .08f, PIC_PRESS_DARK = .25f;
+ImU32 pic_tint(float press, float a) {  // (white, darkened by the press, at the control's opacity)
+    int v = (int)lroundf(255.0f * (1.0f - PIC_PRESS_DARK * std::clamp(press, 0.0f, 1.0f)));
+    return fade(IM_COL32(v, v, v, 255), a);
 }
-// A button's picture of the player's, on its face (pressed or held, lit round it as the disc is), its letter's badge
-// over it: the button still says which of the game's buttons it is. Bare: the picture alone, as the player made it
-bool pic_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, Geo g, bool lit, const char *letter, float a, float h) {
-    ImTextureData *t = image_ok(i) ? pic_texture(l.image[i]) : nullptr;
+float pic_pulse(void) { return .45f + .4f * (.5f + .5f * sinf(SDL_GetTicksNS() / 1e9f * 4)); }
+// The picture fitted in a box of half sizes hw x hh about c, its shape kept
+void pic_fit(ImDrawList *dl, ImTextureData *t, ImVec2 c, float hw, float hh, ImU32 col) {
+    float k = std::min(hw / (float)t->Width, hh / (float)t->Height), w = t->Width * k, h = t->Height * k;
+    dl->AddImage(t->GetTexRef(), ImVec2(c.x - w, c.y - h), ImVec2(c.x + w, c.y + h), ImVec2(0, 0), ImVec2(1, 1), col);
+}
+// A control's picture in its square (r: half its side), pressed by press (0..1), moved by shift (a d-pad's direction)
+void pic_only(ImDrawList *dl, ImTextureData *t, ImVec2 c, float r, float press, float a, ImVec2 shift = ImVec2(0, 0)) {
+    float k = 1.0f - PIC_PRESS_SCALE * std::clamp(press, 0.0f, 1.0f);
+    pic_fit(dl, t, ImVec2(c.x + shift.x, c.y + shift.y), r * k, r * k, pic_tint(press, a));
+}
+ImTextureData *pic_of(const Layout &l, int i) { return image_ok(i) ? pic_texture(l.image[i]) : nullptr; }
+// A round control's picture (a button, an item bar's arrow, the menu pad), if it has one
+bool pic_face(ImDrawList *dl, const Layout &l, int i, Geo g, float press, float a, ImVec2 shift = ImVec2(0, 0)) {
+    ImTextureData *t = pic_of(l, i);
     if (!t) return false;
-    if (l.bare >> i & 1) {
-        pic_bare(dl, t, g.c, g.r, lit, a);
-        return true;
-    }
-    float r = lit ? g.r * .95f : g.r;
-    disc(dl, g.c, r, lit, a);
-    pic_in_circle(dl, t, g.c, r * .84f, a);
-    if (lit) dl->AddCircle(g.c, r * .84f, fade(GLOW, a * .8f), 40, r * .07f);
-    if (letter && letter[0]) badge(dl, font, ImVec2(g.c.x + r * .7f, g.c.y + r * .7f), std::max(r * .3f, .021f * h), letter, a);
+    pic_only(dl, t, g.c, g.r, press, a, shift);
     return true;
 }
-// The d-pad with a picture of the player's (1.0.1): in the d-pad's well or bare, the arm pressed glowing round it
+// The way a d-pad's (or the menu pad's) picture leans while a direction is pressed (dpad_part's bits): toward it
+ImVec2 pic_lean(int part, float r) {
+    ImVec2 v(0, 0);
+    for (int i = 0; i < 4; i++)
+        if (part & (1 << i)) v.x += DPAD_DIR[i][0] * r * .07f, v.y += DPAD_DIR[i][1] * r * .07f;
+    return v;
+}
 bool pic_dpad(ImDrawList *dl, const Layout &l, int i, Geo g, int part, float a) {
-    ImTextureData *t = image_ok(i) ? pic_texture(l.image[i]) : nullptr;
+    return pic_face(dl, l, i, g, part ? .6f : 0.0f, a, pic_lean(part, g.r));
+}
+// The attack pill's picture: along the pill, tilted with it - the picture's width along the pill's length, its right
+// end up at A's end, its top on the pill's upper side -, fitted in the capsule's length and thickness (a wide picture,
+// about 3:1, fills it). Each half darker while its attack is pressed (the seam: both); mask's bits: 1 A, 2 X
+bool pic_pill(ImDrawList *dl, const Layout &l, Geo g, int mask, float a) {
+    ImTextureData *t = pic_of(l, C_ATTACK);
     if (!t) return false;
-    if (l.bare >> i & 1) pic_in_rect(dl, t, Rect{g.c.x - g.r, g.c.y - g.r, g.c.x + g.r, g.c.y + g.r, true}, a);
-    else disc(dl, g.c, g.r, false, a), pic_in_circle(dl, t, g.c, g.r * .84f, a);
-    dpad_lit(dl, g.c, g.r, part, a, false);
+    float L = g.r * (PILL_HALF + 1.0f), H = g.r, aspect = (float)t->Width / (float)t->Height;
+    float hw = aspect >= L / H ? L : H * aspect, hh = aspect >= L / H ? L / aspect : H;
+    ImVec2 u = PILL_U, n(-PILL_U.y, PILL_U.x);  // (the picture's right; its down: the pill's lower side)
+    auto at = [&](float x, float y) { return ImVec2(g.c.x + u.x * x * hw + n.x * y * hh, g.c.y + u.y * x * hw + n.y * y * hh); };
+    for (int half = 0; half < 2; half++) {  // (0 the lower half, X: the picture's left; 1 the upper, A)
+        float x0 = half ? 0.0f : -1.0f, x1 = half ? 1.0f : 0.0f, u0 = half ? .5f : 0.0f, u1 = half ? 1.0f : .5f;
+        bool on = mask & (half ? 1 : 2);
+        dl->AddImageQuad(t->GetTexRef(), at(x0, -1), at(x1, -1), at(x1, 1), at(x0, 1), ImVec2(u0, 0), ImVec2(u1, 0), ImVec2(u1, 1),
+                         ImVec2(u0, 1), pic_tint(on ? 1.0f : 0.0f, a));
+    }
     return true;
 }
-// The stick with the player's pictures (1.0.1): its base (Layout.image) in the rim or bare, its knob (Layout.knob) on its
-// disc or bare; either missing, the port's own
+// The corner band's picture: fitted in the band's box, from its left end along the bottom to its top up the side
+// (a picture of the band's shape, transparent inside its bend, fills it), darker while any of its parts is pressed
+bool pic_band(ImDrawList *dl, const Layout &l, Geo g, int mask, float a) {
+    ImTextureData *t = pic_of(l, C_CORNER);
+    if (!t) return false;
+    float th = g.r * BAND_T, x0 = g.c.x - BAND_LEFT * g.r - th, x1 = g.c.x + g.r + th, y0 = g.c.y - BAND_UP * g.r - th, y1 = g.c.y + g.r + th;
+    pic_fit(dl, t, ImVec2((x0 + x1) * .5f, (y0 + y1) * .5f), (x1 - x0) * .5f, (y1 - y0) * .5f, pic_tint(mask ? 1.0f : 0.0f, a));
+    return true;
+}
+// The stick with the player's pictures: its base (Layout.image) and its knob (Layout.knob), each alone in its place (the
+// knob pressed while the thumb is on it); either missing, the port's own of that one
 void stick_of(ImDrawList *dl, const Layout &l, ImVec2 base, ImVec2 knob, float r, float a, bool on) {
     ImTextureData *tb = pic_texture(l.image[C_STICK]), *tk = pic_texture(l.knob);
     if (!tb && !tk) {
         stick(dl, base, knob, r, a, on);
         return;
     }
-    bool bare = l.bare >> C_STICK & 1;
     float kr = r * KNOB;
-    if (!tb) stick_base(dl, base, r, a, on);
-    else if (bare) pic_in_rect(dl, tb, Rect{base.x - r, base.y - r, base.x + r, base.y + r, true}, a);
-    else stick_rim(dl, base, r, a, on), pic_in_circle(dl, tb, base, r * .9f, a);
-    if (!tk) stick_knob(dl, knob, kr, a, on);
-    else if (bare) pic_in_rect(dl, tk, Rect{knob.x - kr, knob.y - kr, knob.x + kr, knob.y + kr, true}, a);
-    else disc(dl, knob, kr, on, a), pic_in_circle(dl, tk, knob, kr * .84f, a);
+    if (tb) pic_only(dl, tb, base, r, 0.0f, a);
+    else stick_base(dl, base, r, a, on);
+    if (tk) pic_only(dl, tk, knob, kr, on ? 1.0f : 0.0f, a);
+    else stick_knob(dl, knob, kr, a, on);
 }
-// The sprint lock's circle with a picture of the player's (1.0.1), faded in and lit as the port's (lock_circle)
+// The sprint lock's circle with a picture of the player's, faded in as the port's (lock_circle): pressed while armed,
+// pulsing while locked
 void lock_circle_of(ImDrawList *dl, const Layout &l, ImVec2 c, float cr, float a, bool armed, bool locked) {
     ImTextureData *t = a > 0.0f ? pic_texture(l.image[C_RUNLOCK]) : nullptr;
     if (!t) {
         lock_circle(dl, c, cr, a, armed, locked);
         return;
     }
-    bool lit = armed || locked;
-    if (l.bare >> C_RUNLOCK & 1) pic_bare(dl, t, c, cr, lit, a);
-    else {
-        disc(dl, c, cr, lit, a);
-        pic_in_circle(dl, t, c, cr * .84f, a);
-        if (lit) dl->AddCircle(c, cr * .84f, fade(GLOW, a * .8f), 40, cr * .07f);
-    }
-    if (locked) dl->AddCircle(c, cr * 1.18f, fade(GLOW, a * (.6f + .3f * sinf(SDL_GetTicksNS() / 1e9f * 4))), 32, cr * .1f);
+    pic_only(dl, t, c, cr, locked ? pic_pulse() : armed ? 1.0f : 0.0f, a);
 }
 // The mark of a button a tap holds (Layout.hold): a small padlock at its upper left, closed and lit while it is held
 void hold_mark(ImDrawList *dl, Geo g, bool held, float a) {
@@ -4625,7 +4632,7 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
     Geo g = place(l, i, w, h);
     bool held = (s.latched >> i & 1) != 0;  // (a tap holds it down: lit)
     if (i == C_ITEML || i == C_ITEMR) {  // (the editor's: in a hunt they go with the item bar)
-        if (!pic_face(dl, font, l, i, g, false, "", a, h)) item_arrow_disc(dl, g, i == C_ITEML ? -1 : 1, false, a);
+        if (!pic_face(dl, l, i, g, 0.0f, a)) item_arrow_disc(dl, g, i == C_ITEML ? -1 : 1, false, a);
         return;
     }
     if (i == C_RUNLOCK) {  // (the editor's: in a hunt it shows as the thumb pushes toward it, with the stick)
@@ -4649,7 +4656,8 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                 v = std::clamp((d - .9f * g.r) / reach, 0.0f, 1.0f) * std::clamp((up - LOCK_UP) / .15f, 0.0f, 1.0f);
             }
             lock_circle_of(dl, l, lg.c, lg.r, a * v, s.run_over, s.run_lock);
-            if (s.run) {  // (running: a gold ring round the rim, and streaks behind the knob)
+            if (s.run && !pic_texture(l.image[C_STICK])) {  // (running: a gold ring round the rim, and streaks behind the
+                                                            // knob; not round a picture of the player's)
                 dl->AddCircle(base, g.r * 1.12f, fade(GLOW, a * .85f), 48, g.r * .07f);
                 float dx = knob.x - s.bx, dy = knob.y - s.by, n = std::max(1.0f, hypotf(dx, dy));
                 dx /= n, dy /= n;
@@ -4681,11 +4689,20 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
         }
     if (of_mpad(i) && s.lit_ctl == i && SDL_GetTicksNS() < s.lit_until) mask |= i == C_MPAD ? s.lit_part : 1;  // (a tap)
     if (held && !s.edit) mask |= 1;
-    if (i == C_ATTACK) { pill(dl, font, g, mask, a); return; }
-    if (i == C_MPAD) { menu_pad(dl, g, thumb, mask, a, thumb.x != g.c.x || thumb.y != g.c.y); return; }
+    if (i == C_ATTACK) {
+        if (!pic_pill(dl, l, g, mask, a)) pill(dl, font, g, mask, a);
+        return;
+    }
+    if (i == C_MPAD) {  // (a picture of the player's leans toward the direction pressed, as a d-pad's)
+        if (!pic_face(dl, l, i, g, mask ? .6f : 0.0f, a, pic_lean(mask, g.r))) menu_pad(dl, g, thumb, mask, a, thumb.x != g.c.x || thumb.y != g.c.y);
+        return;
+    }
     if (is_tab(i)) { tab(dl, font, g, i == C_ML || i == C_MZL, mpad_label(i), mask != 0, a); return; }
-    if (i == C_CORNER) { corner_band(dl, font, g, mask, a); return; }
-    if ((i == C_HEAVY || i == C_LIGHT) && pic_face(dl, font, l, i, g, mask != 0, DEFS[i].letter, a, h)) return;
+    if (i == C_CORNER) {
+        if (!pic_band(dl, l, g, mask, a)) corner_band(dl, font, g, mask, a);
+        return;
+    }
+    if ((i == C_HEAVY || i == C_LIGHT) && pic_face(dl, l, i, g, mask ? 1.0f : 0.0f, a)) return;
     if (i == C_HEAVY || i == C_LIGHT) {  // (a great sword, a small one, as on the pill)
         float r = mask ? g.r * .95f : g.r;
         disc(dl, g.c, r, mask != 0, a);
@@ -4712,7 +4729,7 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
         char label[32];
         if (is_combo(i)) combo_label(i, label, sizeof label);
         else snprintf(label, sizeof label, "%s", DEFS[i].letter);
-        if (pic_face(dl, font, l, i, g, mask != 0, label, a, h)) return;
+        if (pic_face(dl, l, i, g, mask ? 1.0f : 0.0f, a)) return;
         float r = mask ? g.r * .95f : g.r, fs = r * 1.05f;
         disc(dl, g.c, r, mask != 0, a);
         ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, label);
@@ -4723,6 +4740,11 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
     }
     float r = mask ? g.r * .95f : g.r;
     if (i == C_RUN && s.drawn == 1 && !s.edit) a *= .45f, mask = 0;  // (the weapon out: dimmed, it presses nothing)
+    {  // (a picture of the player's: it alone, pressed; the Lock-on button's lit while the lock-on is on, pulsing while the
+       // camera follows the monster)
+        bool on = i == C_LOCKON && s.lock && !s.edit;
+        if (pic_face(dl, l, i, g, mask ? 1.0f : on ? (mousecam_lock_following() ? pic_pulse() : .5f) : 0.0f, a)) return;
+    }
     disc(dl, g.c, r, mask != 0, a);
     if (i == C_RUN && s.run) dl->AddCircle(g.c, g.r * 1.16f, fade(GLOW, a * (.6f + .3f * sinf(SDL_GetTicksNS() / 1e9f * 4))), 40, g.r * .09f);
     // (the lock-on, as the MH4U port's: a ring round its button while it is on, pulsing while the camera follows the
@@ -4736,7 +4758,6 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                                           : i == C_L && !s.edit && camera_buttons() == B(BTN_ZL) ? "ZL" : DEFS[i].letter);
     if (is_ranged(i)) ranged_face(i, s.edit ? 1 : s.drawn, &ic, letter, sizeof letter);
     bool lit = mask || (i == C_LOCKON && s.lock && !s.edit);  // (the Lock-on button lit while the lock-on is on)
-    if (pic_face(dl, font, l, i, g, lit, strchr("v<>", letter[0]) && letter[0] ? "" : letter, a, h)) return;
     icon(dl, ic, g.c, i == C_RFIRE ? r * .94f : r, fade(lit ? GLOW : INK, a), fade(DEEP, a));
     float br = std::max(r * (i == C_RFIRE ? .22f : .3f), .021f * h);  // (the large one's as large as the others')
     ImVec2 bc(g.c.x + r * .7f, g.c.y + r * .7f);
@@ -4744,11 +4765,12 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
     else if (i != C_MMINUS) badge(dl, font, bc, br, letter, a);  // (the small Minus: its glyph)
 }
 
-// A control, and over it the mark of a button a tap holds: in the editor, and while it is held
+// A control, and over it the mark of a button a tap holds: in the editor, and while it is held (in play not over a
+// picture of the player's, which shows it pressed itself)
 void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, float h, const State &s, float a) {
     control_face(dl, font, l, i, w, h, s, a);
     bool held = (s.latched >> i & 1) != 0;
-    if ((l.hold >> i & 1) && holdable(i) && (s.edit || held)) hold_mark(dl, place(l, i, w, h), held && !s.edit, a);
+    if ((l.hold >> i & 1) && holdable(i) && (s.edit || (held && !pic_of(l, i)))) hold_mark(dl, place(l, i, w, h), held && !s.edit, a);
 }
 
 // a plate in the game's window style: wine-dark, a black edge, red and green rules top and bottom
@@ -5022,12 +5044,10 @@ void draw_pictures(ImDrawList *dl, ImFont *font, const State &s, float w, float 
     if (!s.img_n) snprintf(line, sizeof line, "%s", T("No pictures yet: Add pictures copies yours in (PNG or JPG). They are your own responsibility."));
     else snprintf(line, sizeof line, T("Page %d of %d. The pictures you add are your own responsibility."), s.img_page + 1, pages);
     window_line(dl, font, win, say_y, h, line, INK);
-    bool bare = c >= 0 && (s.layout.bare >> c & 1);
-    const char *const LABEL[IA_COUNT] = {"No picture", "<", ">", bare ? "Frame: Off" : "Frame: On",
-                                         s.img_knob ? "For: knob" : "For: base", "Add pictures", "Close"};
+    const char *const LABEL[IA_COUNT] = {"No picture", "<", ">", s.img_knob ? "For: knob" : "For: base", "Add pictures", "Close"};
     for (int i = 0; i < IA_COUNT; i++) {
         bool off = (i == IA_NONE && (c < 0 || !img_target(s, c)[0])) || ((i == IA_PREV || i == IA_NEXT) && pages < 2) ||
-                   (i == IA_KNOB && c != C_STICK) || (i == IA_FRAME && c < 0);
+                   (i == IA_KNOB && c != C_STICK);
         window_button(dl, font, btn[i], h, T(LABEL[i]), s.img_btn == i, off, false);
     }
 }
@@ -5619,7 +5639,7 @@ extern "C" void touch_draw(float w, float h) {
             int c = d < 0 ? C_ITEML : C_ITEMR;
             Geo g = place(s.layout, c, w, h);
             // (a picture of the player's on it, as the editor shows: until 1.0.1 only the editor drew it)
-            if (!pic_face(dl, font, s.layout, c, g, lit, "", a, h)) item_arrow_disc(dl, g, d, lit, a);
+            if (!pic_face(dl, s.layout, c, g, lit ? 1.0f : 0.0f, a)) item_arrow_disc(dl, g, d, lit, a);
         }
     } else if (item.ok) {
         float cy = (item.y0 + item.y1) * .5f, ch = .03f * h;
