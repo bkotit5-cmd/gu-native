@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// main.c's count of the game's files as the game starts: base_dir scanned now (Android and Linux: by several threads)
+// and its tree kept for romfs_open of that same folder, which then doesn't list it again. The regular files in it.
+int romfs_prescan(const char *base_dir);
 // Builds the image from base_dir and the given overlay folders (later ones win; files they add are added).
 bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays);
 uint64_t romfs_size(void);

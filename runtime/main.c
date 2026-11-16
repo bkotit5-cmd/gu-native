@@ -19,6 +19,7 @@
 #include "savefolder.h"
 #include "cache_clear.h"
 #include "diag.h"
+#include "romfs.h"
 #ifdef __ANDROID__
 static void game_lib_failed(const char *why);
 #endif
@@ -304,7 +305,8 @@ int main(int argc, char **argv) {
         snprintf(romfs, sizeof romfs, "%s/romfs", data);
         snprintf(shaders, sizeof shaders, "%s/nativeNX/system/app_shader/AppShaderPackage.mfx", romfs);
         struct stat st;
-        int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : plat_count_files(romfs);
+        // (romfs_prescan: the scan the game's first fsp-srv call needs, done now and kept, its files counted)
+        int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : romfs_prescan(romfs);
         bool have_shaders = stat(shaders, &st) == 0;
         if (nfiles >= 0 && (nfiles < 35000 || !have_shaders)) {
             char msg[700];
