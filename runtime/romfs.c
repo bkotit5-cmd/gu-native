@@ -338,7 +338,8 @@ static bool build(RomfsImage *im, const char *base_dir, const char *const *overl
         for (int i = 0; rel && host && sz && i < l.nf; i++)
             if (!strncmp(l.files[i]->path, base_dir, bl) && l.files[i]->path[bl] == '/')  // (the game's own, not a mod's)
                 rel[n] = l.files[i]->rpath, host[n] = l.files[i]->path, sz[n] = l.files[i]->size, n++;
-        if (rel && host && sz && !getenv("MHGU_ROMFS_NOQUICK")) verify_quick_start(rel, host, sz, n);
+        const char *nq = getenv("MHGU_ROMFS_NOQUICK");  // (=1: not checked)
+        if (rel && host && sz && !(nq && atoi(nq) > 0)) verify_quick_start(rel, host, sz, n);
         free(rel), free(host), free(sz);
     }
     const char *t = getenv("MHGU_ROMFS_SHORT");  // (test: the notice as if the copy were that many GB, e.g. 11.5)
