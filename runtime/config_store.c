@@ -316,7 +316,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
 // What config_save writes: a setting of the table (setting) or a Quest<number>, RecentServer<n> or RecentKey<n> entry
 // (setting NULL)
 typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
-// (every setting of g_settings, 146 now, 147 on a desktop, the quests set apart, the servers and keys remembered)
+// (every setting of g_settings, 172 now, 174 on a desktop (1.0.1: the log says "[settings] N of 174" on a PC), the quests set apart, the servers and keys remembered)
 #define ENTRY_MAX (HP_QUESTS_MAX + 192 + 2 * LDN_RECENT)
 // A RecentServer<n> / RecentKey<n> line's key, normalized: what config_save writes again or leaves out
 static bool recent_key(const char *normalized) {
