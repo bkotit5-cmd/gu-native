@@ -327,6 +327,10 @@ static void control_poll(void) {
                 config_colour_test(n >= 1 ? v : NULL);  // "colour" alone: the saved values again
                 continue;
             }
+            if (!strcmp(cmd, "upscale")) {  // upscale 0|1: [Display] UpscaleFilter Smooth / Sharp from the next frame, as
+                config_upscale_test(atoi(arg));  // if saved in the menu (tests: the same scene both ways)
+                continue;
+            }
             if (!strcmp(cmd, "fgeval")) {  // fgeval <n> [frames]: n quality samples of frame generation (nvn/vulkan/framegen.c)
                 extern void vk_framegen_eval(int n, int every);
                 vk_framegen_eval(atoi(arg), atoi(arg2));

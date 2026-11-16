@@ -935,6 +935,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(draw_distance);
     SAME(smooth_gradients);
     SAME(frame_gen);
+    SAME(upscale_sharp);
     SAME(msaa);
     SAME(fxaa);
     SAME(fxaa_mode);
@@ -2920,6 +2921,58 @@ void reset_graphics_30() {
 #endif
 }
 MENU_ENTRY("graphics", 30, rows_graphics_30, reset_graphics_30);
+// The upscale filter (1.0.1, gu-native #247: 540p on a 1080p screen looked blurry, where the MH4U port's nearest scaling
+// doesn't): how a 3D picture smaller than the screen is scaled up to it, Smooth (linear, as before) or Sharp (its nearest
+// pixels). Live, from the next frame after Save (nvn/vulkan/fsr.c scale_to_stand: under a HUD at the screen's size;
+// exec.c vk_present_draw: a picture with its HUD in it). FSR rebuilds the picture itself: none there
+void rows_graphics_35(std::vector<Row> &r) {
+    add_choice(r, "upscale", en_es("Upscale filter", "Filtro de escalado"), s.draft.upscale_sharp,
+               {en_es("Smooth", "Suave"), en_es("Sharp (nearest)", "Nítido (vecino más cercano)")},
+               [](int v) { s.draft.upscale_sharp = v; }, ini("UpscaleFilter"));
+    Row &row = r.back();
+    // (the 3D resolution's row isn't there either: FSRQuality sets the size. Where FSR can't run, g_fsr_unavailable, its
+    // quality's size is scaled up plainly, and this filter does it: fsr.c plain_fallback)
+    if (s.draft.fsr && !s.draft.low_end && !g_fsr_unavailable) {
+        row.enabled = false;
+        row.value = "FSR";
+    }
+#ifdef __ANDROID__
+    row.help = en_es(
+        "How the 3D picture is scaled up to the screen when the 3D resolution is below 100%. Smooth blends its pixels: "
+        "softer, as before. Sharp (nearest) makes each of its pixels a sharp block of the screen's: crisp, but blocky; it "
+        "looks most even at 50%, where each pixel becomes exactly 2x2. Without Low-end mode the HUD and the text are part "
+        "of that smaller picture, so they get the same filter; with Low-end mode they are drawn over it as before. Not "
+        "used with FSR, which rebuilds the picture itself, except on a GPU where FSR can't run (Vulkan 1.1): there it scales "
+        "up the FSR quality's size. It changes nothing at 100%, costs next to nothing, and works with "
+        "MSAA, FXAA, the Colour page, HDR and frame generation.",
+        "Cómo se agranda la imagen 3D hasta la pantalla cuando la resolución 3D está por debajo de 100%. "
+        "Suave mezcla sus píxeles: más suave, como antes. Nítido (vecino más cercano) hace de cada "
+        "uno de sus píxeles un bloque nítido de la pantalla: definido, pero en bloques; se ve más parejo a "
+        "50%, donde cada píxel queda justo en 2x2. Sin el modo gama baja, el HUD y los textos son parte de esa "
+        "imagen más chica y llevan el mismo filtro; con el modo gama baja se dibujan encima como siempre. No se usa "
+        "con FSR, que reconstruye la imagen él mismo, salvo en una GPU donde FSR no puede andar (Vulkan 1.1): ahí agranda el "
+        "tamaño de la calidad de FSR. A 100% no cambia nada, casi no cuesta nada y funciona con MSAA, "
+        "FXAA, la página Color, HDR y la generación de cuadros.");
+#else
+    row.help = en_es(
+        "How the 3D picture is scaled up to the screen when it is smaller (3D resolution below 100%, or a Custom render "
+        "resolution below the screen's). Smooth blends its pixels: softer, as before. Sharp (nearest) makes each of its "
+        "pixels a sharp block of the screen's: crisp, but blocky; it looks most even at 50%, where each pixel becomes "
+        "exactly 2x2. The HUD and the text stay sharp at full resolution over it (with a Custom render resolution they "
+        "are part of the picture and get the same filter). Not used with FSR, which rebuilds the picture itself. It costs "
+        "next to nothing, and works with MSAA, FXAA, the Colour page, HDR and frame generation.",
+        "Cómo se agranda la imagen 3D hasta la pantalla cuando es más chica (resolución 3D por debajo de "
+        "100%, o una resolución de renderizado Personalizada menor que la de la pantalla). Suave mezcla sus "
+        "píxeles: más suave, como antes. Nítido (vecino más cercano) hace de cada uno de sus "
+        "píxeles un bloque nítido de la pantalla: definido, pero en bloques; se ve más parejo a 50%, "
+        "donde cada píxel queda justo en 2x2. El HUD y los textos siguen nítidos a resolución completa "
+        "encima (con una resolución de renderizado Personalizada son parte de la imagen y llevan el mismo filtro). No "
+        "se usa con FSR, que reconstruye la imagen él mismo. Casi no cuesta nada y funciona con MSAA, FXAA, la "
+        "página Color, HDR y la generación de cuadros.");
+#endif
+}
+void reset_graphics_35() { s.draft.upscale_sharp = config_defaults().upscale_sharp; }
+MENU_ENTRY("graphics", 35, rows_graphics_35, reset_graphics_35);
 void rows_graphics_40(std::vector<Row> &r) { add_bool(r, "shadows", "Shadows", &s.draft.shadows, ini("Shadows")); }
 void reset_graphics_40() { s.draft.shadows = config_defaults().shadows; }
 MENU_ENTRY("graphics", 40, rows_graphics_40, reset_graphics_40);
@@ -4394,7 +4447,8 @@ const PhoneHelp PHONE_HELP[] = {
     {"DrawDistance", "How far away people in towns are drawn: 1 is the game's distance, 2 twice as far, 0 no limit.",
      "Hasta qué distancia se dibuja a la gente en los pueblos: 1 es la distancia del juego, 2 el doble, 0 sin límite."},
     {"Volume", "The game's volume.", "El volumen del juego."},
-    {"FSR", "Rebuilds the picture from a lower resolution. It needs a Vulkan 1.2 GPU.", "Reconstruye la imagen desde una resolución menor. Necesita una GPU con Vulkan 1.2."},
+    {"FSR", "Rebuilds the picture from a lower resolution. It needs a Vulkan 1.2 GPU: on Vulkan 1.1 the 3D picture is still drawn at the FSR quality's size and scaled up without rebuilding it (as the Upscale filter says), with the HUD and the text sharp at full size.",
+     "Reconstruye la imagen desde una resolución menor. Necesita una GPU con Vulkan 1.2: con Vulkan 1.1 la imagen 3D se dibuja igual al tamaño de la calidad de FSR y se agranda sin reconstruirla (como diga el Filtro de escalado), con el HUD y los textos nítidos a tamaño completo."},
     {"FSRQuality", "How low the resolution goes before the picture is rebuilt.", "Cuánto baja la resolución antes de reconstruir la imagen."},
     {"Sharpness", "How sharp FSR leaves the picture.", "Qué tan nítida deja FSR la imagen."},
     {"FaceButtons", "How A, B, X and Y are read on a controller. Position: as on the Switch. Label: by the letter printed on the button.",

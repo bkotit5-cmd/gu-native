@@ -7193,7 +7193,11 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     VkPipeline p = present_pipeline(kind);
     VkPipelineLayout layout = kind ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
-    VkDescriptorImageInfo ii = {vk_default_sampler(true), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
+    // ([Display] UpscaleFilter Sharp: a 3D picture smaller than the screen that is the game's own frame, its HUD in it - a
+    // phone without Low-end mode, a smaller RenderResolution - scaled up by its nearest pixels. With the HUD's picture at
+    // the screen's size over it, fsr.c's plain scaling did that and this stays linear; FSR: never)
+    const bool sharp = !g_fsr_on && g_scaled_3d && config_live_upscale_sharp();
+    VkDescriptorImageInfo ii = {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
     VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
     vkUpdateDescriptorSets(g_vk.dev, 1, &w, 0, NULL);

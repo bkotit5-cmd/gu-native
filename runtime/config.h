@@ -198,6 +198,9 @@ typedef struct {
                               // screen's peak (0: half of the way)
     int frame_gen;            // [Graphics] FrameGen: a made-up picture between each two of the game's, at half the display's
                               // rate or less (nvn/vulkan/framegen.c); off by default (0: nothing in CONFIG_DEFAULT_VALUES)
+    int upscale_sharp;        // [Display] UpscaleFilter (1.0.1, gu-native #247): a 3D picture smaller than the screen scaled
+                              // up by its nearest pixels (Sharp, 1) instead of linearly (Smooth, 0: the default, as before);
+                              // FSR off only (nvn/vulkan/fsr.c scale_to_stand, exec.c vk_present_draw)
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -252,6 +255,10 @@ extern float g_fov_scale;          // boot diagnostic value; camera_fovy reads c
 extern uint32_t g_ui_size[2];      // the game's 2D canvas size (tools/gen.py PATCHES: 0xdbcd48, 0xdbcd54)
 extern float g_ui_anchor_aspect;   // the HUD's width / height, 16:9 .. g_render_aspect (nvn/vulkan/exec.c)
 extern uint32_t g_fsr_output[2];   // FSR on: the size it upscales to (what g_render_size would be without it), else 0
+extern const char *g_fsr_unavailable;  // FSR chosen but it can't run on this GPU (nvn/vulkan/device.c, fsr.c): why; NULL
+                                   // otherwise (its quality's 3D size is then scaled up plainly, fsr.c plain_fallback)
+extern int g_scaled_3d;            // FSR off and the 3D picture smaller than at 100% (RenderScale, a smaller RenderResolution):
+                                   // what [Display] UpscaleFilter scales up (config_load)
 extern float g_fsr_lod_bias;       // FSR on: texture LOD bias for the lower render size, log2(render / output); else 0
 extern const char *g_fsr4_fallback;  // Upscaler = FSR4 but FSR 3.1 runs: why, for the settings panel (nvn/vulkan/fsr4.c); else NULL
 extern const char *g_xess_fallback;  // Upscaler = XeSS but FSR 3.1 runs: why, for the settings panel (nvn/vulkan/xess.c); else NULL
@@ -345,6 +352,8 @@ int config_live_pause_menu(void);       // [Application] PauseInMenu
 int config_live_shadows(void);          // [Performance] Shadows
 int config_live_bloom(void);            // [Performance] Bloom
 int config_live_frame_gen(void);        // [Graphics] FrameGen (nvn/vulkan/framegen.c)
+int config_live_upscale_sharp(void);    // [Display] UpscaleFilter: 1 Sharp (nvn/vulkan/fsr.c, exec.c)
+void config_upscale_test(int sharp);    // (tests: MHGU_CONTROL "upscale 0|1") as if saved, until the next save
 int config_live_grass(void);            // [Performance] Grass
 int config_live_effects(void);          // [Performance] Effects
 int config_live_reverb(void);           // [Audio] Reverb

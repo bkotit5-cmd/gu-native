@@ -788,6 +788,7 @@ static void create_device(void) {
     if (!g_vk.api12 && g_config.fsr) {
         LOG("[vk] FSR needs Vulkan 1.2: off\n");
         g_config.fsr = 0;
+        g_fsr_unavailable = "Vulkan 1.1";  // (its quality's 3D size scaled up plainly: fsr.c vk_fsr_init)
     }
     ext[n_ext++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     bool mirror_ext = !g_vk.api12 && has_ext(ep, ne, VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);  // (in 1.2: a feature)
