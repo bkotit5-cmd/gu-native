@@ -1816,6 +1816,7 @@ static bool ui_scissor_mid;    // wider than 16:9: the draw being set up is a pi
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
 static bool ui_window_pass;  // and one of a menu's windows (not the chat's log or the Quest Complete stamp, drawn there too)
 static uint64_t ui_window_frame;  // the frame (g_present_count) that drew one of a menu's windows last, 0 none yet
+static uint64_t ui_panel_frame;   // and one of layer 100's stretched panels (the multiplayer menu's, the hub form's), 0 none
 // The HUD quads this pass drew last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left /
 // 1 right / 2 centre): a model preview follows the window drawn over it (ui_preview_map)
 #define UI_RECENT 256
@@ -4830,7 +4831,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     } else if (fabsf(pos_z - 100.0f) < 0.5f) {
                         // (a window on this layer, the multiplayer menu or the hub's form: a stretched panel, which the
                         // HUD's parts here never are, in a hunt: the touch controls' menu detection)
-                        if (fabsf(m[0]) > 2.0f && fabsf(m[5]) > 2.0f) ui_menu_drawn();
+                        if (fabsf(m[0]) > 2.0f && fabsf(m[5]) > 2.0f) ui_menu_drawn(), ui_panel_frame = g_present_count;
                         // 100.0: Hunter Arts HUD and bottom right prompts (y > 600) -> Bottom anchor
                         // Target cam selector (right edge, y 42..82: x > 1000, y < 360) -> Top anchor, so it stays by the minimap.
                         // (Windows centered on this layer, x 640, must stay one piece: they keep the Bottom anchor.)
@@ -4854,9 +4855,17 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // y 192..522), keep the middle 16:9 too: Right, at 21:9 / Edges they sat right of the middle (GU#219;
                         // RG406V, Edges at 1600:720: 128 of the canvas's units). A town's prompts at the bottom right (x 1102..,
                         // y 640..) stay at the edge; a hunt's pieces (no town's update just now) as before
-                        else if (!ui_meownster_pass && pos_x < 1000.0f && pos_y >= 10.0f && pos_y < 600.0f &&
-                                 plat_now_ns() - g_town_ns < 500000000ull)
+                        // With one of this layer's stretched panels drawn in this frame or the two before (the multiplayer
+                        // menu, the Create Hub form, the hub list: x 782..1254, y 56..486) all of the window keeps the
+                        // middle: its half right of x 1000 (the panel's right part and frame, the form's values, its page
+                        // counter) went Right while the rest stayed, and the window came apart with Edges / 21:9 (GU#219,
+                        // Discord; a hudtrace on the PC at 2520x1080, Edges: x 1018 and 1254 "RT", 784 "CB"). The town's
+                        // prompts below y 600 stay at the edge
+                        else if (!ui_meownster_pass && pos_y >= 10.0f && pos_y < 600.0f && plat_now_ns() - g_town_ns < 500000000ull &&
+                                 (pos_x < 1000.0f || (ui_panel_frame && g_present_count - ui_panel_frame <= 2))) {
                             anchor = ANCHOR_CENTER;
+                            if (pos_x >= 1000.0f) vanchor = V_BOTTOM;  // (as the window's left part: one piece)
+                        }
                         // Touch controls (runtime/touch.cpp): the hunt's Hunter Arts panels (x 726..842, y 560..720: up
                         // to three rows) to the top right, the target camera's icons (target_piece) left of them
                         // (not a stretched panel: the multiplayer menu's, the hub form's). Not below the canvas: a
