@@ -28,6 +28,7 @@
 #include <time.h>
 
 #include "../config.h"
+#include "../diag.h"
 #include "../hle.h"
 #include "../net/discord.h"
 #include "../net/net.h"
@@ -165,7 +166,46 @@ static void area_log(void) {
     int zone = LD8(h + PL_ZONE);
     if (zone > 31 || (zone == last_zone && stage == last_stage)) return;
     last_zone = zone, last_stage = stage;
-    LOG("[area] m%02u%c area %d\n", stage % 100, stage >= 100 ? 'n' : 'd', zone);
+    LOG("[area] m%02u%c area %d (at %s)\n", stage % 100, stage >= 100 ? 'n' : 'd', zone, diag_clock());
+}
+
+// ---- [place] (1.0.1) where the game is, at each change, with the session's time: a town (its name, the Hub online or
+// not), a quest (its number, map and time of day), the menus or a load. With [area], a log tells where each crash, black
+// screen or slowdown began without asking the player. Once a second, a few loads; written only when it changes.
+static void place_log(void) {
+    static int last = -3;
+    static uint32_t last_quest;
+    static uint64_t since;
+    uint32_t gc = LD32(G_GAMECONTROL), sp = LD32(G_SPLAYER);
+    uint32_t slot = sane(gc) ? LD32(gc + GC_SLOT) : 0;
+    uint32_t pl = sane(sp) && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0, pd = sane(pl) ? LD32(pl + PL_DATA) : 0;
+    uint32_t sq = LD32(G_SQUEST), qd = sane(sq) ? LD32(sq + 0xa4) : 0;
+    int town = sane(gc) ? LD8(gc + GC_TOWN) : -1;
+    uint32_t quest = town == TOWN_NONE && sane(qd) ? LD32(qd + 8) : 0;
+    int place = !sane(pd) ? -1 : town == TOWN_NONE ? (quest ? 100 : -2) : town;  // -1 no hunter, 100 a quest, -2 between
+    if (place != 100) quest = 0;  // (the quest's number counts only in it: a load that sets it is not a new place)
+    if (place == last && quest == last_quest) return;
+    uint64_t now = plat_now_ns();
+    char was[48] = "";
+    if (since) snprintf(was, sizeof was, ", after %.0f s", (now - since) / 1e9);
+    since = now;
+    last = place, last_quest = quest;
+    if (place == 100) {
+        uint32_t stage = LD8(qd + 0x10);
+        const char *map = stage % 100 < sizeof g_stages / sizeof *g_stages ? g_stages[stage % 100] : NULL;
+        LOG("[place] %s: quest %u, m%02u%c (%s)%s\n", diag_clock(), quest, stage % 100, stage >= 100 ? 'n' : 'd',
+            map ? map : "?", was);
+    } else if (place >= 0) {
+        const char *name = town < (int)(sizeof g_towns / sizeof *g_towns) ? g_towns[town] : NULL;
+        bool hub = town == 0 || town == 7;
+        int party = 0, party_max = 0;
+        char id[40], online[48] = "";
+        if (hub && ldn_party(&party, &party_max, id, sizeof id)) snprintf(online, sizeof online, " (online, %d of %d)", party, party_max);
+        else if (hub) snprintf(online, sizeof online, " (offline)");
+        LOG("[place] %s: %s%s%s\n", diag_clock(), name ? name : "a town", online, was);
+    } else {
+        LOG("[place] %s: %s%s\n", diag_clock(), place == -1 ? "no hunter (the title, the menus or a load)" : "between places", was);
+    }
 }
 
 // ---- once a second, from the game's input polling (the area's line above: every poll)
@@ -190,6 +230,11 @@ int presence_town(void) {
 
 void presence_tick(void) {
     area_log();
+    {  // (once a second, as Discord's below; before its early return on Android)
+        static uint64_t next_place;
+        uint64_t t = plat_now_ns();
+        if (t >= next_place) next_place = t + TICK_NS, place_log();
+    }
 #ifdef __ANDROID__
     if (!discord_running()) return;  // (MHGU_PERF_NODISCORD: nobody to tell)
 #endif

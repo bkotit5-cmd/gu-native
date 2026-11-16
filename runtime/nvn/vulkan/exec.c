@@ -33,6 +33,7 @@
 #include <time.h>
 #include <unistd.h>  // ftruncate (mingw pulls it in through another header; POSIX does not)
 
+#include "../../diag.h"
 #include "../../kernel.h"
 #include "fsr.h"
 #include "shaders.h"
@@ -7403,6 +7404,7 @@ void backend_execute(uint64_t handle) {
     uint64_t now = plat_now_ns();
     if (vk_frame_counter() != frame) {  // (the first submission of each frame: the longest gap is a stutter)
         if (frame_t && now - frame_t > stat_frame_max) stat_frame_max = now - frame_t;
+        if (frame_t) diag_frame_interval(now - frame_t);  // (the minute's percentiles, below: runtime/diag.c)
         frame = vk_frame_counter(), frame_t = now;
     }
     // (1.0.1, without MHGU_VK_STATS: its counters are never reset then) once a minute, what the frames cost this thread
@@ -7410,18 +7412,29 @@ void backend_execute(uint64_t handle) {
     // limits the rate: a GPU slowed by the heat), the vertex cache's copies (whole ranges again and again when what the
     // frames draw from no longer fits) and the textures'. With the [perf] heat line, a player's "the FPS fall after a
     // while" (M10 of 1.0) shows its cause in the log.
-    static uint64_t m_t, m_frame, m_exec, m_wait, m_vcw, m_vcp, m_vcfull, m_copy, m_tex;
+    // (1.0.1, diag) and with the session's time, the frames' intervals (p50 / p90 / p99 / the longest: a minute of 30 FPS
+    // with stutters looks like one without in a count of frames), the shaders and pipelines built in the minute and the
+    // draws left out for one not built yet, the things that make a first visit to an area stutter
+    static uint64_t m_t, m_frame, m_exec, m_wait, m_vcw, m_vcp, m_vcfull, m_copy, m_tex, m_skipped, m_skipframes;
+    static int m_compiles;
     if (!stats && now - m_t >= 60000000000ull) {
         uint64_t frames = vk_frame_counter() - m_frame;
+        int compiles = atomic_load_explicit(&stat_compiles, memory_order_relaxed);
+        char intervals[160];
+        diag_frame_summary(intervals, sizeof intervals);
         if (m_t && frames)
-            LOG("[vk] the minute: %llu frames; translating %.1f ms a frame, waiting for the GPU %.1f ms a frame; copied: vertex "
+            LOG("[vk] the minute (%s): %llu frames, %s; translating %.1f ms a frame, waiting for the GPU %.1f ms a frame; "
+                "built %d shaders and pipelines, %llu draws left out for one not ready (in %llu frames); copied: vertex "
                 "cache %.0f MB whole ranges, %.0f MB written pages (%llu draws past its most), %.0f MB in all, textures %.0f MB (into images)\n",
-                (unsigned long long)frames, (stat_exec_ns - m_exec) / 1e6 / frames, (stat_wait_ns - m_wait) / 1e6 / frames,
+                diag_clock(), (unsigned long long)frames, *intervals ? intervals : "no intervals",
+                (stat_exec_ns - m_exec) / 1e6 / frames, (stat_wait_ns - m_wait) / 1e6 / frames, compiles - m_compiles,
+                (unsigned long long)(stat_skip_prog + stat_skip_pipe - m_skipped), (unsigned long long)(stat_skip_frames - m_skipframes),
                 (stat_vc_whole_bytes - m_vcw) / 1048576.0, (stat_vc_pages_bytes - m_vcp) / 1048576.0,
                 (unsigned long long)(stat_vc_full - m_vcfull), (stat_copy_bytes - m_copy) / 1048576.0,
                 (stat_img_bytes - m_tex) / 1048576.0);
         m_t = now, m_frame = vk_frame_counter(), m_exec = stat_exec_ns, m_wait = stat_wait_ns, m_vcw = stat_vc_whole_bytes;
         m_vcp = stat_vc_pages_bytes, m_vcfull = stat_vc_full, m_copy = stat_copy_bytes, m_tex = stat_img_bytes;
+        m_compiles = compiles, m_skipped = stat_skip_prog + stat_skip_pipe, m_skipframes = stat_skip_frames;
     }
     if (stats && now - last > 2000000000ull) {
         last = now;

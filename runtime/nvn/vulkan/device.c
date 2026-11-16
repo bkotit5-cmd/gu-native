@@ -600,11 +600,111 @@ static void one_compiler_install(void) {
 #endif
 }
 
+// (1.0.1, diag) The device as a log someone else reads needs it, once at the start: its vendor and device ids, the
+// driver's version as its maker numbers it, the driver's own name and build text (VK_KHR_driver_properties / Vulkan 1.2:
+// an Adreno's "Driver Build: ..., Date: ..." line tells a system driver from a newer one), its conformance, the pipeline
+// cache's UUID (a driver update makes the saved cache useless), the memory heaps and types, the core features the
+// renderer could use that this GPU lacks, and every device extension (a player's report then needs no second log to
+// know whether the driver has one). A few calls at the start, nothing per frame.
+static const char *vendor_name(uint32_t v) {
+    switch (v) {
+    case 0x5143: return "Qualcomm";
+    case 0x13B5: return "ARM";
+    case 0x1010: return "Imagination";
+    case 0x10DE: return "NVIDIA";
+    case 0x1002: return "AMD";
+    case 0x8086: return "Intel";
+    case 0x144D: return "Samsung";
+    case 0x19E5: return "Huawei";
+    case 0x1AE0: return "Google";
+    case 0x10005: return "Mesa";
+    default: return "?";
+    }
+}
+
+static void log_device_info(VkExtensionProperties *ep, uint32_t ne) {
+    const VkPhysicalDeviceProperties *p = &g_vk.props;
+    uint32_t v = p->driverVersion;
+    char ver[48];
+    if (p->vendorID == 0x10DE)
+        snprintf(ver, sizeof ver, "%u.%u.%u", v >> 22, (v >> 14) & 0xff, (v >> 6) & 0xff);
+#ifdef _WIN32
+    else if (p->vendorID == 0x8086)
+        snprintf(ver, sizeof ver, "%u.%u", v >> 14, v & 0x3fff);
+#endif
+    else
+        snprintf(ver, sizeof ver, "%u.%u.%u", VK_API_VERSION_MAJOR(v), VK_API_VERSION_MINOR(v), VK_API_VERSION_PATCH(v));
+    static const char *const types[] = {"other", "integrated", "discrete", "virtual", "CPU"};
+    LOG("[vk] device: %s, vendor 0x%x (%s), device 0x%x, %s, api %u.%u.%u, driver 0x%x (%s)\n", p->deviceName, p->vendorID,
+        vendor_name(p->vendorID), p->deviceID, p->deviceType < 5 ? types[p->deviceType] : "?", VK_API_VERSION_MAJOR(p->apiVersion),
+        VK_API_VERSION_MINOR(p->apiVersion), VK_API_VERSION_PATCH(p->apiVersion), v, ver);
+    VkPhysicalDeviceDriverProperties drv = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    bool have_drv = p->apiVersion >= VK_API_VERSION_1_2 || has_ext(ep, ne, "VK_KHR_driver_properties");
+    VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = have_drv ? &drv : NULL};
+    vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
+    if (have_drv)
+        LOG("[vk] driver: id %d, \"%.*s\", \"%.*s\", conformance %u.%u.%u.%u\n", (int)drv.driverID,
+            (int)sizeof drv.driverName, drv.driverName, (int)sizeof drv.driverInfo, drv.driverInfo, drv.conformanceVersion.major,
+            drv.conformanceVersion.minor, drv.conformanceVersion.subminor, drv.conformanceVersion.patch);
+    else
+        LOG("[vk] driver: no driver properties (neither Vulkan 1.2 nor VK_KHR_driver_properties)\n");
+    char uuid[2 * VK_UUID_SIZE + 1];
+    for (int i = 0; i < VK_UUID_SIZE; i++) snprintf(uuid + 2 * i, 3, "%02x", p->pipelineCacheUUID[i]);
+    VkPhysicalDeviceMemoryProperties mp;
+    vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &mp);
+    char line[1024];
+    int o = snprintf(line, sizeof line, "[vk] pipeline cache UUID %s; memory heaps:", uuid);
+    for (uint32_t h = 0; h < mp.memoryHeapCount && o < (int)sizeof line - 64; h++)
+        o += snprintf(line + o, sizeof line - o, "%s %u: %llu MB%s", h ? "," : "", h, (unsigned long long)(mp.memoryHeaps[h].size >> 20),
+                      mp.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? " device local" : "");
+    o += snprintf(line + o, sizeof line - o, "; types (heap, DL device local, HV host visible, HC coherent, CA cached, LA lazy):");
+    for (uint32_t t = 0; t < mp.memoryTypeCount && o < (int)sizeof line - 32; t++) {
+        VkMemoryPropertyFlags fl = mp.memoryTypes[t].propertyFlags;
+        o += snprintf(line + o, sizeof line - o, " %u:%u%s%s%s%s%s", t, mp.memoryTypes[t].heapIndex,
+                      fl & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ? " DL" : "", fl & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? " HV" : "",
+                      fl & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ? " HC" : "", fl & VK_MEMORY_PROPERTY_HOST_CACHED_BIT ? " CA" : "",
+                      fl & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT ? " LA" : "");
+    }
+    LOG("%s\n", line);
+    VkPhysicalDeviceFeatures f;
+    vkGetPhysicalDeviceFeatures(g_vk.phys, &f);
+    struct { const char *name; VkBool32 on; } feats[] = {
+        {"geometryShader", f.geometryShader}, {"tessellationShader", f.tessellationShader}, {"depthClamp", f.depthClamp},
+        {"depthBiasClamp", f.depthBiasClamp}, {"fillModeNonSolid", f.fillModeNonSolid}, {"wideLines", f.wideLines},
+        {"largePoints", f.largePoints}, {"samplerAnisotropy", f.samplerAnisotropy}, {"textureCompressionBC", f.textureCompressionBC},
+        {"textureCompressionETC2", f.textureCompressionETC2}, {"textureCompressionASTC_LDR", f.textureCompressionASTC_LDR},
+        {"independentBlend", f.independentBlend}, {"dualSrcBlend", f.dualSrcBlend}, {"logicOp", f.logicOp},
+        {"multiDrawIndirect", f.multiDrawIndirect}, {"drawIndirectFirstInstance", f.drawIndirectFirstInstance},
+        {"occlusionQueryPrecise", f.occlusionQueryPrecise}, {"shaderInt64", f.shaderInt64}, {"shaderInt16", f.shaderInt16},
+        {"shaderFloat64", f.shaderFloat64}, {"fragmentStoresAndAtomics", f.fragmentStoresAndAtomics},
+        {"vertexPipelineStoresAndAtomics", f.vertexPipelineStoresAndAtomics}, {"shaderClipDistance", f.shaderClipDistance},
+        {"shaderCullDistance", f.shaderCullDistance}, {"imageCubeArray", f.imageCubeArray}, {"sampleRateShading", f.sampleRateShading},
+        {"shaderStorageImageExtendedFormats", f.shaderStorageImageExtendedFormats}, {"robustBufferAccess", f.robustBufferAccess},
+        {"fullDrawIndexUint32", f.fullDrawIndexUint32}, {"depthBounds", f.depthBounds}};
+    o = snprintf(line, sizeof line, "[vk] core features this GPU lacks:");
+    int lacks = 0;
+    for (size_t i = 0; i < sizeof feats / sizeof *feats && o < (int)sizeof line - 48; i++)
+        if (!feats[i].on) o += snprintf(line + o, sizeof line - o, " %s", feats[i].name), lacks++;
+    LOG("%s%s\n", line, lacks ? "" : " none of those the renderer looks at");
+    o = snprintf(line, sizeof line, "[vk] device extensions (%u):", ne);
+    for (uint32_t i = 0; i < ne; i++) {
+        const char *name = ep[i].extensionName;
+        if (!strncmp(name, "VK_", 3)) name += 3;  // (shorter lines: VK_ left out)
+        if (o + strlen(name) + 2 > 230) {
+            LOG("%s\n", line);
+            o = snprintf(line, sizeof line, "[vk]   ");
+        }
+        o += snprintf(line + o, sizeof line - o, " %s", name);
+    }
+    LOG("%s\n", line);
+}
+
 static void create_device(void) {
     uint32_t ne = 0;
     vkEnumerateDeviceExtensionProperties(g_vk.phys, NULL, &ne, NULL);
     VkExtensionProperties *ep = calloc(ne, sizeof *ep);
     vkEnumerateDeviceExtensionProperties(g_vk.phys, NULL, &ne, ep);
+    log_device_info(ep, ne);
     const char *ext[32];
     uint32_t n_ext = 0;
     if (!g_vk.api12 && g_config.fsr) {

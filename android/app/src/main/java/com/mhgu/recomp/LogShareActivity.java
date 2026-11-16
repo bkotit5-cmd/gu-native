@@ -35,6 +35,8 @@ import java.util.Locale;
  * Corre en su propio proceso (":share", como LogProvider), porque el del juego muere tras un error y lo que comparte
  * tiene que seguir disponible para la app que lo reciba. Junta en un archivo los datos del teléfono, el registro de esta
  * sesión y el de la anterior: el jugador elige a quién enviarlo; la app no manda nada por su cuenta.
+ * (1.0.1) Diag.bundle arma el archivo, en un hilo propio: el teléfono y la app ahora, cómo terminaron sus últimos
+ * procesos, los ajustes, los mods, las dos sesiones anteriores, el último armado y el registro del sistema.
  */
 public class LogShareActivity extends Activity {
     static final String EXTRA_CRASH = "crash";
@@ -45,6 +47,9 @@ public class LogShareActivity extends Activity {
     private static final int MAX_LOG = 2 << 20;  // (the end of each log: a debug session's can be large)
 
     private boolean es;
+    private Thread systemLines;  // (after a crash) addSystemLines
+    private Button shareButton;
+    private boolean sharing;
 
     private int dp(int v) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
@@ -84,6 +89,10 @@ public class LogShareActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         es = "es".equals(Locale.getDefault().getLanguage());
         boolean crash = getIntent().getBooleanExtra(EXTRA_CRASH, false);
+        if (crash && saved == null) {  // (once: not again when the screen turns)
+            systemLines = new Thread(this::addSystemLines, "mhgu-system-log");
+            systemLines.start();
+        }
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -102,18 +111,24 @@ public class LogShareActivity extends Activity {
                                 : "One of the game's files is shorter than it should be, or damaged: it was cut short when it "
                                   + "was copied. Copy the romfs folder to the device again. In the game, System › Your game › "
                                   + "Verify game files names it.", 15, GOLD, false), gap);
-        box.addView(text(es ? "El registro explica qué pasó y en qué teléfono. Puedes enviarlo a quien te esté ayudando: "
-                              + "se abre la lista de apps y tú eliges a dónde va. No lleva tu partida, pero puede "
-                              + "incluir la dirección de tu red local si jugaste en LAN."
-                            : "The log says what happened and on which phone. You can send it to whoever is helping "
-                              + "you: the list of apps opens and you choose where it goes. Your save is not in it, but "
-                              + "it can hold your local network address if you played over LAN.", 15, CREAM, false), gap);
+        box.addView(text(es ? "El registro explica qué pasó y en qué teléfono: el modelo y su sistema, la memoria, la batería y "
+                              + "la temperatura, el tipo de red (Wi-Fi o datos, nunca su nombre), los ajustes y los mods de "
+                              + "la app, y las últimas sesiones. Puedes enviarlo a quien te esté ayudando: se abre la lista "
+                              + "de apps y tú eliges a dónde va. No lleva tu partida, cuentas, correo ni ubicación, pero "
+                              + "puede incluir la dirección de tu red local si jugaste en LAN."
+                            : "The log says what happened and on which phone: its model and system, the memory, the "
+                              + "battery and the heat, the network's kind (Wi-Fi or mobile data, never its name), the app's "
+                              + "settings and mods, and the last sessions. You can send it to whoever is helping you: the "
+                              + "list of apps opens and you choose where it goes. Your save, accounts, e-mail and location "
+                              + "are not in it, but it can hold your local network address if you played over LAN.",
+                         15, CREAM, false), gap);
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(18), 0, 0);
         Button share = button(es ? "Compartir registro" : "Share log", true);
         share.setOnClickListener(v -> share());
+        shareButton = share;
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
         size.setMargins(dp(8), 0, dp(8), 0);
         row.addView(share, size);
@@ -134,34 +149,82 @@ public class LogShareActivity extends Activity {
         setContentView(scroll);
     }
 
+    // (1.0.1) the file is made on a thread of its own (the system log, the folders' sizes and the snapshot take a moment),
+    // then the list of apps opens
     private void share() {
-        File report = LogProvider.report(this);
-        try (OutputStream out = new FileOutputStream(report)) {
-            out.write(device().getBytes(StandardCharsets.UTF_8));
-            File home = AppHome.home(this);
-            append(out, new File(home, "log.txt"), "this session");
-            append(out, new File(home, "log_prev.txt"), "the session before");
-        } catch (IOException e) {
-            Log.e(TAG, "share log: " + e);
-        }
-        Uri uri = LogProvider.uri();
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "MHGU log");
-        send.putExtra(Intent.EXTRA_STREAM, uri);
-        send.setClipData(ClipData.newRawUri("MHGU log", uri));
-        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivity(Intent.createChooser(send, es ? "Compartir registro" : "Share log"));
+        if (sharing) return;
+        sharing = true;
+        final String label = shareButton.getText().toString();
+        shareButton.setEnabled(false);
+        shareButton.setText(es ? "Preparando…" : "Preparing…");
+        final boolean crash = getIntent().getBooleanExtra(EXTRA_CRASH, false);
+        new Thread(() -> {
+            waitSystemLines();
+            String header = device() + "share log: " + (crash ? "the error screen" : "from the settings") + ", "
+                            + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new java.util.Date()) + "\n";
+            File report;
+            try {
+                report = Diag.bundle(this, header);
+            } catch (Throwable t) {  // (never seen: the logs as before rather than no file)
+                Log.e(TAG, "share log: " + t);
+                report = Diag.plain(this, header, t);
+            }
+            final File shared = report;
+            runOnUiThread(() -> {
+                sharing = false;
+                shareButton.setEnabled(true);
+                shareButton.setText(label);
+                if (isFinishing() || isDestroyed()) return;
+                boolean zip = shared.getName().endsWith(".zip");
+                Uri uri = LogProvider.uri(zip);
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType(zip ? "application/zip" : "text/plain");
+                send.putExtra(Intent.EXTRA_SUBJECT, "MHGU log");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.setClipData(ClipData.newRawUri("MHGU log", uri));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(send, es ? "Compartir registro" : "Share log"));
+            });
+        }, "mhgu-share").start();
     }
 
-    private static void append(OutputStream out, File log, String title) throws IOException {
-        out.write(("\n===== " + title + " (" + log.getName() + ", " + log.length() + " bytes) =====\n").getBytes(StandardCharsets.UTF_8));
-        if (!log.exists()) return;
-        try (FileInputStream in = new FileInputStream(log)) {
-            if (log.length() > MAX_LOG) in.skip(log.length() - MAX_LOG);
-            byte[] buf = new byte[1 << 16];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+    /**
+     * After a crash: the system log's warnings and errors of this app (an app reads only its own) at the end of the
+     * crashed session's log.txt, once the game's process is gone, as the MH4U port does. They say what the game's own
+     * report can't: why the allocator or the C++ library stopped it, or the GPU driver's own words.
+     */
+    private void addSystemLines() {
+        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        String game = getPackageName();
+        for (int i = 0; i < 30; i++) {  // (3 s at most)
+            boolean alive = false;
+            java.util.List<ActivityManager.RunningAppProcessInfo> running = am.getRunningAppProcesses();
+            if (running != null)
+                for (ActivityManager.RunningAppProcessInfo p : running) alive |= game.equals(p.processName);
+            if (!alive) break;
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+        java.util.List<String> lines = Diag.systemLog(this, 120, true);
+        StringBuilder s = new StringBuilder("\n===== the system log's errors of this app (logcat, the last ").append(lines.size()).append(") =====\n");
+        for (String l : lines) s.append(l).append('\n');
+        for (String l : Diag.exits(this, 2)) s.append(l).append('\n');
+        try (OutputStream out = new FileOutputStream(new File(AppHome.home(this), "log.txt"), true)) {
+            out.write(s.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            Log.e(TAG, "system log: " + e);
+        }
+    }
+
+    /** addSystemLines done (or 4 s gone): before the log is shared. */
+    private void waitSystemLines() {
+        if (systemLines == null) return;
+        try {
+            systemLines.join(4000);
+        } catch (InterruptedException ignored) {
         }
     }
 

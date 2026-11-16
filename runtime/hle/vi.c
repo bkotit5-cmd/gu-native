@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "../hle.h"
+#include "../diag.h"
 #include "../config.h"
 #include "../kernel.h"
 
@@ -136,13 +137,13 @@ void vi_menu_hold(bool on) {
         uint64_t frozen = plat_now_ns() - __atomic_load_n(&clock_held, __ATOMIC_RELAXED);
         clock_set(frozen ? frozen : 1, __atomic_load_n(&clock_held, __ATOMIC_RELAXED));
         __atomic_store_n(&menu_hold, 1, __ATOMIC_RELEASE);
-        LOG("[app] the game waits while the menu is open\n");
+        LOG("[app] %s: the game waits while the menu is open\n", diag_clock());
     } else if (!on && menu_hold) {
         uint64_t frozen = __atomic_load_n(&clock_frozen, __ATOMIC_RELAXED);
         clock_set(0, plat_now_ns() - frozen);  // (the clock goes on from where it stood)
         __atomic_store_n(&menu_hold, 0, __ATOMIC_RELEASE);
         pthread_cond_broadcast(&pause_cond);
-        LOG("[app] the game goes on\n");
+        LOG("[app] %s: the game goes on\n", diag_clock());
     }
     pthread_mutex_unlock(&pause_lock);
 }
