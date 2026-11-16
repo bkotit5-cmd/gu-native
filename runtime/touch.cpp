@@ -398,7 +398,8 @@ const float KNOB = .45f;             // the stick's knob, in its base's radius
 // port's touch.cpp
 const float RUN_ON = 1.6f, RUN_OFF = 1.45f, LOCK_AT = 2.4f, LOCK_R = .42f, LOCK_GRAB = .55f, LOCK_EDGE = .02f;
 const float LOCK_UP = .7f;  // (the thumb's way within about 45 degrees of straight up: the circle shows)
-const uint64_t RUN_X_WAIT = 400 * 1000000ull;  // (X pressed: no run's R until this long after: touch_input)
+const uint64_t RUN_X_WAIT = 400 * 1000000ull;  // (X pressed: no run's R until this long after, but for X + A in a run
+                                               // whose R was held this long already: touch_input)
 // The lock circle's middle, for a stick at (bx, by) of radius r on a screen h high
 ImVec2 lock_spot(float bx, float by, float r, float h) { return ImVec2(bx, std::max(by - LOCK_AT * r, LOCK_R * r + LOCK_EDGE * h)); }
 const float CAMERA_COUNTS = 1150.0f; // mouse counts for a drag the screen's height (hle/mousecam.c: 0.08 degrees each)
@@ -1337,6 +1338,7 @@ struct State {
     bool run_can;            // a lock could start now (StickRun, sheathed, no menu, the hunter played: the circle shows)
     bool rim;                // the thumb past the rim runs (RUN_ON, down to RUN_OFF)
     uint64_t run_x_until;    // an attack that draws the weapon (X) was pressed: no run's R until then (#151)
+    uint64_t run_t0;         // when the run's R began (held since: a sprint going on, which X + A doesn't stop)
     float fx, fy;            // the stick's thumb where it is (the knob stops at the rim)
     bool lock;               // the lock-on is on (hle/mousecam.c turns the hunt camera to the monster)
     uint64_t hunt_ns;        // when the hunt camera last ran (away 10 s: the lock-on goes off)
@@ -3127,6 +3129,7 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     if (s.run_lock && !s.run_can)
         run_end(s, !stick_run ? "StickRun off" : menu ? "the settings menu" : !visible || s.edit ? "the controls hidden or edited"
                  : s.menu ? "a menu of the game's" : s.drawn == 1 ? "the weapon out" : "the hunter not played");
+    bool ran = s.run;  // (the run's R in the last update that got to the end: below)
     s.run = false;
     // (while a menu is open the fingers are its mouse: nothing of theirs reaches the game or the menu's controller)
     if (menu) {
@@ -3221,7 +3224,12 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     // lifted on the lock circle above the stick, come from inside the rim while a lock can start, locks the run with a
     // click; it goes on forward (above) until run_end. StickRun Off: the Run button, while held. No run's R with X pressed
     // or just after: X draws the weapon, and R + X + A is another move (the Great Sword's guard from the sheath came out of
-    // a run and a draw attack: #151)
+    // a run and a draw attack: #151, the rim's R starting as the sheathe ended, in the same update as the X + A). But a
+    // run whose R was held RUN_X_WAIT already, a sprint going on, keeps it as X and A come together: R + X + A, as with a
+    // controller's R held through a sprint. It is the Charge Blade's draw into the axe, sheathed (X + A alone does nothing
+    // there): 0.1.8 had it from the rim's run, and from 0.1.9 the tap on the seam did nothing in a run (Discord, 1.0;
+    // PC, a Charge Blade in Striker: the rim's run and the seam, 0002:002 and nothing; with R kept, 0010:000). X alone
+    // still lets it go (a draw attack: with R held the same one, 0010:033)
     int drawn = s.drawn;
     static int drawn_was = -2;
     if (drawn != drawn_was) {
@@ -3247,11 +3255,16 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     for (const Finger &f : s.f) run_held |= f.kind == F_BUTTON && !f.done && f.ctl == C_RUN;
     run_held |= (s.latched >> C_RUN & 1) != 0;  // (held by a tap)
     bool want = s.run_lock || s.rim || (run_held && !stick_run && drawn != 1 && !s.menu);
-    if (*buttons & B(BTN_X)) s.run_x_until = now + RUN_X_WAIT;
-    s.run = want && now >= s.run_x_until;
+    const uint64_t XA = B(BTN_X) | B(BTN_A);
+    bool keep = ran && now - s.run_t0 >= RUN_X_WAIT && (*buttons & XA) == XA;
+    if ((*buttons & B(BTN_X)) && !keep) s.run_x_until = now + RUN_X_WAIT;
+    s.run = want && (keep || now >= s.run_x_until);
+    if (s.run && !ran) s.run_t0 = now;
     if (s.run) *buttons |= B(BTN_R);
-    static bool said_x, said_run;  // (the log: once a change, what held R said as it lets go too)
+    static bool said_x, said_run, said_keep;  // (the log: once a change, what held R said as it lets go too)
     static const char *said_why = "";
+    if (dbg && keep && s.run && !said_keep) rt_logf("[touch] run: R kept with X + A (a sprint: the game's R + X + A)\n");
+    said_keep = keep && s.run;
     if (dbg && want && !s.run && !said_x) rt_logf("[touch] run: no R while X draws the weapon\n");
     said_x = want && !s.run;
     if (s.run) said_why = s.run_lock ? "the lock" : s.rim ? "the stick's rim" : "the Run button";
