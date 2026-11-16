@@ -36,6 +36,27 @@ still share the log: a long press on the app's icon offers Share log (`res/xml/s
 it, and `adb shell am start -a android.intent.action.VIEW -f 0x1000c000 -n com.mhgu.recomp/.LogShareActivity` fires the same
 intent). The log's `[vk] limits` line says what the GPU allows (vertex streams, a stage's buffers and textures...).
 
+What a log carries (1.0.1, "ask for more than we think we need": one log should answer most questions):
+- At the start: `[device]` (the phone's build, security patch, kernel, ABIs, page size, CPU clusters with their cores and
+  clocks, memory and swap, the app folder's free space; on a PC Windows' version, the CPU, memory and disk), `[settings]`
+  (every setting not the default, and the MHGU_ variables set: `runtime/diag.c`), `[vk] device / driver / pipeline cache
+  UUID / core features this GPU lacks / device extensions` (`device.c log_device_info`), and from the Java side `[diag]`
+  lines (`Diag.java`: the app's signature - official or not -, who installed it, the versions seen, the screen, battery,
+  heat, power saving, standby bucket, game mode, the network's kind - never its name or an address -, the GPU the system
+  reports, and how the app's last processes ended, Android's ApplicationExitInfo: low memory, a crash, an ANR).
+- As it runs, with the session's time (`diag_clock`): `[place]` (a town, a quest and its map, the menus), `[area]`, `[app]`
+  (background and back, focus, the window's size, memory trimmed, thermal status, power saving, the network changing,
+  the menu holding the game), `[settings] ... changed` (each save), and once a minute `[vk] the minute` with the frames'
+  interval percentiles and the shaders built, `[mem]`, `[perf] heat`; once, `[app] build ids` (libmain, libmhgugame, the
+  GPU driver's: a backtrace's offsets symbolized with the very build).
+- A crash's report says when in the session and on which thread; a Java crash goes to `java_crash.txt`; Verify game files
+  leaves its verdict in `verify_last.txt`.
+- log.txt stays under 32 MB (past it the middle is cut, the first 4 MB and the latest lines kept); log_prev.txt and
+  log_prev2.txt are the two sessions before. Share log (`Diag.bundle`, on a thread of its own) sends the `[diag]` snapshot,
+  the settings file (names, keys and passwords hidden), the mods, cheats and plugins, the app's folder (names and sizes,
+  never the game's files), the three sessions' starts and ends, builder_log.txt, the system log's warnings and errors of
+  the app, the last ANR's trace; zipped past 6 MB. The PC's log writes the player's folder as %USERPROFILE%.
+
 ## Layout
 
 - `runtime/`: the host runtime. `touch.cpp` touch controls and editor, `settings_panel.cpp` the menu, `nvn/vulkan/` the renderer,

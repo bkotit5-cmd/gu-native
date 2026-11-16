@@ -1,6 +1,7 @@
 // Atomic INI persistence and live settings. Cold boot state is never mutated;
 // each consumer reads hot values atomically on its own thread.
 #include "config.h"
+#include "diag.h"
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <errno.h>
@@ -400,6 +401,7 @@ bool config_save(const Config *c, char *error, size_t error_size) {
 #endif
     }
     if (!ok) { remove(temp); return fail(error, error_size, "Could not save settings; the previous file was kept."); }
+    if (have_saved) diag_settings_changed(&saved, c);  // (the log: what changed, with the session's time)
     config_store_loaded(c);
     return true;
 }

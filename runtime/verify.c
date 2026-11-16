@@ -26,6 +26,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <SDL3/SDL.h>
@@ -703,6 +704,27 @@ static void *run(void *arg) {
 #endif
     if (todo_mods && problems == 0) add(&r, VL_TODO, "If the game fails, turn the mods off (Mods & Cheats › Mods) and try again.", NULL, NULL);
     LOG("[verify] %s: %d problem(s), %.1f s in all\n", cancelled ? "cancelled" : "done", problems, (plat_now_ns() - t0) / 1e9);
+    if (!cancelled) {  // (1.0.1, diag) verify_last.txt in the app's folder: the last check's verdict, which Share log takes
+        FILE *last = fopen("verify_last.txt", "w");
+        if (last) {
+            time_t now = time(NULL);
+            char when[32] = "?";
+            struct tm tmv;
+#ifdef _WIN32
+            if (localtime_s(&tmv, &now) == 0) strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tmv);
+#else
+            if (localtime_r(&now, &tmv)) strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tmv);
+#endif
+            fprintf(last, "Verify game files, %s: %d problem(s)\n", when, problems);
+            static const char *kinds[] = {"ok", "PROBLEM", "note", "file", "to do"};
+            for (int i = 0; i < r.n; i++) {
+                char line[700];
+                snprintf(line, sizeof line, r.l[i].text, r.l[i].a, r.l[i].b);
+                fprintf(last, "  %s: %s\n", r.l[i].kind < 5 ? kinds[r.l[i].kind] : "?", line);
+            }
+            fclose(last);
+        }
+    }
     order(&r);
     publish(&r, cancelled ? VERIFY_CANCELLED : VERIFY_DONE, problems);
     if (!cancelled && !overlay_menu_open()) {  // (the menu was closed meanwhile: the result over the game)

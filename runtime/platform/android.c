@@ -39,7 +39,9 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/ucontext.h>
+#include <sys/utsname.h>
 #include <asm/sigcontext.h>
 #include <time.h>
 #include <unistd.h>
@@ -610,16 +612,30 @@ bool plat_exe_path(char *buf, size_t size) {
 // the log goes to log.txt and plat_fatal_notice then points the player at it.
 static bool g_own_log;
 
+// (1.0.1, diag) log.txt never grows past LOG_CAP: past it, what came after its first LOG_KEEP bytes is cut and the log goes
+// on from a line that says so. The start (the phone, the GPU, the settings) and the latest lines (what led to an error)
+// stay; Share log takes the start and the end too, and a log of tens of MB was no use to anyone (Discord takes 25 MB).
+#define LOG_CAP (32ll << 20)
+#define LOG_KEEP (4ll << 20)
+
 static void *log_tee(void *arg) {
     plat_thread_name("logtee");
     struct { int fd; FILE *log; } *t = arg;
     char buf[4096], line[4096];
     size_t n = 0;
+    long long written = 0;
+    int cuts = 0;
     for (;;) {
         ssize_t r = read(t->fd, buf, sizeof buf);
         if (r <= 0) { if (r < 0 && errno == EINTR) continue; break; }
         fwrite(buf, 1, (size_t)r, t->log);
         fflush(t->log);
+        written += r;
+        if (written > LOG_CAP && ftruncate(fileno(t->log), LOG_KEEP) == 0 && fseek(t->log, LOG_KEEP, SEEK_SET) == 0) {
+            written = LOG_KEEP + fprintf(t->log, "\n[log] (cut %d) the lines after the first %lld MB up to here were left out: "
+                                                 "the log stays under %lld MB\n", ++cuts, LOG_KEEP >> 20, LOG_CAP >> 20);
+            fflush(t->log);
+        }
         for (ssize_t i = 0; i < r; i++) {
             if (buf[i] == '\n' || n == sizeof line - 1) {
                 line[n] = 0;
@@ -646,7 +662,9 @@ void plat_standalone(void) {
     // log.txt in the home folder, and every line to logcat as well (adb logcat -s MHGU): stderr goes to a pipe a
     // thread reads, writing each line to both.
     int fds[2];
-    rename("log.txt", "log_prev.txt");  // (kept: after a crash the share screen sends both)
+    // (kept: after a crash the share screen sends them; 1.0.1: two sessions back, so a crash's log outlives one more start)
+    rename("log_prev.txt", "log_prev2.txt");
+    rename("log.txt", "log_prev.txt");
     FILE *log = fopen("log.txt", "w");
     if (log && pipe(fds) == 0) {
         setvbuf(log, NULL, _IOLBF, 0);
@@ -797,6 +815,139 @@ void plat_fatal_notice_why(const char *why) {
 
 void plat_fatal_notice(void) { plat_fatal_notice_why(NULL); }
 
+// (1.0.1, diag) An ARM core's name by its implementer and part (/proc/cpuinfo), for the [device] cpus line
+static const char *core_name(unsigned impl, unsigned part) {
+    if (impl == 0x41) switch (part) {
+        case 0xd03: return "Cortex-A53"; case 0xd04: return "Cortex-A35"; case 0xd05: return "Cortex-A55";
+        case 0xd07: return "Cortex-A57"; case 0xd08: return "Cortex-A72"; case 0xd09: return "Cortex-A73";
+        case 0xd0a: return "Cortex-A75"; case 0xd0b: return "Cortex-A76"; case 0xd0d: return "Cortex-A77";
+        case 0xd41: return "Cortex-A78"; case 0xd44: return "Cortex-X1"; case 0xd46: return "Cortex-A510";
+        case 0xd47: return "Cortex-A710"; case 0xd48: return "Cortex-X2"; case 0xd4d: return "Cortex-A715";
+        case 0xd4e: return "Cortex-X3"; case 0xd80: return "Cortex-A520"; case 0xd81: return "Cortex-A720";
+        case 0xd82: return "Cortex-X4"; case 0xd85: return "Cortex-X925"; case 0xd87: return "Cortex-A725";
+        default: return NULL;
+    }
+    if (impl == 0x51) switch (part) {
+        case 0x800: return "Kryo 2xx Gold"; case 0x801: return "Kryo 2xx Silver"; case 0x802: return "Kryo 3xx Gold";
+        case 0x803: return "Kryo 3xx Silver"; case 0x804: return "Kryo 4xx Gold"; case 0x805: return "Kryo 4xx Silver";
+        default: return NULL;
+    }
+    return NULL;
+}
+
+static long sys_long(const char *path) {
+    FILE *f = fopen(path, "re");
+    long v = -1;
+    if (f) { if (fscanf(f, "%ld", &v) != 1) v = -1; fclose(f); }
+    return v;
+}
+
+static long meminfo_kb(const char *name) {
+    FILE *f = fopen("/proc/meminfo", "re");
+    if (!f) return -1;
+    char line[160];
+    long v = -1;
+    size_t len = strlen(name);
+    while (fgets(line, sizeof line, f))
+        if (!strncmp(line, name, len)) { v = atol(line + len); break; }
+    fclose(f);
+    return v;
+}
+
+// The rest of the phone for the log, once at the start (system properties, /proc and /sys: a few ms): its build and
+// security patch, kernel, ABIs, page size, the board, the system's GPU libraries and its updatable driver, low-RAM mode,
+// each CPU cluster (cores, kind, top clock), memory and swap, and the free storage where the app keeps its files
+static void log_device_more(void) {
+    static const char *const props[][2] = {
+        {"ro.build.version.security_patch", "security patch"}, {"ro.build.fingerprint", "build"},
+        {"ro.product.cpu.abilist", "ABIs"}, {"ro.board.platform", "board"}, {"ro.hardware.vulkan", "vulkan HAL"},
+        {"ro.hardware.egl", "EGL"}, {"ro.gfx.driver.0", "updatable GPU driver"}, {"ro.config.low_ram", "low RAM"},
+        {"ro.product.first_api_level", "first API level"}, {"ro.vendor.build.security_patch", "vendor patch"}};
+    char line[1200];
+    int o = snprintf(line, sizeof line, "[device] system:");
+    for (size_t i = 0; i < sizeof props / sizeof *props; i++) {
+        char v[PROP_VALUE_MAX] = "";
+        __system_property_get(props[i][0], v);
+        if (*v && o < (int)sizeof line - 40) o += snprintf(line + o, sizeof line - o, "%s %s %s", i ? ";" : "", props[i][1], v);
+    }
+    struct utsname u;
+    if (uname(&u) == 0) o += snprintf(line + o, sizeof line - o, "; kernel %s %s", u.release, u.machine);
+    snprintf(line + o, sizeof line - o, "; page size %ld KB", sysconf(_SC_PAGESIZE) >> 10);
+    fprintf(stderr, "%s\n", line);
+    // CPU clusters: a cpufreq policy per cluster, its cores (related_cpus) and its top clock; the cores' kind from /proc/cpuinfo
+    unsigned impl[32] = {0}, part[32] = {0};
+    FILE *ci = fopen("/proc/cpuinfo", "re");
+    if (ci) {
+        int cpu = -1;
+        char l[256];
+        while (fgets(l, sizeof l, ci)) {
+            if (!strncmp(l, "processor", 9)) { const char *c = strchr(l, ':'); cpu = c ? atoi(c + 1) : -1; }
+            else if (cpu >= 0 && cpu < 32 && !strncmp(l, "CPU implementer", 15)) { const char *c = strchr(l, ':'); if (c) impl[cpu] = (unsigned)strtoul(c + 1, NULL, 0); }
+            else if (cpu >= 0 && cpu < 32 && !strncmp(l, "CPU part", 8)) { const char *c = strchr(l, ':'); if (c) part[cpu] = (unsigned)strtoul(c + 1, NULL, 0); }
+        }
+        fclose(ci);
+    }
+    o = snprintf(line, sizeof line, "[device] cpus:");
+    int clusters = 0;
+    for (int p = 0; p < 32 && o < (int)sizeof line - 80; p++) {
+        char path[96], rel[64] = "";
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpufreq/policy%d/related_cpus", p);
+        FILE *f = fopen(path, "re");
+        if (!f) continue;
+        if (!fgets(rel, sizeof rel, f)) rel[0] = 0;
+        fclose(f);
+        rel[strcspn(rel, "\n")] = 0;
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpufreq/policy%d/cpuinfo_max_freq", p);
+        long top = sys_long(path);
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpufreq/policy%d/cpuinfo_min_freq", p);
+        long low = sys_long(path);
+        const char *name = p < 32 ? core_name(impl[p], part[p]) : NULL;
+        char kind[48];
+        if (name) snprintf(kind, sizeof kind, "%s", name);
+        else snprintf(kind, sizeof kind, "0x%x:0x%x", p < 32 ? impl[p] : 0, p < 32 ? part[p] : 0);
+        o += snprintf(line + o, sizeof line - o, "%s cores %s %s %ld-%ld MHz", clusters++ ? "," : "", rel, kind, low / 1000, top / 1000);
+    }
+    if (!clusters) snprintf(line + o, sizeof line - o, " no cpufreq policies readable");
+    fprintf(stderr, "%s\n", line);
+    struct statvfs vs;
+    char storage[96] = "?";
+    if (statvfs(".", &vs) == 0)  // (the app's home folder: the current one)
+        snprintf(storage, sizeof storage, "%llu MB free of %llu MB", (unsigned long long)vs.f_bavail * vs.f_frsize >> 20,
+                 (unsigned long long)vs.f_blocks * vs.f_frsize >> 20);
+    fprintf(stderr, "[device] memory: %ld MB, available %ld MB, swap %ld MB (%ld free); the app's folder: %s\n",
+            meminfo_kb("MemTotal:") / 1024, meminfo_kb("MemAvailable:") / 1024, meminfo_kb("SwapTotal:") / 1024,
+            meminfo_kb("SwapFree:") / 1024, storage);
+}
+
+// (1.0.1, diag) A line from the app's Java side into this log (com.mhgu.recomp.Diag.nativeLine: the phone's state the
+// system gives Java - battery, power saving, the network's kind, the screen - and its events - trimmed memory, the
+// thermal status, the network changing). false: the log is not this process's yet (the line went nowhere)
+JNIEXPORT jboolean JNICALL Java_com_mhgu_recomp_Diag_nativeLine(JNIEnv *env, jclass cls, jstring text) {
+    (void)cls;
+    if (!g_own_log || !text) return JNI_FALSE;
+    const char *s = (*env)->GetStringUTFChars(env, text, NULL);
+    if (!s) return JNI_FALSE;
+    char line[4096];
+    snprintf(line, sizeof line, "%s\n", s);  // (one write: whole lines between the game's)
+    fputs(line, stderr);
+    (*env)->ReleaseStringUTFChars(env, text, s);
+    return JNI_TRUE;
+}
+
+// (1.0.1, diag) The same, as an event of the session's: "[app] 0:12:34: <text>" (Diag.event)
+JNIEXPORT jboolean JNICALL Java_com_mhgu_recomp_Diag_nativeEvent(JNIEnv *env, jclass cls, jstring text) {
+    (void)cls;
+    if (!g_own_log || !text) return JNI_FALSE;
+    const char *s = (*env)->GetStringUTFChars(env, text, NULL);
+    if (!s) return JNI_FALSE;
+    const char *diag_clock(void);
+    char line[4096];
+    snprintf(line, sizeof line, "[app] %s: %s\n", diag_clock(), s);
+    fputs(line, stderr);
+    (*env)->ReleaseStringUTFChars(env, text, s);
+    return JNI_TRUE;
+}
+
 // Which phone, for a log someone else reads (not everyone who sends one knows its chip)
 void plat_log_device(void) {
     char maker[PROP_VALUE_MAX] = "", model[PROP_VALUE_MAX] = "", soc[PROP_VALUE_MAX] = "", hw[PROP_VALUE_MAX] = "", ver[PROP_VALUE_MAX] = "";
@@ -809,6 +960,7 @@ void plat_log_device(void) {
     fprintf(stderr, "[device] %s %s, Android %s (API %d), chip %s (%s), %ld CPUs, %lld MB, LSE atomics %s\n", maker, model, ver,
             android_get_device_api_level(), soc[0] ? soc : "?", hw, sysconf(_SC_NPROCESSORS_CONF),
             (long long)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE) >> 20, gamelib_cpu_lse() ? "yes" : "no");
+    log_device_more();
 }
 
 // ---- diagnostics

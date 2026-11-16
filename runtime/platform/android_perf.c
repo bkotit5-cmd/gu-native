@@ -45,6 +45,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <link.h>
 #include <math.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -484,6 +485,49 @@ static void heat_line(void) {
     LOG("%s\n", line);
 }
 
+// (1.0.1, diag) The build ids of the port's libraries and of the GPU driver's, once (the first [mem] line, off the game's
+// threads): a crash's backtrace gives "libmain.so+<offset>"; with the build id, the offset is turned into a function with
+// the very build that ran, and a driver's id tells one driver build from another of the same version number.
+static int build_id_cb(struct dl_phdr_info *info, size_t size, void *data) {
+    (void)size;
+    struct { char *line; int o, cap; } *out = data;
+    const char *name = info->dlpi_name;
+    if (!name || !*name) return 0;
+    const char *base = strrchr(name, '/');
+    base = base ? base + 1 : name;
+    bool ours = !strcmp(base, "libmain.so") || !strcmp(base, "libmhgugame.so") || !strcmp(base, "libSDL3.so") ||
+                !strcmp(base, "libmhguffmpeg.so") || !strcmp(base, "libc++_shared.so");
+    bool gpu = strstr(base, "vulkan") || strstr(base, "GLES") || strstr(base, "adreno") || strstr(base, "mali") ||
+               strstr(base, "pvr") || strstr(base, "usc") || strstr(base, "glnext") || strstr(base, "mesa");
+    if ((!ours && !gpu) || out->o > out->cap - 120) return 0;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_NOTE) continue;
+        const char *p = (const char *)(uintptr_t)(info->dlpi_addr + ph->p_vaddr), *end = p + ph->p_memsz;
+        while (p + sizeof(ElfW(Nhdr)) <= end) {
+            const ElfW(Nhdr) *nh = (const ElfW(Nhdr) *)(const void *)p;
+            const char *nname = p + sizeof *nh, *desc = nname + ((nh->n_namesz + 3) & ~3u);
+            if (desc + nh->n_descsz > end) break;
+            if (nh->n_type == NT_GNU_BUILD_ID && nh->n_namesz == 4 && !memcmp(nname, "GNU", 4)) {
+                out->o += snprintf(out->line + out->o, out->cap - out->o, "%s %s ", out->o > 18 ? "," : "", base);
+                for (unsigned k = 0; k < nh->n_descsz && k < 20 && out->o < out->cap - 3; k++)
+                    out->o += snprintf(out->line + out->o, out->cap - out->o, "%02x", (unsigned char)desc[k]);
+                return 0;
+            }
+            p = desc + ((nh->n_descsz + 3) & ~3u);
+        }
+    }
+    return 0;
+}
+
+static void build_ids_line(void) {
+    char line[1500];
+    struct { char *line; int o, cap; } out = {line, 0, (int)sizeof line};
+    out.o = snprintf(line, sizeof line, "[app] build ids:");
+    dl_iterate_phdr(build_id_cb, &out);
+    LOG("%s\n", line);
+}
+
 static sem_t mem_sem;       // (MHGU_PERF_MEMTHREAD) a line is due
 static bool mem_threaded;   // the mem thread writes the lines (set once, before the first)
 
@@ -512,6 +556,8 @@ static void mem_line(void) {
         "available %ld MB%s\n",
         maps, of, maps - first_maps, rss / 1024, (rss - first_rss) / 1024, anon / 1024, file / 1024, shmem / 1024, avail / 1024, gpu);
     heat_line();
+    static bool ids_told;
+    if (!ids_told) ids_told = true, build_ids_line();
     if (__atomic_load_n(&log_on, __ATOMIC_RELAXED) > 0)  // (MHGU_ADPF_LOG: what reading it cost the thread)
         LOG("[mem] that line took %.2f ms of the %s thread\n", (plat_now_ns() - t0) / 1e6, mem_threaded ? "mem" : "presenting");
 }

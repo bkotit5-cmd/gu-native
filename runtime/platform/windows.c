@@ -236,6 +236,7 @@ void plat_standalone(void) {
         if (s) { *s = 0; SetCurrentDirectoryA(exe); }
     }
     if (g_log_free) {
+        MoveFileExA("log_prev.txt", "log_prev2.txt", MOVEFILE_REPLACE_EXISTING);  // (1.0.1: two sessions back)
         MoveFileExA("log.txt", "log_prev.txt", MOVEFILE_REPLACE_EXISTING);
         if (std_reopen(stderr, 2, STD_ERROR_HANDLE, "log.txt")) { setvbuf(stderr, NULL, _IONBF, 0); g_own_log = true; }
     }
@@ -538,8 +539,49 @@ static void qos_high(void) {
     if (set(GetCurrentProcess(), ProcessPowerThrottling, &s, sizeof s)) g_qos = "off (its timer part not known here)";
 }
 
+// (1.0.1, diag) The computer, for a log someone else reads: Windows' version, the CPU (its name, cores), the memory and
+// the page file, the free space where the game keeps its files. Once, at the start.
+#include <cpuid.h>
+static void log_computer(void) {
+    typedef LONG(WINAPI * GetVersion)(OSVERSIONINFOW *);
+    OSVERSIONINFOW ov = {.dwOSVersionInfoSize = sizeof ov};
+    GetVersion rtl = (GetVersion)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion");
+    if (!rtl || rtl(&ov) != 0) ov.dwMajorVersion = ov.dwMinorVersion = ov.dwBuildNumber = 0;
+    char brand[49] = "?";
+    unsigned regs[12] = {0}, top = __get_cpuid_max(0x80000000u, NULL);
+    if (top >= 0x80000004u) {
+        for (unsigned i = 0; i < 3; i++) __get_cpuid(0x80000002u + i, &regs[4 * i], &regs[4 * i + 1], &regs[4 * i + 2], &regs[4 * i + 3]);
+        memcpy(brand, regs, 48), brand[48] = 0;
+        char *b = brand;
+        while (*b == ' ') b++;
+        memmove(brand, b, strlen(b) + 1);
+        for (size_t n = strlen(brand); n && brand[n - 1] == ' '; n--) brand[n - 1] = 0;  // (padded with spaces)
+    }
+    MEMORYSTATUSEX ms = {.dwLength = sizeof ms};
+    GlobalMemoryStatusEx(&ms);
+    ULARGE_INTEGER free_bytes = {0}, total = {0};
+    GetDiskFreeSpaceExA(".", &free_bytes, &total, NULL);
+    rt_logf("[device] Windows %lu.%lu.%lu; %s, %lu logical cores; memory %llu MB (available %llu MB), page file and memory "
+            "%llu MB (available %llu MB); the game's folder: %llu MB free of %llu MB\n",
+            ov.dwMajorVersion, ov.dwMinorVersion, ov.dwBuildNumber, brand, (unsigned long)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS),
+            ms.ullTotalPhys >> 20, ms.ullAvailPhys >> 20, ms.ullTotalPageFile >> 20, ms.ullAvailPageFile >> 20,
+            free_bytes.QuadPart >> 20, total.QuadPart >> 20);
+}
+
+// (1.0.1, diag: the crash report's thread) the calling thread's name, as plat_thread_name gave it ("?" without one)
+void plat_current_thread_name(char *buf, size_t size) {
+    snprintf(buf, size, "?");
+    typedef HRESULT(WINAPI * GetDesc)(HANDLE, PWSTR *);
+    GetDesc get = (GetDesc)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription");
+    PWSTR name = NULL;
+    if (!get || FAILED(get(GetCurrentThread(), &name)) || !name) return;
+    if (*name) WideCharToMultiByte(CP_UTF8, 0, name, -1, buf, (int)size, NULL, NULL);
+    LocalFree(name);
+}
+
 // (main.c, once the log is in place) how this run treats its threads
 void plat_log_device(void) {
+    log_computer();
     rt_logf("[plat] thread priorities: %s%s; power throttling %s\n",
             g_prio_on ? "guest threads by guest priority (up to 43 above normal, 44 and past it normal), the update and "
                         "presenting threads, the vsync tick and the audio mixer at least above normal, background work below "

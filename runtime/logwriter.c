@@ -57,6 +57,22 @@ static void write_out(uint64_t from, uint64_t to) {
         if (!WriteFile(g_dest, g_ring + o, n, &done, NULL) || !done) break;  // (a pipe nobody reads any more: dropped)
         at += done;
     }
+    // (1.0.1, diag) log.txt stays under 32 MB: past it, what came after its first 4 MB is cut and it goes on from a line
+    // that says so (the start and the latest lines stay; Android's log does the same, platform/android.c log_tee)
+    static uint64_t written;
+    static int cuts;
+    written += to - from;
+    if (written > (32ull << 20) && GetFileType(g_dest) == FILE_TYPE_DISK) {
+        LARGE_INTEGER keep = {.QuadPart = 4ll << 20};
+        if (SetFilePointerEx(g_dest, keep, NULL, FILE_BEGIN) && SetEndOfFile(g_dest)) {
+            char note[160];
+            int k = snprintf(note, sizeof note, "\n[log] (cut %d) the lines after the first 4 MB up to here were left out: the log "
+                                                "stays under 32 MB\n", ++cuts);
+            DWORD done = 0;
+            WriteFile(g_dest, note, (DWORD)k, &done, NULL);
+            written = (4ull << 20) + done;
+        }
+    }
     if (HITCH_ON) hitch_add(HC_LOG_WRITE, plat_now_ns() - t0, to - from);  // ((debug) MHGU_HITCHLOG)
 }
 
@@ -111,7 +127,57 @@ static void put(const char *s, size_t n) {
     if (atomic_exchange(&g_idle, 0)) SetEvent(g_wake);
 }
 
+// (1.0.1, diag) The player's own folder (%USERPROFILE%: C:\Users\<their name>) is written as %USERPROFILE% in every line:
+// a log a player shares names the game's folders, the saves' and the mods', and their name is no one's business. Its
+// short form too (C:\Users\NAME~1), '/' or '\' and any case.
+static char g_home[2][MAX_PATH];
+static size_t g_home_len[2];
+static INIT_ONCE g_home_once = INIT_ONCE_STATIC_INIT;
+static BOOL CALLBACK home_init(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once, (void)param, (void)ctx;
+    const char *h = getenv("USERPROFILE");
+    size_t n = h ? strlen(h) : 0;
+    if (n > 3 && n < MAX_PATH) {
+        memcpy(g_home[0], h, n + 1), g_home_len[0] = n;
+        char sh[MAX_PATH];
+        DWORD k = GetShortPathNameA(h, sh, MAX_PATH);
+        if (k > 3 && k < MAX_PATH && _stricmp(sh, h)) memcpy(g_home[1], sh, k + 1), g_home_len[1] = k;
+    }
+    return TRUE;
+}
+static int path_char(char c) { return c == '/' ? '\\' : c >= 'A' && c <= 'Z' ? c + 32 : c; }
+// s (n bytes) into out with the folder replaced; 0: nothing replaced (or no room), s as it is
+static size_t mask_home(const char *s, size_t n, char *out, size_t size) {
+    InitOnceExecuteOnce(&g_home_once, home_init, NULL, NULL);
+    size_t o = 0, done = 0;
+    bool any = false;
+    for (size_t i = 0; i < n;) {
+        size_t hit = 0;
+        for (int h = 0; h < 2 && !hit; h++) {
+            size_t len = g_home_len[h];
+            if (!len || n - i < len || path_char(s[i]) != path_char(g_home[h][0])) continue;
+            size_t k = 1;
+            while (k < len && path_char(s[i + k]) == path_char(g_home[h][k])) k++;
+            // (the whole folder, not the start of a longer name: C:\Users\Al must not take C:\Users\Alan)
+            if (k == len && (i + len == n || s[i + len] == '\\' || s[i + len] == '/' || s[i + len] == '"' || s[i + len] == ' ' ||
+                             s[i + len] == '\n' || s[i + len] == ')' || s[i + len] == ',' || s[i + len] == ';' || s[i + len] == '\''))
+                hit = len;
+        }
+        if (!hit) { i++; continue; }
+        if (o + (i - done) + 14 >= size) return 0;
+        memcpy(out + o, s + done, i - done), o += i - done;
+        memcpy(out + o, "%USERPROFILE%", 13), o += 13;
+        i += hit, done = i, any = true;
+    }
+    if (!any || o + (n - done) >= size) return 0;
+    memcpy(out + o, s + done, n - done);
+    return o + (n - done);
+}
+
 static void emit(const char *s, size_t n) {
+    char masked[4096];
+    size_t m = mask_home(s, n, masked, sizeof masked);
+    if (m) s = masked, n = m;
     if (atomic_load_explicit(&g_mode, memory_order_acquire) == 1) put(s, n);
     else fwrite(s, 1, n, stderr);
 }

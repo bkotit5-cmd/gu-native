@@ -11,6 +11,7 @@
 
 #include "config.h"
 #include "app_actions.h"
+#include "diag.h"
 #include "haptics.h"
 #include "overlay.h"
 #include "mods.h"
@@ -189,7 +190,10 @@ static bool android_lifecycle(void *ud, SDL_Event *e) {
     switch (e->type) {
     case SDL_EVENT_WILL_ENTER_BACKGROUND:
     case SDL_EVENT_DID_ENTER_BACKGROUND:
-        if (__atomic_load_n(&g_android_window_state, __ATOMIC_ACQUIRE) != 1) g_android_bg_ns = plat_now_ns();
+        if (__atomic_load_n(&g_android_window_state, __ATOMIC_ACQUIRE) != 1) {
+            g_android_bg_ns = plat_now_ns();
+            LOG("[app] %s: to the background\n", diag_clock());  // (1.0.1: the log's timeline)
+        }
         __atomic_store_n(&g_android_window_state, 1, __ATOMIC_RELEASE);
         // (SDL's main thread now blocks until the app is back: the buttons and sticks it gave the game would stay held,
         // and the fingers' ups will not come)
@@ -199,6 +203,8 @@ static bool android_lifecycle(void *ud, SDL_Event *e) {
         if (config_live_pause_background()) vi_set_paused(true);
         break;
     case SDL_EVENT_DID_ENTER_FOREGROUND:
+        if (__atomic_load_n(&g_android_window_state, __ATOMIC_ACQUIRE) == 1)
+            LOG("[app] %s: back in front after %.0f s\n", diag_clock(), g_android_bg_ns ? (plat_now_ns() - g_android_bg_ns) / 1e9 : 0.0);
         __atomic_store_n(&g_android_window_state, 2, __ATOMIC_RELEASE);
         vi_set_paused(false);  // (after the state: the renderer's first frame back makes the surface again)
         break;
@@ -207,6 +213,27 @@ static bool android_lifecycle(void *ud, SDL_Event *e) {
     return true;
 }
 #endif
+
+// (1.0.1) The window's events the log's timeline wants, with the session's time: the focus (a PC's alt-tab, a phone's
+// notification shade or a dialog over the game), minimized and back, a new size (split screen, DeX, a desktop's window;
+// 40 at most) and the system's low memory warning (Android: onLowMemory / a critical onTrimMemory)
+static void diag_window_event(const SDL_Event *e) {
+    static int sizes;
+    static int last_w, last_h;
+    switch (e->type) {
+    case SDL_EVENT_WINDOW_FOCUS_LOST: LOG("[app] %s: the window lost the focus\n", diag_clock()); break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED: LOG("[app] %s: the window has the focus\n", diag_clock()); break;
+    case SDL_EVENT_WINDOW_MINIMIZED: LOG("[app] %s: minimized\n", diag_clock()); break;
+    case SDL_EVENT_WINDOW_RESTORED: LOG("[app] %s: restored\n", diag_clock()); break;
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        if ((e->window.data1 != last_w || e->window.data2 != last_h) && sizes++ < 40)
+            LOG("[app] %s: the window is %dx%d pixels\n", diag_clock(), (int)e->window.data1, (int)e->window.data2);
+        last_w = e->window.data1, last_h = e->window.data2;
+        break;
+    case SDL_EVENT_LOW_MEMORY: LOG("[app] %s: the system says memory is low\n", diag_clock()); break;
+    default: break;
+    }
+}
 
 #ifdef __ANDROID__
 static bool loop_event(void *ud, SDL_Event *e) {  // (any thread: an event queued wakes the window loop)
@@ -234,6 +261,7 @@ void ui_init(void) {
         SDL_GetCurrentVideoDriver());
 #endif
     config_load();
+    diag_log_settings();  // (the log: every setting that is not the default, diag.c)
     // Initial background input policy. SDL documents this hint as changeable at runtime.
     // Subsequent saved changes are consumed by the host thread in ui_run().
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_config.background_input ? "1" : "0");
@@ -338,6 +366,7 @@ int ui_run(void) {
                 if (e.type == SDL_EVENT_DISPLAY_ORIENTATION && log_orientation)
                     LOG("[ui] display orientation %d (SDL_DisplayOrientation)\n", (int)e.display.data1);
 #endif
+                diag_window_event(&e);  // (the log's timeline: focus, size, low memory)
                 host_input_event(&e);
             } while (SDL_PollEvent(&e));
         }

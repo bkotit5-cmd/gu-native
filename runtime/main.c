@@ -18,6 +18,7 @@
 #include "net/discord.h"
 #include "savefolder.h"
 #include "cache_clear.h"
+#include "diag.h"
 #ifdef __ANDROID__
 static void game_lib_failed(const char *why);
 #endif
@@ -213,6 +214,7 @@ static void android_env(void) {
 #endif
 
 int main(int argc, char **argv) {
+    diag_start();  // (the session's clock on the log's lines: diag.h)
 #ifdef __ANDROID__
     android_env();
 #endif

@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#if defined(__ANDROID__) || defined(__linux__)
+#include <sys/prctl.h>
+#endif
 
 #include "gamelib.h"
 #include "hle.h"
@@ -600,6 +603,20 @@ const char *rt_host_fn_name(uint64_t pc, uint64_t *offset) {
 void (*rt_fault_note)(void);
 
 void rt_fatal_trace(void) {
+    {  // (1.0.1, diag) when in the session, and on which thread (its name says whose work it was: the renderer, a shader
+       // worker, the game's own, a driver's)
+        char tn[32] = "?";
+#if defined(__ANDROID__) || defined(__linux__)
+        prctl(PR_GET_NAME, tn);
+#elif defined(_WIN32)
+        void plat_current_thread_name(char *buf, size_t size);  // (platform/windows.c)
+        plat_current_thread_name(tn, sizeof tn);
+#endif
+        void diag_clock_into(char *buf, size_t size);  // (diag.c: no thread-local storage in a crash's report)
+        char when[24];
+        diag_clock_into(when, sizeof when);
+        fprintf(stderr, "at %s into the session, on thread \"%s\"\n", when, tn);
+    }
     fprintf(stderr, "host backtrace (guest functions are f_<addr>):\n");
     plat_print_backtrace();
     if (rt_fault_note) rt_fault_note();
