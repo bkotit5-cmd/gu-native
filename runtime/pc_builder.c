@@ -40,24 +40,35 @@
 const char *const pcb_stage_names[PCB_STAGES] = {"tools", "extract", "recompile", "compile", "install"};
 
 // ---- the downloads: where from, their SHA-256 and size (the official pages: python.org's release page lists the
-// embeddable package's SHA-256; PyPI's JSON API the wheel's)
+// embeddable package's SHA-256; PyPI's JSON API the wheel's; ziglang.org's download/index.json its zip's, 0.13.0,
+// x86_64-windows, which Zig's minisign key signs too)
 typedef struct {
     const char *name, *version, *url, *sha256;
     int64_t size, unpacked;
+    const char *prefix;  // the folder in the archive the tool is in (NULL: the archive's root, all of it kept)
+    const char *from;    // the source, in the log and on the page
 } Tool;
 static const Tool PYTHON = {"python", "3.14.9", "https://www.python.org/ftp/python/3.14.9/python-3.14.9-embed-amd64.zip",
-                            "3c01d7cfc666f746a6f064f60fb2156ab0ec464d3d738ab796371a46a9bb24a2", 12609248, 30LL << 20};
+                            "3c01d7cfc666f746a6f064f60fb2156ab0ec464d3d738ab796371a46a9bb24a2", 12609248, 30LL << 20,
+                            NULL, "python.org"};
 static const Tool ZIG = {"zig", "0.13.0",
                          "https://files.pythonhosted.org/packages/e0/0c/66f4710aedf5544e15779ff9c6e770322986e15daf9299b1a4df0be19e09/"
                          "ziglang-0.13.0-py3-none-win_amd64.whl",
-                         "b64b2aa936ebbfeecfbb2611df331a5474edebe1246b98c2f56d6ae4d58b71fc", 80418705, 270LL << 20};
+                         "b64b2aa936ebbfeecfbb2611df331a5474edebe1246b98c2f56d6ae4d58b71fc", 80418705, 270LL << 20,
+                         "ziglang/", "PyPI"};
+// Zig from its own site, when PyPI can't give it (a provider's DNS answered 127.9.9.9 for files.pythonhosted.org): the
+// official zip, the very files the wheel has (the 6027 kept, zig.exe among them, the same byte for byte)
+static const Tool ZIG_ORG = {"zig", "0.13.0", "https://ziglang.org/download/0.13.0/zig-windows-x86_64-0.13.0.zip",
+                             "d859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158", 79163968, 270LL << 20,
+                             "zig-windows-x86_64-0.13.0/", "ziglang.org"};
 static const Tool *const TOOLS[] = {&PYTHON, &ZIG};
-// The parts of the wheel `zig cc` reads for x86_64-windows-gnu C (its mingw-w64 and compiler-rt are built from them once):
-// the C libraries and headers of other systems, libc++ and the sanitizers stay out
-static const char *const ZIG_KEEP[] = {"ziglang/zig.exe", "ziglang/LICENSE", "ziglang/lib/c.zig", "ziglang/lib/zig.h",
-                                       "ziglang/lib/compiler_rt.zig", "ziglang/lib/compiler_rt/", "ziglang/lib/compiler/",
-                                       "ziglang/lib/std/", "ziglang/lib/include/", "ziglang/lib/libc/mingw/",
-                                       "ziglang/lib/libc/include/any-windows-any/", "ziglang/lib/libunwind/"};
+// A tool's other source, tried when its own fails (NULL: none)
+static const Tool *other_source(const Tool *t) { return t == &ZIG ? &ZIG_ORG : NULL; }
+// The parts of Zig `zig cc` reads for x86_64-windows-gnu C (its mingw-w64 and compiler-rt are built from them once),
+// under the archive's prefix: the C libraries and headers of other systems, libc++ and the sanitizers stay out
+static const char *const ZIG_KEEP[] = {"zig.exe", "LICENSE", "lib/c.zig", "lib/zig.h", "lib/compiler_rt.zig", "lib/compiler_rt/",
+                                       "lib/compiler/", "lib/std/", "lib/include/", "lib/libc/mingw/",
+                                       "lib/libc/include/any-windows-any/", "lib/libunwind/"};
 #define WORK_SPACE (3LL << 30)  // (tools/pc_build.py's: the C, the objects and their copies in Zig's cache)
 
 // ---- paths (wide: the player's folders can have any name)
@@ -147,6 +158,28 @@ static void tree_delete(const wchar_t *dir) {
     }
     RemoveDirectoryW(dir);
 }
+static bool read_text(const wchar_t *p, char *out, size_t n);
+// A tool in place: its .installed mark names it, from either of its sources
+static bool tool_installed(const Tool *t) {
+    wchar_t name[32], mark[MAX_PATH];
+    MultiByteToWideChar(CP_UTF8, 0, t->name, -1, name, 32);
+    _snwprintf(mark, MAX_PATH, L"%ls\\%ls\\.installed", g_root, name);
+    char text[200], want[200];
+    if (!read_text(mark, text, sizeof text)) return false;
+    for (const Tool *s = t; s; s = other_source(s)) {
+        snprintf(want, sizeof want, "%s %s %s", s->name, s->version, s->sha256);
+        if (!strcmp(text, want)) return true;
+    }
+    return false;
+}
+// Where a source's download is kept while it comes (downloads\<its file name>.part: a cut one goes on from there)
+static void part_path(const Tool *t, wchar_t *out, size_t n) {
+    const char *base = strrchr(t->url, '/');
+    wchar_t b[200];
+    MultiByteToWideChar(CP_UTF8, 0, base ? base + 1 : t->name, -1, b, 200);
+    _snwprintf(out, n, L"%ls\\downloads\\%ls.part", g_root, b);
+    out[n - 1] = 0;
+}
 static bool read_text(const wchar_t *p, char *out, size_t n) {
     out[0] = 0;
     FILE *f = _wfopen(p, L"rb");
@@ -224,19 +257,20 @@ static DWORD WINAPI info_thread(void *arg) {
         char text[200];
         for (int i = 0; i < 2; i++) {
             const Tool *t = TOOLS[i];
-            wchar_t name[32], mark[MAX_PATH];
+            wchar_t name[32];
             MultiByteToWideChar(CP_UTF8, 0, t->name, -1, name, 32);
             in_root(p, MAX_PATH, name);
-            wjoin(mark, MAX_PATH, p, L".installed");
-            char want[200];
-            snprintf(want, sizeof want, "%s %s %s", t->name, t->version, t->sha256);
-            if (read_text(mark, text, sizeof text) && !strcmp(text, want)) {
+            if (tool_installed(t)) {
                 in.installed += tree_size(p);
             } else {
-                wchar_t part[MAX_PATH];
-                _snwprintf(part, MAX_PATH, L"%ls\\downloads\\%ls.part", g_root, name);
-                int64_t have = file_size(part);
-                in.to_download += t->size - (have > 0 && have <= t->size ? have : 0);
+                int64_t left = t->size;  // (what is left of the source with the most already here)
+                for (const Tool *s = t; s; s = other_source(s)) {
+                    wchar_t part[MAX_PATH];
+                    part_path(s, part, MAX_PATH);
+                    int64_t have = file_size(part);
+                    if (have > 0 && have <= s->size && s->size - have < left) left = s->size - have;
+                }
+                in.to_download += left;
                 in.needed += t->size + t->unpacked;
             }
         }
@@ -383,7 +417,7 @@ bool pcb_take_open_request(void) {
 }
 
 // ---- downloads (WinHTTP: the system's TLS, its proxy settings)
-typedef struct { bool ok; char why[300]; } Result;
+typedef struct { bool ok; char why[400]; } Result;
 static void why(Result *r, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -468,7 +502,7 @@ static Result download(const Tool *t, const wchar_t *part) {
             }
             static char buf[1 << 16];
             char detail[32];
-            snprintf(detail, sizeof detail, "download:%s", t->name);
+            snprintf(detail, sizeof detail, "download:%s@%s", t->name, t->from);  // (the page names the source)
             int64_t last = 0;
             bool failed = false;
             for (;;) {
@@ -506,7 +540,7 @@ static Result download(const Tool *t, const wchar_t *part) {
             }
         }
         DeleteFileW(part);  // (another file, or a damaged one: once more from the start, then it's an error)
-        if (attempt >= 1) { why(&r, "%s: the download doesn't match its SHA-256 (%s)", t->name, t->url); return r; }
+        if (attempt >= 1) { why(&r, "%s: the download from %s doesn't match its SHA-256", t->name, t->from); return r; }
     }
 }
 
@@ -545,17 +579,21 @@ static Result unpack(const Tool *t, const wchar_t *archive, const wchar_t *dest)
         why(&r, "%s: the archive can't be read (%d)", t->name, (int)u);
         return r;
     }
-    bool zig = t == &ZIG;
+    // (Zig's archives: only what is under their prefix, ziglang/ in the wheel, zig-windows-x86_64-0.13.0/ in the zip, and of
+    // that only ZIG_KEEP, unpacked without the prefix: the same tree from either)
+    const char *prefix = t->prefix;
+    size_t np = prefix ? strlen(prefix) : 0;
+#define KEPT(n) (!prefix || (!strncmp((n), prefix, np) && keep_zig((n) + np)))
     char detail[32];
     snprintf(detail, sizeof detail, "unpack:%s", t->name);
     UnpackProgress pr = {detail, 0, 0};
     for (int i = 0; i < z.count; i++)
-        if (!z.entries[i].dir && (!zig || keep_zig(z.entries[i].name))) pr.total += (int64_t)z.entries[i].size;
+        if (!z.entries[i].dir && KEPT(z.entries[i].name)) pr.total += (int64_t)z.entries[i].size;
     for (int i = 0; i < z.count && r.ok; i++) {
         UnzipEntry *e = &z.entries[i];
-        if (e->dir || (zig && !keep_zig(e->name))) continue;
+        if (e->dir || !KEPT(e->name)) continue;
         if (g_cancel) { why(&r, "cancelled"); break; }
-        const char *rel = zig ? e->name + strlen("ziglang/") : e->name;
+        const char *rel = e->name + np;
         if (!safe_name(rel)) { why(&r, "%s: a path outside its folder in the archive: %s", t->name, e->name); break; }
         char to[MAX_PATH * 3];
         snprintf(to, sizeof to, "%s/%s", d8, rel);
@@ -570,6 +608,7 @@ static Result unpack(const Tool *t, const wchar_t *archive, const wchar_t *dest)
         set_step(detail, pr.done, pr.total);
     }
     unzip_close(&z);
+#undef KEPT
     return r;
 }
 
@@ -594,26 +633,24 @@ static Result python_paths(const wchar_t *dir) {
     return r;
 }
 
-static Result install_tool(const Tool *t) {
+// A tool from one of its sources: downloaded into downloads\, checked, unpacked beside its place and renamed when whole
+static Result install_from(const Tool *t, const wchar_t *dest) {
     Result r = {true, ""};
-    wchar_t name[32], dest[MAX_PATH], tmp[MAX_PATH], mark[MAX_PATH], part[MAX_PATH], dl[MAX_PATH];
-    MultiByteToWideChar(CP_UTF8, 0, t->name, -1, name, 32);
-    in_root(dest, MAX_PATH, name);
-    wjoin(mark, MAX_PATH, dest, L".installed");
-    char want[200], text[200];
+    wchar_t tmp[MAX_PATH], mark[MAX_PATH], part[MAX_PATH], dl[MAX_PATH];
+    char want[200];
     snprintf(want, sizeof want, "%s %s %s", t->name, t->version, t->sha256);
-    if (read_text(mark, text, sizeof text) && !strcmp(text, want)) return r;
     in_root(dl, MAX_PATH, L"downloads");
     mkdirs(dl);
-    _snwprintf(part, MAX_PATH, L"%ls\\%ls.part", dl, name);
+    part_path(t, part, MAX_PATH);
     uint64_t t0 = SDL_GetTicks();
     int64_t had = file_size(part);
     set_step(NULL, 0, t->size);
     r = download(t, part);
     if (!r.ok) return r;
     uint64_t t1 = SDL_GetTicks();
-    say("%s %s: %lld MB downloaded in %llu s%s, SHA-256 checked", t->name, t->version, (long long)((t->size - (had > 0 ? had : 0)) >> 20),
-        (unsigned long long)((t1 - t0) / 1000), had > 0 ? " (part of it was already here)" : "");
+    say("%s %s: %lld MB downloaded from %s in %llu s%s, SHA-256 checked", t->name, t->version,
+        (long long)((t->size - (had > 0 ? had : 0)) >> 20), t->from, (unsigned long long)((t1 - t0) / 1000),
+        had > 0 ? " (part of it was already here)" : "");
     _snwprintf(tmp, MAX_PATH, L"%ls.new", dest);
     tree_delete(tmp);
     mkdirs(tmp);
@@ -626,6 +663,49 @@ static Result install_tool(const Tool *t) {
     if (!MoveFileExW(tmp, dest, 0)) { why(&r, "%s: can't move it in place (error %lu)", t->name, GetLastError()); return r; }
     DeleteFileW(part);
     say("%s: unpacked in %llu s, %lld MB", t->name, (unsigned long long)((SDL_GetTicks() - t1) / 1000), (long long)(tree_size(dest) >> 20));
+    return r;
+}
+// A tool in place: from its own source, else from its other one (Zig: ziglang.org when PyPI fails, or straight away when
+// PyPI's host answers a loopback address here, a provider's or a filter's block). Not when it was cancelled or the disk
+// is the trouble: the other source would fail the same. Once in place, no source's half download stays
+static void drop_parts(const Tool *t) {
+    for (const Tool *s = t; s; s = other_source(s)) {
+        wchar_t part[MAX_PATH];
+        part_path(s, part, MAX_PATH);
+        DeleteFileW(part);
+    }
+}
+static Result install_tool(const Tool *t) {
+    Result r = {true, ""};
+    if (tool_installed(t)) return r;
+    wchar_t name[32], dest[MAX_PATH];
+    MultiByteToWideChar(CP_UTF8, 0, t->name, -1, name, 32);
+    in_root(dest, MAX_PATH, name);
+    const Tool *other = other_source(t);
+    char host[200], note[200] = "";
+    const char *h = strstr(t->url, "://");
+    h = h ? h + 3 : t->url;
+    snprintf(host, sizeof host, "%.*s", (int)strcspn(h, "/:"), h);
+    if (other) blocked_note(host, note, sizeof note);
+    if (note[0]) {
+        why(&r, "%s: from %s, blocked%s", t->name, t->from, note);
+        say("%s: not from %s%s: from %s instead", t->name, t->from, note, other->from);
+    } else {
+        r = install_from(t, dest);
+        if (r.ok) drop_parts(t);
+        if (r.ok || !other || g_cancel || strstr(r.why, "disk may be full") || strstr(r.why, "can't write") ||
+            strstr(r.why, "can't move"))
+            return r;
+        say("%s: from %s it failed (%s): from %s instead", t->name, t->from, r.why, other->from);
+    }
+    Result first = r;
+    r = install_from(other, dest);
+    if (r.ok) drop_parts(t);
+    else if (!g_cancel) {
+        char second[400];
+        snprintf(second, sizeof second, "%s", r.why);
+        why(&r, "%s; and from %s: %s", first.why, other->from, second);
+    }
     return r;
 }
 
@@ -913,16 +993,8 @@ static void finish(int status, const char *stage, const char *text, int jobs) {
 static Result room_check(void) {
     Result r = {true, ""};
     int64_t need = 0;
-    char text[200];
-    for (int i = 0; i < 2; i++) {
-        const Tool *t = TOOLS[i];
-        wchar_t name[32], mark[MAX_PATH];
-        MultiByteToWideChar(CP_UTF8, 0, t->name, -1, name, 32);
-        _snwprintf(mark, MAX_PATH, L"%ls\\%ls\\.installed", g_root, name);
-        char want[200];
-        snprintf(want, sizeof want, "%s %s %s", t->name, t->version, t->sha256);
-        if (!(read_text(mark, text, sizeof text) && !strcmp(text, want))) need += t->size + t->unpacked;
-    }
+    for (int i = 0; i < 2; i++)
+        if (!tool_installed(TOOLS[i])) need += TOOLS[i]->size + TOOLS[i]->unpacked;
     wchar_t work[MAX_PATH];
     in_root(work, MAX_PATH, L"work");
     int64_t have = is_dir(work) ? tree_size(work) : 0;

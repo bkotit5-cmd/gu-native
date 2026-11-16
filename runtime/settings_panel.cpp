@@ -2465,7 +2465,7 @@ void game_code_rows(std::vector<Row>& r) {
     r.back().help = tr("Makes the game code (libmhgugame.so) on this phone, from your own exefs in the game folder. No PC needed. The first time it downloads the tools (about 100 MB). It takes 10 minutes to about 2 hours depending on the phone and goes on in the background; the game starts again to use it.");
 #else
     action(r, "game.build", tr("Build the game code"), []() { push(View::BuildCode, "dialog.cancel"); });
-    r.back().help = tr("Makes the game code (mhgugame.dll) again on this PC, from your own exefs in the game folder: the game closes and opens its builder. The first time it downloads its tools (about 90 MB); it takes about 10 to 30 minutes. Save in the game first.");
+    r.back().help = tr("Makes the game code (mhgugame.dll) again on this PC, from your own exefs in the game folder: the game closes and opens its builder. The first time it downloads its tools (about 90 MB); it takes about 5 to 30 minutes, depending on the PC. Save in the game first.");
 #endif
 }
 // ...and its credit, among Credits & Licenses' notes (about).

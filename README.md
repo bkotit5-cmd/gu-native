@@ -758,11 +758,14 @@ The program has no game code in it, so it makes yours from your own copy, once, 
 When your folder has everything but the game code, the screen says that `mhgugame.dll` is missing: press **Build the game
 code on this PC**, then **Build**.
 
-- The first time it downloads its tools, about 90 MB: Python from python.org and Zig, a C compiler, from PyPI. Both are
-  free software, checked against their SHA-256 before they are used, and nothing of the game is ever downloaded.
+- The first time it downloads its tools, about 90 MB: Python from python.org and Zig, a C compiler, from PyPI, or from
+  ziglang.org, Zig's own site, when PyPI can't be reached. Both are free software, checked against their SHA-256 before
+  they are used, and nothing of the game is ever downloaded.
 - It needs about 3 GB free on the disk where `MHGU.exe` is while it works. When it ends only the tools stay (about 300 MB,
   in the `builder` folder beside `MHGU.exe`), and **Delete the tools** removes them too.
-- It took about 6 minutes on the developer's PC (a 6-core processor), plus the download the first time; a slower PC takes longer, up to about an hour with 2 cores. It uses all the processor's cores but one, at low priority, so you can use the PC meanwhile.
+- It takes about 5 to 30 minutes, depending on the PC, plus the download the first time (about 6 minutes on the
+  developer's PC, with a 6-core processor). It uses all the processor's cores but one, at low priority, so you can use
+  the PC meanwhile.
 - **Cancel** stops it, and so does closing the window or restarting the PC: what it did is kept, and **Go on** continues
   from there. **Start over** forgets a build half done and starts from the beginning.
 
@@ -796,8 +799,8 @@ The zip holds one folder with the program's files and nothing of the game:
 <a name="step-2-create-the-game-code-1"></a>
 #### Create the game code by hand
 
-The other way, for a PC where the program can't build it (no internet, or a network that blocks PyPI): the tool from the
-source code makes the same game code (the same id) with Python of your own.
+The other way, for a PC where the program can't build it (no internet, or a network that blocks both PyPI and
+ziglang.org): the tool from the source code makes the same game code (the same id) with Python of your own.
 
 1. Install [Python](https://www.python.org/downloads/). Tick **Add python.exe to PATH** in the installer.
 2. Get the tool from the same version as your `MHGU-PC` zip: on [Releases](../../releases/latest), under **Assets**,
@@ -985,7 +988,7 @@ To open `%APPDATA%`, type it in File Explorer's address bar and press Enter.
 | Smart App Control blocked it | It blocks programs that aren't signed, with no **Run anyway**, and `MHGU.exe` isn't signed: it only runs with Smart App Control off (Windows Security, **App & browser control**, **Smart App Control settings**). Think it over first: on many versions of Windows it can't be turned back on without reinstalling Windows |
 | "mhgugame.dll ... is missing from that folder" | The download doesn't include it: press **Build the game code on this PC** on that screen ([Setup step 3](#step-3-create-the-game-code)) |
 | "This mhgugame.dll is from another version" | It was made for another version: press **Build the game code on this PC** on that screen, and it is made again for this one |
-| The builder can't download its tools | Check the internet connection and press **Go on**: the download continues where it stopped. Some internet providers or filters block `files.pythonhosted.org` (PyPI's downloads), and the builder says so: another network, or a DNS such as 1.1.1.1, gets around it, or make the game code [by hand](#create-the-game-code-by-hand) |
+| The builder can't download its tools | Check the internet connection and press **Go on**: the download continues where it stopped. When PyPI (`files.pythonhosted.org`) can't be reached, as some internet providers or filters block it, the builder gets Zig from ziglang.org, Zig's own site, by itself. If both are blocked, it says so: another network, or a DNS such as 1.1.1.1, gets around it, or make the game code [by hand](#create-the-game-code-by-hand) |
 | Your antivirus warns about, blocks or deletes `zig.exe` or `python.exe` in the `builder` folder | They are the official Zig and Python, checked by their SHA-256 before they run; some antivirus programs distrust a compiler that was just downloaded. Allow the `builder` folder beside `MHGU.exe` and press **Go on**, or make the game code [by hand](#create-the-game-code-by-hand) |
 | The builder says there isn't enough space | It needs about 3 GB free on the disk where `MHGU.exe` is while it works. Free some, or move the program's folder to another disk, and press **Go on** |
 | The builder stopped and **Go on** fails again | **Start over** clears what it did and starts from the beginning. If it still fails, attach `builder_log.txt` (beside `MHGU.exe`) to an [issue](../../issues) |

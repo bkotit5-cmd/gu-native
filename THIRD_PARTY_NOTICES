@@ -53,7 +53,7 @@ what only one of them contains is marked "Android only" or "PC only".
 - Downloaded by MHGU.exe's own builder the first time it runs, not part of the PC zip or of this repository (PC;
   runtime/pc_builder.c, licenses/Builder-tools.txt beside MHGU.exe): Python 3.14.9's embeddable package for 64-bit
   Windows from python.org (Python Software Foundation License Version 2) and Zig 0.13.0 for 64-bit Windows from PyPI's
-  ziglang package (MIT; it includes LLVM, Clang and LLD under the Apache License 2.0 with LLVM Exceptions, and the
+  ziglang package, or ziglang.org's own zip of it when PyPI can't be reached (MIT; it includes LLVM, Clang and LLD under the Apache License 2.0 with LLVM Exceptions, and the
   mingw-w64 runtime under its own licenses).
 - FFmpeg 9.0.2 (libavformat, libavcodec, libavutil): not in this repository. Its source release, configured for the
   MP4 demuxer and the H.264 and AAC decoders only (deps/build_ffmpeg.sh), is built into a shared library of its own,

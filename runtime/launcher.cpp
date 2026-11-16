@@ -103,18 +103,24 @@ int percent(const PcbJob &j) {
     double part = j.total > 0 ? SDL_min(1.0, (double)j.done / (double)j.total) : 0;
     return (int)(from[j.stage] + span[j.stage] * part + .5);
 }
+// A tool's name from a step's detail ("download:zig@ziglang.org", "unpack:zig"), and its source ("" when none)
 std::string tool_name(const char *detail) {
     const char *n = SDL_strchr(detail, ':');
-    n = n ? n + 1 : detail;
-    return !SDL_strcmp(n, "python") ? "Python 3.14.9" : !SDL_strcmp(n, "zig") ? "Zig 0.13.0" : T("the builder's scripts");
+    std::string name = n ? n + 1 : detail;
+    if (name.find('@') != std::string::npos) name.resize(name.find('@'));
+    return name == "python" ? "Python 3.14.9" : name == "zig" ? "Zig 0.13.0" : T("the builder's scripts");
+}
+std::string tool_source(const char *detail) {
+    const char *at = SDL_strchr(detail, '@');
+    return at ? at + 1 : "";
 }
 // One line for the page: what is going on now
 std::string status_line(const PcbJob &j) {
     std::string s = stage_text(j.stage);
     if (j.stage == 0) {
-        if (!SDL_strncmp(j.detail, "download:", 9))
-            return fmt("%s %s: %lld / %lld MB", T("Downloading"), tool_name(j.detail).c_str(), (long long)(j.done >> 20),
-                       (long long)(j.total >> 20));
+        if (!SDL_strncmp(j.detail, "download:", 9))  // ("Downloading Zig 0.13.0 (ziglang.org): 12 / 75 MB")
+            return fmt("%s %s (%s): %lld / %lld MB", T("Downloading"), tool_name(j.detail).c_str(), tool_source(j.detail).c_str(),
+                       (long long)(j.done >> 20), (long long)(j.total >> 20));
         if (!SDL_strncmp(j.detail, "unpack:", 7)) return fmt("%s %s", T("Setting up"), tool_name(j.detail).c_str());
         return s;
     }
@@ -128,7 +134,7 @@ const char *failure_text(const char *stage) {
     if (!SDL_strcmp(stage, "space"))
         return T("There isn't enough free space on the disk where MHGU is. Free some (it needs about 3 GB while it builds) and try again: it goes on from where it stopped.");
     if (!SDL_strcmp(stage, "download"))
-        return T("The tools couldn't be downloaded. Check the internet connection and try again: the download goes on from where it stopped. If your internet provider blocks files.pythonhosted.org (PyPI), another network or DNS (such as 1.1.1.1) helps, or make the game code by hand (Open the guide).");
+        return T("The tools couldn't be downloaded. Check the internet connection and try again: the download goes on from where it stopped. When PyPI (files.pythonhosted.org) can't be reached, Zig comes from ziglang.org instead; if both are blocked, another network or DNS (such as 1.1.1.1) helps, or make the game code by hand (Open the guide).");
     if (!SDL_strcmp(stage, "tools"))
         return T("The builder's files that came with MHGU are missing or don't match it (builder_tools.zip). Unzip the whole MHGU-PC zip again over this folder.");
     if (!SDL_strcmp(stage, "dest"))
@@ -390,8 +396,8 @@ extern "C" int launcher_choose_folder(const char *problem, const char *problem_f
                 next = w == "done"        ? job.status == PCB_DONE
                        : w == "stopped"   ? !building && job.status != PCB_RUNNING
                        : w == "failed"    ? job.status == PCB_FAILED
-                       : w == "python"    ? job.stage == 0 && !SDL_strcmp(job.detail, "download:python") && job.done >= ((int64_t)n << 20)
-                       : w == "zig"       ? job.stage == 0 && !SDL_strcmp(job.detail, "download:zig") && job.done >= ((int64_t)n << 20)
+                       : w == "python"    ? job.stage == 0 && !SDL_strncmp(job.detail, "download:python", 15) && job.done >= ((int64_t)n << 20)
+                       : w == "zig"       ? job.stage == 0 && !SDL_strncmp(job.detail, "download:zig", 12) && job.done >= ((int64_t)n << 20)
                        : w == "recompile" ? job.stage == 2 && job.done >= n
                        : w == "compile"   ? job.stage == 3 && job.total > 0 && job.done >= n
                                           : true;
@@ -525,13 +531,13 @@ extern "C" int launcher_choose_folder(const char *problem, const char *problem_f
             if (!ran) {
                 heading(T("WHAT IT NEEDS"));
                 if (info.to_download > 0)
-                    wrapped(fmt(T("- The first time it downloads its tools, about %s: Python (python.org) and Zig (PyPI), free software, checked before they are used. Nothing of the game is ever downloaded."),
+                    wrapped(fmt(T("- The first time it downloads its tools, about %s: Python (python.org) and Zig (PyPI, or ziglang.org when PyPI can't be reached), free software, checked before they are used. Nothing of the game is ever downloaded."),
                                 mb(info.to_download).c_str()), TEXT);
                 else wrapped(T("- The tools are already on this PC."), TEXT);
                 wrapped(fmt(T("- Space: %s free while it builds (there are %s). When it ends the temporary files go and the tools stay (about 300 MB)."),
                             mb(info.needed).c_str(), mb(info.free).c_str()),
                         info.free < info.needed ? WARN : TEXT);
-                wrapped(T("- Time: about 10 to 30 minutes, depending on the PC. It uses all the processor's cores but one, at low priority: you can use the PC meanwhile."), TEXT);
+                wrapped(T("- Time: about 5 to 30 minutes, depending on the PC. It uses all the processor's cores but one, at low priority: you can use the PC meanwhile."), TEXT);
                 wrapped(T("- If it is cut (Cancel, the window closed, the PC restarted), it goes on from where it stopped."), TEXT);
             } else {
                 heading(T("HOW IT GOES"));

@@ -779,12 +779,14 @@ a ningún lado.
 Cuando tu carpeta tiene todo menos el código del juego, la pantalla dice que falta `mhgugame.dll`: pulsa **Crear el código
 del juego en esta PC** y después **Crear**.
 
-- La primera vez descarga sus herramientas, unos 90 MB: Python desde python.org y Zig, un compilador de C, desde PyPI. Los
-  dos son software libre, se verifican con su SHA-256 antes de usarlos y nunca se descarga nada del juego.
+- La primera vez descarga sus herramientas, unos 90 MB: Python desde python.org y Zig, un compilador de C, desde PyPI, o
+  desde ziglang.org, el sitio de Zig, si PyPI no responde. Los dos son software libre, se verifican con su SHA-256 antes
+  de usarlos y nunca se descarga nada del juego.
 - Necesita unos 3 GB libres en el disco donde está `MHGU.exe` mientras trabaja. Al terminar solo quedan las herramientas
   (unos 300 MB, en la carpeta `builder` junto a `MHGU.exe`), y **Borrar las herramientas** las quita también.
-- En la PC del desarrollador (un procesador de 6 núcleos) tardó unos 6 minutos, más la descarga la primera vez; una PC más lenta tarda más, hasta alrededor de una hora con 2 núcleos. Usa todos los núcleos del procesador menos uno, con prioridad baja, así que puedes usar la PC mientras
-  tanto.
+- Tarda de unos 5 a 30 minutos, según la PC, más la descarga la primera vez (unos 6 minutos en la PC del desarrollador,
+  con un procesador de 6 núcleos). Usa todos los núcleos del procesador menos uno, con prioridad baja, así que puedes
+  usar la PC mientras tanto.
 - **Cancelar** lo detiene, y también cerrar la ventana o reiniciar la PC: lo que hizo se guarda, y **Seguir** continúa desde
   ahí. **Empezar de cero** olvida una creación a medias y empieza desde el principio.
 
@@ -819,8 +821,8 @@ El zip tiene una carpeta con los archivos del programa y nada del juego:
 <a name="paso-2-crea-el-código-del-juego-1"></a>
 #### Crea el código del juego a mano
 
-La otra forma, para una PC donde el programa no puede crearlo (sin internet, o una red que bloquea PyPI): la herramienta del
-código fuente crea el mismo código del juego (el mismo id) con un Python tuyo.
+La otra forma, para una PC donde el programa no puede crearlo (sin internet, o una red que bloquea PyPI y también
+ziglang.org): la herramienta del código fuente crea el mismo código del juego (el mismo id) con un Python tuyo.
 
 1. Instala [Python](https://www.python.org/downloads/). Marca **Add python.exe to PATH** en el instalador.
 2. Baja la herramienta de la misma versión que tu zip `MHGU-PC`: en [Releases](../../releases/latest), en **Assets**, haz
@@ -1013,7 +1015,7 @@ Para abrir `%APPDATA%`, escríbelo en la barra de direcciones del Explorador de 
 | El Control inteligente de aplicaciones lo bloqueó | Bloquea los programas sin firma, sin **Ejecutar de todas formas**, y `MHGU.exe` no está firmado: solo arranca con el Control inteligente de aplicaciones desactivado (Seguridad de Windows, **Control de aplicaciones y navegador**, **Configuración de Control inteligente de aplicaciones**). Piénsalo antes: en muchas versiones de Windows no se puede volver a activar sin reinstalar Windows |
 | "En esa carpeta falta mhgugame.dll" | La descarga no lo trae: pulsa **Crear el código del juego en esta PC** en esa pantalla ([paso 3 de la instalación](#paso-3-crea-el-código-del-juego)) |
 | "Este mhgugame.dll es de otra versión" | Se creó para otra versión: pulsa **Crear el código del juego en esta PC** en esa pantalla y se vuelve a crear para esta |
-| El creador no puede descargar sus herramientas | Revisa la conexión a internet y pulsa **Seguir**: la descarga continúa desde donde quedó. Algunos proveedores de internet o filtros bloquean `files.pythonhosted.org` (las descargas de PyPI), y el creador lo dice: otra red, u otro DNS como 1.1.1.1, lo evita; o crea el código del juego [a mano](#crea-el-código-del-juego-a-mano) |
+| El creador no puede descargar sus herramientas | Revisa la conexión a internet y pulsa **Seguir**: la descarga continúa desde donde quedó. Si PyPI (`files.pythonhosted.org`) no responde, porque algunos proveedores de internet o filtros lo bloquean, el creador descarga Zig de ziglang.org, el sitio de Zig, por su cuenta. Si los dos están bloqueados, lo dice: otra red, u otro DNS como 1.1.1.1, lo evita; o crea el código del juego [a mano](#crea-el-código-del-juego-a-mano) |
 | Tu antivirus avisa, bloquea o borra `zig.exe` o `python.exe` de la carpeta `builder` | Son el Zig y el Python oficiales, verificados con su SHA-256 antes de usarlos; algunos antivirus desconfían de un compilador recién descargado. Permite la carpeta `builder` junto a `MHGU.exe` y pulsa **Seguir**, o crea el código del juego [a mano](#crea-el-código-del-juego-a-mano) |
 | El creador dice que no hay espacio suficiente | Necesita unos 3 GB libres en el disco donde está `MHGU.exe` mientras trabaja. Libera espacio, o mueve la carpeta del programa a otro disco, y pulsa **Seguir** |
 | El creador se detuvo y **Seguir** vuelve a fallar | **Empezar de cero** borra lo que hizo y empieza desde el principio. Si sigue fallando, adjunta `builder_log.txt` (junto a `MHGU.exe`) a un [issue](../../issues) |

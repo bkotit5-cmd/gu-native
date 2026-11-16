@@ -253,11 +253,17 @@ loaded); closing the window while it builds asks first and stops it, its work ke
   proxy), checked against their SHA-256, unpacked beside their place and renamed when whole (`runtime/unzip.c`), in
   `builder\` beside the settings: python.org's embeddable Python 3.14.9 for 64-bit Windows (12.0 MB; SHA-256 from
   python.org's release page) and Zig 0.13.0 from PyPI's `ziglang` win_amd64 wheel (76.7 MB; SHA-256 from PyPI's JSON),
-  of which `zig.exe` and the lib parts `zig cc` reads for x86_64-windows-gnu (`ZIG_KEEP`). A cut download goes on with an
-  HTTP Range. Never game files. The embeddable Python reads no environment variable: its `python314._pth` is written to
+  or, when that fails or files.pythonhosted.org resolves to a loopback address here, from ziglang.org's own
+  `zig-windows-x86_64-0.13.0.zip` (75.5 MB; SHA-256 d8599947... from ziglang.org's `download/index.json`, and the zip's
+  minisign signature checks with Zig's key): `ZIG_ORG`, `other_source`. The 6027 files kept are the same, byte for byte,
+  in both (the prefix differs: `ziglang/`, `zig-windows-x86_64-0.13.0/`), so either gives the same `builder\zig` and the
+  same DLL; `.installed` names the source used and either counts. The log and the page's download line name the source
+  (`download:zig@ziglang.org`); each source's cut download is its own `downloads\<file>.part`. Kept of Zig: `zig.exe` and
+  the lib parts `zig cc` reads for x86_64-windows-gnu (`ZIG_KEEP`). A cut download goes on with an HTTP Range. Never game files. The embeddable Python reads no environment variable: its `python314._pth` is written to
   name the scripts' `tools` (gen.py's own imports) and the work folder's `pylib` (build_game.py's LZ4 reader, `lz4_env`).
   A download whose host the system resolves to a loopback address says so (the developer's provider answered 127.9.9.9
-  for files.pythonhosted.org: a DNS block, which a player can get around with another DNS or network).
+  for files.pythonhosted.org: a DNS block; Zig then comes from ziglang.org, and with both blocked another DNS or network
+  gets around it).
 - **Zig instead of llvm-mingw** (`build_game.py --zig`): the same PC_CFLAGS with Zig's name for the processor
   (`-mcpu=x86_64_v2` for `-march=x86-64-v2`) and `-target x86_64-windows-gnu` (mingw-w64 with the UCRT, as llvm-mingw's
   UCRT build: the same `api-ms-win-crt-*` imports, plus a few of Zig's mingw startup code). Zig builds its mingw-w64 and
