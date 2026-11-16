@@ -277,10 +277,15 @@ int plat_thread_create(void *(*fn)(void *), void *arg, size_t stack) {
     return err;
 }
 
-void plat_fatal_notice(void) {
-    if (g_own_log)
+void plat_fatal_notice_why(const char *why) {
+    if (why && !strcmp(why, "file_cut"))
+        plat_error_box("The game stopped: one of its files is shorter than it should be, or damaged (cut short when it was copied). "
+                       "Copy the romfs folder again; Verify game files names the file. The details are in log.txt.");
+    else if (g_own_log)
         plat_error_box("The game stopped because of an error. The details are in log.txt, next to mhgurecomp.");
 }
+
+void plat_fatal_notice(void) { plat_fatal_notice_why(NULL); }
 
 // ---- diagnostics
 const char *plat_symbol(uint64_t pc, uint64_t *offset) {

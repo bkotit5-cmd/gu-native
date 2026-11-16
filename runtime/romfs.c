@@ -15,6 +15,7 @@
 
 #include "arcmerge.h"
 #include "rt.h"
+#include "verify.h"
 
 #define EMPTY 0xFFFFFFFFu
 #define DATA_START 0x200u
@@ -330,6 +331,17 @@ static bool build(RomfsImage *im, const char *base_dir, const char *const *overl
     if (empty) LOG("[romfs] WARNING: %d empty file(s): the copy is incomplete\n", empty);
     if (unread_own) LOG("[romfs] WARNING: %d file(s) or folder(s) of the game's could not be read\n", unread_own);
     if (short_own || empty) g_short_gb = own / 1e9, g_short_empty = empty, g_short_size = short_own;
+    {  // (each of them against version 1.4.0's size, on a thread of its own: verify.c verify_quick_start)
+        const char **rel = malloc(sizeof *rel * (l.nf ? l.nf : 1)), **host = malloc(sizeof *host * (l.nf ? l.nf : 1));
+        uint64_t *sz = malloc(sizeof *sz * (l.nf ? l.nf : 1));
+        int n = 0;
+        for (int i = 0; rel && host && sz && i < l.nf; i++)
+            if (!strncmp(l.files[i]->path, base_dir, bl) && l.files[i]->path[bl] == '/')  // (the game's own, not a mod's)
+                rel[n] = l.files[i]->rpath, host[n] = l.files[i]->path, sz[n] = l.files[i]->size, n++;
+        const char *nq = getenv("MHGU_ROMFS_NOQUICK");  // (=1: not checked)
+        if (rel && host && sz && !(nq && atoi(nq) > 0)) verify_quick_start(rel, host, sz, n);
+        free(rel), free(host), free(sz);
+    }
     const char *t = getenv("MHGU_ROMFS_SHORT");  // (test: the notice as if the copy were that many GB, e.g. 11.5)
     if (t && atof(t) > 0) g_short_gb = atof(t), g_short_size = true;
     return true;

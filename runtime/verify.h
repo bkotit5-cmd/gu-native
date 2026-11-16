@@ -4,6 +4,7 @@
 // settings menu shows its progress and its report (settings_panel.cpp, View::Verify); the log gets every file.
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -33,6 +34,11 @@ void verify_cancel(void);  // stops within a moment; the report says what was re
 VerifyState verify_state(void);
 // The report (done, cancelled or failed): its lines, up to max, copied; how many there are
 int verify_lines(VerifyLine *out, int max);
+// (romfs.c, as the game starts) The game's own romfs files (paths inside romfs, host paths, sizes: copied) checked
+// against version 1.4.0's sizes on a thread of its own; verify_quick_cut then says how many were cut short (-1: not
+// known yet), how many of those are empty, and the first one's path ("romfs/...")
+void verify_quick_start(const char *const *rel, const char *const *host, const uint64_t *size, int n);
+int verify_quick_cut(int *empty, char *first, size_t size);
 
 #ifdef __cplusplus
 }

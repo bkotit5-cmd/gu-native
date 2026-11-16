@@ -357,6 +357,17 @@ public class GameActivity extends SDLActivity {
         activity.startActivity(intent);
     }
 
+    /** Lo mismo, cuando el runtime sabe qué pasó (runtime/hle/abort.c): "file_cut", un archivo del juego cortado o dañado. */
+    public static void crashReportWhy(String why) {
+        SDLActivity activity = mSingleton;
+        if (activity == null) throw new IllegalStateException("crashReport: no activity");
+        Intent intent = new Intent(activity, LogShareActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.putExtra(LogShareActivity.EXTRA_CRASH, true);
+        intent.putExtra(LogShareActivity.EXTRA_WHY, why);
+        activity.startActivity(intent);
+    }
+
     /** LAN (runtime/net/ldn.c): sin este permiso, muchos teléfonos descartan por Wi-Fi los paquetes de búsqueda de sala. */
     public static void lanSearch(boolean on) {
         SDLActivity activity = mSingleton;

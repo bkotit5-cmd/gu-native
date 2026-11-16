@@ -164,7 +164,7 @@ static int find_want(const Work *k, const char *path, bool lower) {
     return -1;
 }
 
-static bool load_list(Work *k) {
+static bool load_list(Work *k, bool quiet) {
     char path[1100];
 #ifdef __ANDROID__
     snprintf(path, sizeof path, "%s", LIST_NAME);  // (the APK's assets)
@@ -212,7 +212,7 @@ static bool load_list(Work *k) {
     k->slot = malloc(sizeof *k->slot * slots), k->lower = malloc(sizeof *k->lower * slots);
     memset(k->slot, 0xff, sizeof *k->slot * slots), memset(k->lower, 0xff, sizeof *k->lower * slots);
     for (int i = 0; i < k->n; i++) index_add(k, k->slot, i, false), index_add(k, k->lower, i, true);
-    LOG("[verify] the list of version 1.4.0's files: %d files (%s)\n", k->n, path);
+    if (!quiet) LOG("[verify] the list of version 1.4.0's files: %d files (%s)\n", k->n, path);
     return true;
 }
 
@@ -483,7 +483,7 @@ static void *run(void *arg) {
     int problems = 0;
     char c1[32], c2[32];
     LOG("[verify] checking the game folder %s\n", g_game_dir ? g_game_dir : "(none)");
-    if (!load_list(&k)) {
+    if (!load_list(&k, false)) {
         add(&r, VL_PROBLEM, "The list of version 1.4.0's files is missing from the app (game_files.txt): install the app again.", NULL,
             NULL);
         publish(&r, VERIFY_FAILED, 1);
@@ -721,6 +721,79 @@ static void *run(void *arg) {
     free(k.h), free(k.unread), free(k.text), free(k.w), free(k.slot), free(k.lower);
     atomic_store(&g_running, 0);
     return NULL;
+}
+
+// ------------------------------------------------------------------ at the start: the sizes alone
+// (romfs.c, as the game starts) The game's own romfs files against version 1.4.0's sizes, on a thread of its own and
+// nothing read but an archive's table: one smaller than it should be and not whole as its format says (an archive whose
+// entries reach past its end; any other kind smaller) was cut short when it was copied. The movies are left out: encoded
+// again they are smaller and play (#171). GU#232: an area's archive some 10 MB short (12.30 GB of 12.31, no file empty)
+// closed the game entering that area (the game's own check: result 2002-3005), and the start's rule (the game's files
+// 2.5 % short as a whole, or empty ones) never told; Verify game files would have, had the player known to run it.
+static char **q_rel, **q_host;
+static uint64_t *q_size;
+static int q_n;
+static atomic_int q_state;  // 0 not started, 1 running, 2 done (q_cut, q_first set)
+static int q_cut, q_empty;
+static char q_first[VERIFY_ARG];
+
+static void *quick_run(void *arg) {
+    (void)arg;
+#ifdef __ANDROID__
+    setpriority(PRIO_PROCESS, (id_t)gettid(), 10);  // (the game first)
+#elif defined(_WIN32)
+    plat_thread_priority(PLAT_PRIO_BACKGROUND);
+#endif
+    uint64_t t0 = plat_now_ns();
+    Work k = {0};
+    int cut = 0, empty = 0, known = 0;
+    char first[VERIFY_ARG] = "";
+    if (load_list(&k, true)) {
+        char rel[1100];
+        for (int i = 0; i < q_n; i++) {
+            snprintf(rel, sizeof rel, "romfs/%s", q_rel[i]);
+            int w = find_want(&k, rel, false);
+            if (w < 0) continue;
+            known++;
+            const Want *x = &k.w[w];
+            if (q_size[i] >= x->size || is_movie(x->path)) continue;
+            if (q_size[i] && whole(q_host[i], q_size[i]) == 1) continue;  // (smaller but whole: packed again, not cut)
+            if (!cut++) snprintf(first, sizeof first, "%s", rel);
+            empty += !q_size[i];
+            if (cut <= 20) LOG("[romfs] WARNING: cut short: %s, %llu of its %llu bytes\n", rel, (unsigned long long)q_size[i],
+                               (unsigned long long)x->size);
+        }
+        LOG("[romfs] the game's own files against version 1.4.0's sizes: %d known, %d cut short (%d of them empty), %.0f ms\n",
+            known, cut, empty, (plat_now_ns() - t0) / 1e6);
+    }
+    free(k.text), free(k.w), free(k.slot), free(k.lower);
+    for (int i = 0; i < q_n; i++) free(q_rel[i]), free(q_host[i]);
+    free(q_rel), free(q_host), free(q_size);
+    q_rel = q_host = NULL, q_size = NULL, q_n = 0;
+    q_cut = cut, q_empty = empty;
+    snprintf(q_first, sizeof q_first, "%s", first);
+    atomic_store(&q_state, 2);
+    return NULL;
+}
+
+void verify_quick_start(const char *const *rel, const char *const *host, const uint64_t *size, int n) {
+    if (atomic_exchange(&q_state, 1)) return;
+    q_rel = malloc(sizeof *q_rel * (n ? n : 1)), q_host = malloc(sizeof *q_host * (n ? n : 1)), q_size = malloc(sizeof *q_size * (n ? n : 1));
+    for (int i = 0; i < n; i++) q_rel[i] = strdup(rel[i]), q_host[i] = strdup(host[i]), q_size[i] = size[i];
+    q_n = n;
+    pthread_t t;
+    pthread_attr_t a;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&t, &a, quick_run, NULL)) quick_run(NULL);
+    pthread_attr_destroy(&a);
+}
+
+int verify_quick_cut(int *empty, char *first, size_t size) {
+    if (atomic_load(&q_state) != 2) return atomic_load(&q_state) ? -1 : 0;
+    if (empty) *empty = q_empty;
+    if (first && size) snprintf(first, size, "%s", q_first);
+    return q_cut;
 }
 
 void verify_start(void) {

@@ -71,6 +71,10 @@ bool vk_exiting(void);
 // Work is recorded into the current command buffer; uploads go into a separate one that runs first.
 VkCommandBuffer vk_cmd(void);         // current command buffer (outside any render pass unless exec.c began one)
 VkCommandBuffer vk_upload_cmd(void);  // upload command buffer of the pending submission
+// (the device-lost report: exec.c) a copy just recorded into the pending submission - into an image (a texture's upload:
+// its size and format) or a buffer - and the window image's pass (device.c: the 3D picture, the HUD and the overlay)
+void vk_lost_upload(bool image, uint64_t bytes, uint32_t w, uint32_t h, int fmt);
+void vk_lost_window_pass(uint32_t w, uint32_t h, int fmt);
 uint64_t vk_pending_seq(void);        // number the pending submission will get
 uint64_t vk_completed_seq(void);
 void vk_wait_seq(uint64_t seq);

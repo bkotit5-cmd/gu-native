@@ -416,6 +416,74 @@ void perf_mem_report(void) {
     fprintf(stderr, "[mem] at the error: %ld map entries, resident %ld MB\n", maps, rss / 1024);
 }
 
+// (1.0.1) The heat, once a minute after the [mem] line: the system's thermal status and headroom (API 30 / 31), the
+// battery's temperature, each CPU cluster's clock (now, the most it may take now, its own most: a thermal cap lowers the
+// second) and the GPU's where the system lets an app read it. Players' "the FPS fall after a while and come back when the
+// menu opens" (M10 of 1.0: Helio G70 / G85 with a Mali-G52 MC2, four of them) is heat or not by this line; every file is
+// read only, and one an app may not read is left out.
+static long read_long(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    char b[64];
+    ssize_t r = read(fd, b, sizeof b - 1);
+    close(fd);
+    if (r <= 0) return -1;
+    b[r] = 0;
+    const char *p = b;
+    while (*p && (*p < '0' || *p > '9') && *p != '-') p++;  // (MediaTek's GED: "idx, freq")
+    const char *comma = strchr(b, ',');
+    if (comma && comma[1]) p = comma + 1;
+    return atol(p);
+}
+
+static void heat_line(void) {
+    static AThermalManager *tm;
+    static bool tm_tried;
+    if (!tm_tried) {  // (a binder call: once)
+        tm_tried = true;
+        pthread_once(&load_once, load);
+        if (fn.thermal_manager) tm = fn.thermal_manager();
+    }
+    char line[512];
+    int o = snprintf(line, sizeof line, "[perf] heat:");
+    if (tm && fn.thermal_status) o += snprintf(line + o, sizeof line - o, " thermal status %d", fn.thermal_status(tm));
+    if (tm && fn.thermal_headroom) {
+        float h = fn.thermal_headroom(tm, 0);  // (1.0: the system slows the phone down; NaN: not known)
+        if (h == h) o += snprintf(line + o, sizeof line - o, ", headroom %.2f", h);
+    }
+    long bt = read_long("/sys/class/power_supply/battery/temp");
+    if (bt > -400 && bt < 1500) o += snprintf(line + o, sizeof line - o, ", battery %.1f C", bt / 10.0);
+    // the CPU clusters (a policy per cluster: policy0, policy4, policy6, policy7...), MHz now / allowed / its most
+    int nclu = 0;
+    for (int c = 0; c < 16 && o < (int)sizeof line - 40; c++) {
+        char p[96];
+        snprintf(p, sizeof p, "/sys/devices/system/cpu/cpufreq/policy%d/scaling_cur_freq", c);
+        long cur = read_long(p);
+        if (cur <= 0) continue;
+        snprintf(p, sizeof p, "/sys/devices/system/cpu/cpufreq/policy%d/scaling_max_freq", c);
+        long cap = read_long(p);
+        snprintf(p, sizeof p, "/sys/devices/system/cpu/cpufreq/policy%d/cpuinfo_max_freq", c);
+        long top = read_long(p);
+        o += snprintf(line + o, sizeof line - o, "%s%ld/%ld/%ld", nclu++ ? ", " : "; CPU MHz now/allowed/most: ", cur / 1000,
+                      cap / 1000, top / 1000);
+    }
+    // the GPU: Adreno's kgsl (Hz), MediaTek's GED (KHz), a Mali's devfreq (Hz)
+    static const char *const gpu[][2] = {{"/sys/class/kgsl/kgsl-3d0/gpuclk", "/sys/class/kgsl/kgsl-3d0/max_gpuclk"},
+                                         {"/sys/kernel/ged/hal/current_freqency", NULL},
+                                         {"/sys/class/misc/mali0/device/cur_freq", "/sys/class/misc/mali0/device/max_freq"},
+                                         {"/sys/class/devfreq/13000000.mali/cur_freq", "/sys/class/devfreq/13000000.mali/max_freq"}};
+    for (size_t g = 0; g < sizeof gpu / sizeof gpu[0] && o < (int)sizeof line - 40; g++) {
+        long cur = read_long(gpu[g][0]);
+        if (cur <= 0) continue;
+        long top = gpu[g][1] ? read_long(gpu[g][1]) : -1;
+        double div = g == 1 ? 1e3 : 1e6;  // (GED: KHz)
+        o += snprintf(line + o, sizeof line - o, "; GPU MHz now %.0f", cur / div);
+        if (top > 0) o += snprintf(line + o, sizeof line - o, ", allowed %.0f", top / div);
+        break;
+    }
+    LOG("%s\n", line);
+}
+
 static sem_t mem_sem;       // (MHGU_PERF_MEMTHREAD) a line is due
 static bool mem_threaded;   // the mem thread writes the lines (set once, before the first)
 
@@ -443,6 +511,7 @@ static void mem_line(void) {
     LOG("[mem] %ld map entries%s (%+ld since the start), resident %ld MB (%+ld; own %ld, files %ld, shared %ld), the system's "
         "available %ld MB%s\n",
         maps, of, maps - first_maps, rss / 1024, (rss - first_rss) / 1024, anon / 1024, file / 1024, shmem / 1024, avail / 1024, gpu);
+    heat_line();
     if (__atomic_load_n(&log_on, __ATOMIC_RELAXED) > 0)  // (MHGU_ADPF_LOG: what reading it cost the thread)
         LOG("[mem] that line took %.2f ms of the %s thread\n", (plat_now_ns() - t0) / 1e6, mem_threaded ? "mem" : "presenting");
 }

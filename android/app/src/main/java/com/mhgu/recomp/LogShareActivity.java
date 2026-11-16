@@ -38,6 +38,7 @@ import java.util.Locale;
  */
 public class LogShareActivity extends Activity {
     static final String EXTRA_CRASH = "crash";
+    static final String EXTRA_WHY = "why";  // (what went wrong, when the runtime knows it: "file_cut")
     private static final String TAG = "MHGU";
     private static final int WINE = Color.rgb(38, 18, 14), PANEL = Color.rgb(26, 12, 9), CREAM = Color.rgb(240, 228, 200);
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
@@ -93,6 +94,14 @@ public class LogShareActivity extends Activity {
         LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                                                                       LinearLayout.LayoutParams.WRAP_CONTENT);
         gap.setMargins(0, dp(12), 0, 0);
+        // (runtime/hle/abort.c: the game's file system gave up on one of its files, GU#232) what to do, before the log
+        if (crash && "file_cut".equals(getIntent().getStringExtra(EXTRA_WHY)))
+            box.addView(text(es ? "Uno de los archivos del juego es más corto de lo que debería, o está dañado: se cortó al "
+                                  + "copiarlo. Vuelve a copiar la carpeta romfs al dispositivo. En el juego, Sistema › Tu "
+                                  + "partida › Verificar archivos del juego dice cuál es."
+                                : "One of the game's files is shorter than it should be, or damaged: it was cut short when it "
+                                  + "was copied. Copy the romfs folder to the device again. In the game, System › Your game › "
+                                  + "Verify game files names it.", 15, GOLD, false), gap);
         box.addView(text(es ? "El registro explica qué pasó y en qué teléfono. Puedes enviarlo a quien te esté ayudando: "
                               + "se abre la lista de apps y tú eliges a dónde va. No lleva tu partida, pero puede "
                               + "incluir la dirección de tu red local si jugaste en LAN."

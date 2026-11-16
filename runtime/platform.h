@@ -84,6 +84,9 @@ bool plat_path_from_utf8(const char *utf8, char *out, size_t size);
 bool plat_path_to_utf8(const char *native, char *out, size_t size);
 void plat_error_box(const char *msg);
 void plat_fatal_notice(void);
+// The same with what went wrong, when the runtime knows it (hle/abort.c): why names it, "file_cut" (one of the game's files
+// shorter than the game expects, or damaged: the game's own file system check failed)
+void plat_fatal_notice_why(const char *why);
 // A thread running fn(arg) with stack bytes of stack, nobody waiting for it (runtime/kernel.c: a guest thread); 0 or
 // the error. Windows only reserves the stack and commits it as it is used: pthread_create committed all of it.
 int plat_thread_create(void *(*fn)(void *), void *arg, size_t stack);

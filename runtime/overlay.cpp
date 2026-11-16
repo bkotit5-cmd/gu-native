@@ -43,6 +43,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "hle/chat.h"
 #include "settings_locale.h"
 #include "settings_panel.h"
+#include "verify.h"
 
 #define LOG(...) rt_logf(__VA_ARGS__)  // (Windows: queued, the log's own thread writes it)
 
@@ -554,41 +555,58 @@ static void menu_hint(uint64_t now) {
 }
 #endif
 
-// A copy of the game's files cut short (romfs.c romfs_incomplete: short of the game's size but its movies, or empty files)
-// starts, then closes or draws black somewhere later (#106): a few seconds into each start, once nothing else is shown,
-// the player is told. Short by size, empty comes as 0 and the size is told; else the empty files.
+// A copy of the game's files cut short (romfs.c romfs_incomplete: short of the game's size but its movies, or empty files;
+// verify.c verify_quick_cut: any of its files smaller than version 1.4.0's and not whole) starts, then closes or draws
+// black somewhere later (#106, GU#232): a few seconds into each start, once nothing else is shown, the player is told.
+// Short by size, the size is told; else files cut short (the first one named), or the empty ones.
 static const uint64_t ROMFS_NOTICE_NS = 8000000000ull;  // (after the first frame the overlay drew)
+static const uint64_t ROMFS_QUICK_WAIT_NS = 60000000000ull;  // (the size check not done by then: what is known is told)
 static void romfs_notice(uint64_t now) {
     static uint64_t first;
     static bool done;
     if (done) return;
     double gb = 0;
-    int empty = 0;
-    if (!romfs_incomplete(&gb, &empty)) {
+    int empty = 0, cut_empty = 0;
+    char cut_first[VERIFY_ARG] = "";
+    bool incomplete = romfs_incomplete(&gb, &empty);
+    int cut = verify_quick_cut(&cut_empty, cut_first, sizeof cut_first);
+    if (!first) first = now;
+    if (cut < 0 && now - first < ROMFS_QUICK_WAIT_NS) return;  // (the size check still going)
+    if (!incomplete && cut <= 0) {
         done = true;
         return;
     }
-    if (!first) first = now;
     if (now - first < ROMFS_NOTICE_NS || notice_due(now) || settings_panel_credits_up()) return;
     done = true;
     int lang = config_language();
-    char size[16], text[400];
+    char size[16], text[600];
     snprintf(size, sizeof size, "%.1f", gb);
     if (lang == 1)
         for (char *c = size; *c; c++)
             if (*c == '.') *c = ',';  // (Spanish: 11,5)
-    if (!empty)
+    if (incomplete && !empty)
         snprintf(text, sizeof text,
                  settings_text(lang, "The romfs folder holds %s GB of the game's 12.3 GB: some files were cut short when they were "
                                      "copied. If the game closes or shows black, copy the romfs folder to the device again."),
                  size);
+    else if (cut == 1 && !cut_empty)
+        snprintf(text, sizeof text,
+                 settings_text(lang, "One of the game's files is smaller than it should be (%s): it was cut short when it was "
+                                     "copied. If the game closes or shows black, copy the romfs folder to the device again."),
+                 cut_first);
+    else if (cut > cut_empty || (cut > 0 && !incomplete))
+        snprintf(text, sizeof text,
+                 settings_text(lang, "%d of the game's files are smaller than they should be (the first: %s): they were cut short "
+                                     "when they were copied. If the game closes or shows black, copy the romfs folder to the "
+                                     "device again. System › Your game › Verify game files lists them all."),
+                 cut, cut_first);
     else
         snprintf(text, sizeof text,
                  settings_text(lang, "%d of the romfs folder's files are empty: they were cut short when they were copied. If the "
                                      "game closes or shows black, copy the romfs folder to the device again."),
-                 empty);
+                 empty ? empty : cut_empty);
     overlay_notice(settings_text(lang, "Game files incomplete"), text);
-    LOG("[overlay] notice: the game's files look incomplete (%s GB, %d empty)\n", size, empty);
+    LOG("[overlay] notice: the game's files look incomplete (%s GB, %d empty, %d cut short)\n", incomplete ? size : "-", empty, cut);
 }
 
 static void draw_plate(const std::string &title, const std::string &text, float alpha, float scale);
