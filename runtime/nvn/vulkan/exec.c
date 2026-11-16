@@ -1340,6 +1340,11 @@ static int compile_workers(void) {
 #define PC_EVERY_NS 120000000000ull  // (at most one save in this long: a Mali's file is about 20 MB)
 #define PC_MIN_NEW 64
 static _Atomic uint64_t pc_told, pc_hit, pc_new, pc_saved_ns;
+// (the start's line) the pipelines built in under 4 ms: on a driver that can't say (no creation feedback: a PowerVR, Vulkan
+// 1.1) what its cache had shows only as time - a player there saw the start build everything again at every launch
+// (Discord, BXM-8-256: 3,255 builds in 150 s with a 130 MB cache, 570 s from an empty one)
+#define PC_FAST_NS 4000000ull
+static _Atomic uint64_t pc_fast;
 static _Atomic int pc_start_done, pc_due_queued;
 static void pcache_built(VkPipelineCreationFeedbackFlags f) {
     bool told = (f & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) != 0;
@@ -1383,12 +1388,19 @@ static void queue_caught_up(JobQueue *q) {
     if (q->watch != 1 || q->head || q->lhead || q->busy) return;
     q->watch = 0;
     uint64_t told = atomic_load(&pc_told), hit = atomic_load(&pc_hit);
-    char had[96] = "";
+    char had[96] = "", took[200] = "";
     if (told)
         snprintf(had, sizeof had, " (the driver's pipeline cache had %llu of the %llu pipelines)", (unsigned long long)hit,
                  (unsigned long long)told);
-    LOG("[shader] the builds queued at the start are done: %llu in %.1f s%s\n", (unsigned long long)q->watch_jobs,
-        (plat_now_ns() - q->watch_t0) / 1e9, had);
+    // (the workers' time since the start, by kind: programs - SPIR-V from its cache, the driver's modules - and pipelines,
+    // those built in under 4 ms counted; MHGU_VK_STATS's 2 s lines empty these counts as they go)
+    uint64_t np = atomic_load(&stat_job_n[1]), pn = atomic_load(&stat_job_n[2]);
+    if (np || pn)
+        snprintf(took, sizeof took, "; programs %llu in %.1f s, pipelines %llu in %.1f s, %llu of them in under 4 ms",
+                 (unsigned long long)np, atomic_load(&stat_job_ns[1]) / 1e9, (unsigned long long)pn,
+                 atomic_load(&stat_job_ns[2]) / 1e9, (unsigned long long)atomic_load(&pc_fast));
+    LOG("[shader] the builds queued at the start are done: %llu in %.1f s%s%s\n", (unsigned long long)q->watch_jobs,
+        (plat_now_ns() - q->watch_t0) / 1e9, had, took);
     atomic_store(&pc_start_done, 1);
 }
 
@@ -4489,6 +4501,7 @@ static void build_pipeline(void *arg) {
         if (n++ < 10) LOG("[vk] pipeline creation failed: %d\n", r);
     } else {
         pcache_built(fb.flags);
+        if (plat_now_ns() - t0 < PC_FAST_NS) atomic_fetch_add(&pc_fast, 1);
     }
     atomic_fetch_add(&stat_compiles, 1);
     job_stat(2, t0);
@@ -4808,6 +4821,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // default while they show; the item bar, the Hunter Arts and the target camera answer a finger
                 // (runtime/touch.cpp), moved or not
                 bool hunt_hud = !ui_results_pass && !ui_results_last && !ui_loading_pass && !ui_title_pass && !ui_meownster_pass;
+                bool town = plat_now_ns() - g_town_ns < 500000000ull;  // (a town's walking-around update just now: no hunt)
                 int part = -1;              // (HP_*)
                 bool part_nearest = false;  // (a piece of the status in none of its parts' regions: the nearest's)
                 bool part_touch = false;    // (a finger works it there: the item bar itself, not its ammo list)
@@ -4906,20 +4920,23 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // Effects over the Felyne skills, #167). Not a cinematic's bar, nor the Meownster screen's frame
                         if (window_lately && !ui_meownster_pass && pos_x < 630.0f && pos_y >= 10.0f && pos_y < 560.0f)
                             anchor = ANCHOR_CENTER, window_before = !ui_window_pass;
-                        // A town's windows here, the world map (X) and the "Choose a destination" list after it (x 291..985,
-                        // y 192..522), keep the middle 16:9 too: Right, at 21:9 / Edges they sat right of the middle (GU#219;
-                        // RG406V, Edges at 1600:720: 128 of the canvas's units). A town's prompts at the bottom right (x 1102..,
-                        // y 640..) stay at the edge; a hunt's pieces (no town's update just now) as before
-                        // With one of this layer's stretched panels drawn in this frame or the two before (the multiplayer
-                        // menu, the Create Hub form, the hub list: x 782..1254, y 56..486) all of the window keeps the
-                        // middle: its half right of x 1000 (the panel's right part and frame, the form's values, its page
-                        // counter) went Right while the rest stayed, and the window came apart with Edges / 21:9 (GU#219,
-                        // Discord; a hudtrace on the PC at 2520x1080, Edges: x 1018 and 1254 "RT", 784 "CB"). The town's
-                        // prompts below y 600 stay at the edge
-                        else if (!ui_meownster_pass && pos_y >= 10.0f && pos_y < 600.0f && plat_now_ns() - g_town_ns < 500000000ull &&
-                                 (pos_x < 1000.0f || (ui_panel_frame && g_present_count - ui_panel_frame <= 2))) {
+                        // A town's windows here keep the middle 16:9 too, each one whole: the world map (X) and the
+                        // "Choose a destination" list after it (x 291..985, y 192..522: Right, at 21:9 / Edges they sat right
+                        // of the middle, GU#219; RG406V, Edges at 1600:720: 128 of the canvas's units), the multiplayer
+                        // menu, the Create Hub form and the hub lists (stretched panels, x 782..1254, y 56..486), the Guild
+                        // Card's pages, a hub's player list and posted quest's card, the Control Type list (Bherna). 1.0's rule
+                        // (72b9365) kept the middle left of x 1000 and above y 600 only, 1.0.1's (8831010) all of a window
+                        // with a stretched panel above y 600: the rest went Right, and the windows came apart with Edges /
+                        // 21:9 (Discord "Bug hud", GU#247; a hudtrace on the PC at 3168x1440, Edges, the Guild Card's Weapon
+                        // Usage: its numbers at y 573 "CB", its weapons' icons at y 621 "RB", 175 units right of them; up to
+                        // 0.1.9.3 all of the layer went Right, each window whole at the edge). Only the town's prompts at the
+                        // bottom right stay at the edge (their bars at x 1102, a row every 34 units up from y 674: 572 with
+                        // four rows, 538 with five), and a cinematic's bars (y 0 and 720); a hunt's pieces (no town's
+                        // update just now) as before
+                        else if (!ui_meownster_pass && town && pos_y >= 10.0f && pos_y <= 712.0f && !(pos_x >= 1090.0f && pos_y >= 530.0f)) {
                             anchor = ANCHOR_CENTER;
-                            if (pos_x >= 1000.0f) vanchor = V_BOTTOM;  // (as the window's left part: one piece)
+                            if (pos_x >= 1000.0f && pos_y < 600.0f && ui_panel_frame && g_present_count - ui_panel_frame <= 2)
+                                vanchor = V_BOTTOM;  // (a stretched panel's window: its right part as its left, one piece)
                         }
                         // Touch controls (runtime/touch.cpp): the hunt's Hunter Arts panels (x 726..842, y 560..720: up
                         // to three rows) to the top right, the target camera's icons (target_piece) left of them
@@ -4927,16 +4944,18 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // style with fewer than three arts has the empty slots' frames there (one art: rows at y 676,
                         // 721, 766), out of sight on the console; taken by their top row, they came into view as blank
                         // rows under the arts (#125, Discord)
-                        // (and what is drawn left of an art on its row: arts_row_has)
+                        // (and what is drawn left of an art on its row: arts_row_has). Not in a town, which has neither: its
+                        // windows' pieces there are no part (the Guild Card's page counter has its R at 1200, 54.6, the
+                        // target camera's place: taken for it, the touch arrangement drew it 250 units left of the rest)
                         bool flat = !(fabsf(m[0]) > 2.0f && fabsf(m[5]) > 2.0f);
                         bool arts_box = pos_x >= 700.0f && pos_x <= 900.0f;
                         bool arts_label = pos_x >= 640.0f && pos_x < 700.0f && arts_row_has(pos_y);
-                        if (hunt_hud && flat && (arts_box || arts_label) && pos_y > 560.0f && pos_y < 720.0f &&
+                        if (hunt_hud && !town && flat && (arts_box || arts_label) && pos_y > 560.0f && pos_y < 720.0f &&
                             hud_accept(HP_ARTS, pos_z, pos_x, pos_y)) {
                             part = HP_ARTS, part_touch = true;
                             if (arts_box) arts_row_note(pos_y);
                             if (prof == HUD_TOUCH) vanchor = V_TOP;
-                        } else if (hunt_hud && target_piece(pos_x, pos_y) && hud_accept(HP_TARGET, pos_z, pos_x, pos_y)) {
+                        } else if (hunt_hud && !town && target_piece(pos_x, pos_y) && hud_accept(HP_TARGET, pos_z, pos_x, pos_y)) {
                             part = HP_TARGET, part_touch = true;
                         }
                     } else if (fabsf(pos_z - 103.0f) < 0.5f) {
@@ -5107,8 +5126,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                               !(part >= 0 && ((prof == HUD_TOUCH && (part == HP_ARTS || part == HP_TARGET)) || part_custom));
                     vgroup = v;
                     if (g_hudtrace_active)
-                        LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s%s sc %d,%d %dx%d%s%s%s%s\n", pos_z, pos_x, pos_y, m[0], m[1],
-                            m[4], m[5], "LRC"[anchor], "TBC"[vanchor], new_pos_x, new_pos_y, ui_menu_pass ? " menu" : "",
+                        LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s%s%s sc %d,%d %dx%d%s%s%s%s\n", pos_z, pos_x, pos_y, m[0], m[1],
+                            m[4], m[5], "LRC"[anchor], "TBC"[vanchor], new_pos_x, new_pos_y, ui_menu_pass ? " menu" : "", town ? " town" : "",
                             window_before ? " (before the menu's windows)" : "", st.scissor[0][0],
                             st.scissor[0][1], st.scissor[0][2], st.scissor[0][3], part >= 0 ? " part " : "", part >= 0 ? HUD_KEY[part] : "",
                             part >= 0 && part_nearest ? " (nearest)" : "", hud_hidden ? " hidden" : "");
