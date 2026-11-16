@@ -53,6 +53,7 @@ static struct {
     int told_n;
     int64_t told_period, told_at;
     int told_lines;
+    int follow;  // (frame generation) the next new frame's present goes this many vsyncs after the last one (0: none)
 } pp = {.on = -1, .window = 2000000000};
 
 static bool switch_on(void) {
@@ -119,6 +120,16 @@ static int cadence(void) {
     double d = refresh / k - cap;
     return (d < 0 ? -d : d) <= 0.02 * cap ? k : 1;
 }
+
+// (frame generation, nvn/vulkan/framegen.c) the vsyncs a game frame takes now, as the presents are timed: n >= 2 only on
+// the timed swapchain with the grid known, else 1 (no picture is made then)
+int vk_pacing_cadence(void) {
+    if (!pp.ext || !pp.sc || pp.sc != g_vk.swapchain || pp.vsync <= 0 || pp.period <= 0) return 1;
+    return cadence();
+}
+// (device.c) the next present, the game's frame after a made picture, goes `vsyncs` after the made picture's slot,
+// which took the game frame's place in the cadence
+void vk_pacing_follow(int vsyncs) { pp.follow = vsyncs; }
 
 // Should the swapchain present FIFO with times (the switch on, the limit a whole fraction of the display's rate)?
 // (device.c present_mode, and frame_begin: a change makes the swapchain again, at a menu's change of the limit or when
@@ -198,6 +209,8 @@ static void read_past(int64_t now) {
 void vk_pacing_present(VkPresentInfoKHR *pi, bool new_frame) {
     static VkPresentTimeGOOGLE pt;
     static VkPresentTimesInfoGOOGLE pti = {.sType = VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE, .swapchainCount = 1, .pTimes = &pt};
+    int follow = pp.follow;  // (frame generation: for this present only)
+    pp.follow = 0;
     if (!pp.ext || !pp.sc || pp.sc != g_vk.swapchain) return;
     int64_t now = plat_now_ns();
     if (now - pp.past_at >= 500000000) read_past(now);
@@ -232,6 +245,11 @@ void vk_pacing_present(VkPresentInfoKHR *pi, bool new_frame) {
     if (pp.last_slot) pp.last_slot = on_grid(pp.last_slot);  // (the slots taken, on the newest grid)
     if (pp.last_frame_slot) pp.last_frame_slot = on_grid(pp.last_frame_slot);
     int64_t slot = earliest > pp.last_slot ? earliest : pp.last_slot;
+    if (follow > 0 && new_frame && pp.last_slot) {  // (frame generation: the game's frame after the made picture)
+        int64_t want = pp.last_slot + follow * period;
+        if (want > slot) slot = want;
+        new_frame = false;  // (the cadence stays the made picture's)
+    }
     if (new_frame) {
         int64_t want = pp.last_frame_slot + (pp.anew ? period : n * period);
         bool late = pp.last_frame_slot && want < earliest;

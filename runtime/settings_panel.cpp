@@ -931,6 +931,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(shader_prewarm);
     SAME(draw_distance);
     SAME(smooth_gradients);
+    SAME(frame_gen);
     SAME(msaa);
     SAME(fxaa);
     SAME(fxaa_mode);
@@ -3177,6 +3178,11 @@ void rows_graphics_advanced_60(std::vector<Row> &r) {
 }
 bool shown_graphics_advanced_60() { return vk_gpu_adreno(); }
 MENU_ENTRY("graphics/advanced", 60, rows_graphics_advanced_60, {}, shown_graphics_advanced_60);
+void rows_graphics_advanced_70(std::vector<Row> &r) {  // [Graphics] FrameGen (nvn/vulkan/framegen.c)
+    add_bool(r, "framegen", "Frame generation", &s.draft.frame_gen, ini("FrameGen"));
+}
+void reset_graphics_advanced_70() { s.draft.frame_gen = config_defaults().frame_gen; }
+MENU_ENTRY("graphics/advanced", 70, rows_graphics_advanced_70, reset_graphics_advanced_70);
 #else
 void rows_graphics_advanced_30(std::vector<Row> &r) {  // [Display] GPU: Automatic, or a device by its name
     const Config &c = s.draft;                                  // (nvn/vulkan/device.c pick_device), at the next start
@@ -4292,6 +4298,8 @@ const PhoneHelp PHONE_HELP[] = {
      "El juego espera mientras este menú está abierto, cuando juegas solo. Con otros, en línea o en juego local, sigue."},
     {"BonusContent", "Copies the free downloadable content (event quests, item packs, Palicoes) to a save that has not received it yet.",
      "Copia el contenido descargable gratuito (misiones de evento, packs de objetos, Palicoes) a una partida que todavía no lo recibió."},
+    {"FrameGen", "Doubles the frames you see: a picture made between each two of the game's, so 30 FPS look like 60. It works only when the FPS limit is half the screen's refresh rate or less (30 FPS on a 60 Hz screen) and not in the game's menus. It adds a little input delay (about one refresh of the screen), fast movement can show artifacts (smears at the edges of what moves), and it costs GPU work: on a weak phone the game's own frame rate can drop. The HUD is never warped. Off by default.",
+     "Duplica los cuadros que ves: una imagen hecha entre cada dos del juego, así 30 FPS se ven como 60. Funciona solo cuando el límite de FPS es la mitad de la frecuencia de la pantalla o menos (30 FPS en una pantalla de 60 Hz) y fuera de los menús del juego. Agrega un poco de retraso a los controles (más o menos un refresco de la pantalla), en los movimientos rápidos pueden verse defectos (manchas en los bordes de lo que se mueve) y le cuesta trabajo a la GPU: en un teléfono débil los FPS propios del juego pueden bajar. El HUD nunca se deforma. Apagado por defecto."},
     {"Updates", "At most once a day the app asks GitHub for the latest version (nothing else is sent) and tells you at the next start when there is a new one. It never downloads or installs anything by itself.",
      "Como mucho una vez al día la app le pregunta a GitHub cuál es la última versión (no se envía nada más) y te avisa al abrir el juego cuando hay una nueva. Nunca descarga ni instala nada por su cuenta."},
 };

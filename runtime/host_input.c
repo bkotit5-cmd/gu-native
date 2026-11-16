@@ -229,6 +229,7 @@ static void script_parse(void) {
 //   hudtrace               log every HUD quad of the next frame: its layer, place, and where 16:10 / ultrawide moved it;
 //                          and each pass (targets, stand-ins, area), draw (program, viewport, scissor, textures), copy and dispatch
 //   frame                  log the current frame number
+//   fgeval <n> [frames]    n quality samples of frame generation from now, one every that many frames (framegen.c)
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
 //   wheel <notches>        the mouse wheel turned that far (> 0 up; by default the item bar to the left)
@@ -320,6 +321,11 @@ static void control_poll(void) {
             }
 #endif
             if (!strcmp(cmd, "gpuprof")) { extern volatile int g_gpuprof_request; g_gpuprof_request = 1; continue; }
+            if (!strcmp(cmd, "fgeval")) {  // fgeval <n> [frames]: n quality samples of frame generation (nvn/vulkan/framegen.c)
+                extern void vk_framegen_eval(int n, int every);
+                vk_framegen_eval(atoi(arg), atoi(arg2));
+                continue;
+            }
             if (!strcmp(cmd, "devicelost")) { extern volatile int g_fake_lost; g_fake_lost = 1; continue; }  // (tests: exec.c lost_report)
             if (!strcmp(cmd, "submitoom")) {  // submitoom <n>: the next n tries to submit refused for memory (tests: exec.c submit_again)
                 extern volatile int g_fake_oom;

@@ -211,6 +211,12 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "SmoothGradients = Off\n"
     "\n"
+    "; Frame generation: a made-up picture between each two of the game's, so 30 FPS show as 60. Only when the FPS\n"
+    "; limit is half the screen's refresh rate or less, and not in the game's menus. Adds a little input delay, fast\n"
+    "; movement can show artifacts, and it costs GPU time. The HUD is never warped\n"
+    "; Default: Off\n"
+    "FrameGen = Off\n"
+    "\n"
     "[Performance]\n"
 #ifdef __ANDROID__
     "; Framerate cap\n"
@@ -844,6 +850,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
+    ON_OFF("Graphics", "FrameGen", frame_gen, false),
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, FPS_MAX, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),

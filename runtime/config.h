@@ -175,6 +175,8 @@ typedef struct {
     int xroom_host_port;      // [Multiplayer] RoomHostPort: its UDP port; 0 the rooms' usual 24872
     int send_all_rewards;     // [Quest Rewards] SendAllRewards: choosing Send to the Item Box at a quest's rewards sends
                               // every reward that fits at once (runtime/hle/rewards.c); off, one at a time as the game does
+    int frame_gen;            // [Graphics] FrameGen: a made-up picture between each two of the game's, at half the display's
+                              // rate or less (nvn/vulkan/framegen.c); off by default (0: nothing in CONFIG_DEFAULT_VALUES)
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -316,6 +318,7 @@ int config_live_pause_background(void); // [Application] PauseInBackground
 int config_live_pause_menu(void);       // [Application] PauseInMenu
 int config_live_shadows(void);          // [Performance] Shadows
 int config_live_bloom(void);            // [Performance] Bloom
+int config_live_frame_gen(void);        // [Graphics] FrameGen (nvn/vulkan/framegen.c)
 int config_live_grass(void);            // [Performance] Grass
 int config_live_effects(void);          // [Performance] Effects
 int config_live_reverb(void);           // [Audio] Reverb

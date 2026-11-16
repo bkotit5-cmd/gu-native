@@ -21,6 +21,7 @@
 
 #include "../../overlay.h"
 #include "fsr.h"
+#include "framegen.h"
 #include "fsr4.h"
 #include "vk.h"
 #include "xess.h"
@@ -1530,6 +1531,39 @@ static bool shot_frame(uint64_t f) {
     return false;
 }
 
+// FRAMEGEN: ([Graphics] FrameGen, framegen.c) the picture made between the last game frame and `real`, presented before
+// it with the overlay over it, as the game's own frames are; then `real` follows the vsyncs framegen.c says (the timed
+// presents: present_pacing.c). Nothing runs here with the setting off.
+static void present_made(TexBackend *real, double a) {
+    int n = 1;
+#ifdef __ANDROID__
+    if (swapchain_paced) n = vk_pacing_cadence();
+#else
+    static int forced = -1;  // (a desktop: only for tests, MHGU_FRAMEGEN=1, the two presented back to back)
+    if (forced < 0) forced = getenv("MHGU_FRAMEGEN") != NULL;
+    n = forced ? 2 : 1;
+#endif
+    int follow = 0;
+    TexBackend *g = vk_framegen_frame(real, n, &follow);
+    if (!g || !frame_begin()) return;
+    double ww = g_vk.sc_extent.width, wh = g_vk.sc_extent.height, vw = ww, vh = ww / a;
+    if (vh > wh) vh = wh, vw = wh * a;
+    vk_present_draw(vk_cmd(), g, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
+    OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
+                        g_vk.sc_extent.width, g_vk.sc_extent.height, sc_turn};
+    overlay_draw(vk_cmd(), &ot);
+    char path[300];
+    extern char g_burst_name[200];
+    extern int g_burst_left, g_burst_index;
+    bool shot = g_burst_left > 0;  // (a burst of shots: the made picture too, named after the game frame it comes before)
+    if (shot) mkdir("shots", 0755), snprintf(path, sizeof path, "shots/%s_%dg.png", g_burst_name, g_burst_index);
+    frame_end(shot ? path : NULL, true);
+    vk_framegen_presented();
+#ifdef __ANDROID__
+    if (swapchain_paced) vk_pacing_follow(follow);
+#endif
+}
+
 void backend_present(NvnTexture *t) {
     extern void vi_frame_presented(void);
     vi_frame_presented();  // (the frame rate target back in place; MHGU_STEPLOG's count: runtime/hle/vi.c)
@@ -1542,6 +1576,11 @@ void backend_present(NvnTexture *t) {
     b->presented = true;
     vk_end_pass();
     vk_ms_resolve(b);
+#ifdef __ANDROID__
+    if (vk_framegen_enabled()) present_made(b, (double)t->width / t->height);  // FRAMEGEN: (framegen.c)
+#else
+    if (vk_framegen_enabled()) present_made(b, g_render_aspect > 0 ? g_render_aspect : (double)t->width / t->height);
+#endif
     if (frame_begin()) {
         // the game's image, as large as fits in the picture's shape, centred: g_render_aspect, the image's own shape
         // unless the window has changed shape since the start (a desktop: config.c config_window_shape), when the image

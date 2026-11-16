@@ -364,6 +364,19 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   rate itself (60 on 60 Hz) nothing changes: MAILBOX drops 0.6-0.8 % of the frames drawn there (shown 59.5-59.6 of 59.96 a
   second, 1% low 33-36), under the 1-2 % that would pay for FIFO's latency. The game never asks `nn::vi` for its vsync event
   (`vi.c`'s thread doesn't start): its pace is the engine's limiter alone, on the host's clock.
+- Frame generation (`[Graphics] FrameGen`, Graphics & Audio > Advanced, off by default; `nvn/vulkan/framegen.c`, the hook
+  `present_made` in `device.c`): at a timed cadence of two vsyncs or more a game frame (30 FPS on 60 Hz), a picture made between
+  the last game frame and the new one is presented first and the new one a vsync later (`vk_pacing_follow`): 60 shown, one
+  refresh more of input delay. Motion is found from the pictures (no vectors from the game): a luma pyramid at 1/4 to 1/32, a
+  full search at 1/32 and a 3x3 refinement at each finer level, the motion split between the two pictures (A at c - floor(v/2),
+  B at c + v - floor(v/2)). Levels four times apart with the motion split in halves found wrong vectors in half the blocks
+  of a plain 40-pixel pan: halves of two, and whole texels. HUD parts (`touch_hud_frame_boxes`, this frame's) and pixels the
+  same in both pictures take the new picture's own; menus (`touch_frame_menu`), the settings menu and a cadence of one turn it
+  off. Its own quality samples: `fgeval <n> [frames]` in the control file (PC: `MHGU_FRAMEGEN=1`, any limit) saves the earlier,
+  the truth, the later and the made picture of pairs two frames apart; on PC quest 101 with fast mouse pans the made picture
+  was 32.7 dB from the truth against 29.2 for a blend and 26.5 for repeating the frame. Anbernic RG406V (Mali-G57), 960x720,
+  30 FPS: 2.6 ms of GPU a made picture (the made picture's own pass 1.2, testing 12 HUD boxes at every pixel had cost 3.8;
+  the HUD's mask is now in the 1/4 level's green) plus its present, the game still at 30.0. `gpuprof` names each pass.
 - `MHGU_PERF_PREROTATE=1` (`device.c` `sc_turn`, read once; on by default, `=0` the old way): the window image drawn turned for the
   panel. Presented upright in landscape (IDENTITY), the picture is turned by the system every frame: an Anbernic RG406V's DPU does
   it as it scans out (`dumpsys SurfaceFlinger`'s composer table: DPU, transform 90), but a Moto g06's MediaTek composer sends the

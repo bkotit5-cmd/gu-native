@@ -3679,6 +3679,28 @@ bool g_build_front;  // (render thread) the front end's backdrop in this frame
 extern "C" void touch_hud_front(void) { g_build_front = true; }
 bool g_build_preview;  // (render thread) a model in a window in this frame
 extern "C" void touch_hud_preview(void) { g_build_preview = true; }
+// (render thread, frame generation: nvn/vulkan/framegen.c, before touch_hud_frame) this frame's menu window (bit 0) and
+// the front end's backdrop (bit 1), and its HUD parts drawn, not hidden, on the 1280x720 canvas: their pieces' places and
+// how far their art reaches past them (HUD_PAD, sized with them), the minimap by its box. Their pixels stay unwarped.
+extern "C" int touch_frame_menu(void) { return (g_build_menu ? 1 : 0) | (g_build_front ? 2 : 0); }
+extern "C" int touch_hud_frame_boxes(float (*out)[4], int max) {
+    const Zones &b = g_build;
+    float s = hud_squeeze();
+    int n = 0;
+    for (int k = 0; k < HP_COUNT && n < max; k++) {
+        if (!b.n[k] || b.hidden[k]) continue;
+        float m = b.k[k];
+        int prof = g_hud_prof_now;
+        if (HUD_FRAME_BOX(k) && prof >= 0 && prof < HUD_PROFILES) {
+            hud_box(k, prof, g_hud_arts_top, out[n]);
+        } else {
+            out[n][0] = b.x0[k] - HUD_PAD[k][0] * m * s, out[n][1] = b.y0[k] - HUD_PAD[k][1] * m;
+            out[n][2] = b.x1[k] + HUD_PAD[k][2] * m * s, out[n][3] = b.y1[k] + HUD_PAD[k][3] * m;
+        }
+        n++;
+    }
+    return n;
+}
 std::atomic<uint64_t> g_test_window_until;  // (tests: fakewindow) a menu's window seen in every frame until then
 extern "C" void touch_test_window(int ms) {
     g_test_window_until = SDL_GetTicksNS() + (uint64_t)(ms > 0 ? ms : 0) * MS;

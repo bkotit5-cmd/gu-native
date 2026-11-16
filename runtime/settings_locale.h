@@ -458,6 +458,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Shadows", "Sombras"},
         {"Grass", "Pasto"},
         {"Bloom and depth of field", "Bloom y desenfoque de profundidad"},
+        {"Frame generation", "Generación de cuadros"},
         {"Reverb", "Reverberación"},
         {"Toaster", "Tostadora"},
         {"On (FSR)", "Sí (FSR)"},
