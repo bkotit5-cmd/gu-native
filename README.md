@@ -102,6 +102,7 @@ doesn't sync by itself: a free sync app does it on the phone, and on the PC you 
 - Up to 120 fps on powerful phones, with a configurable frame rate limit (from 15)
 - Fills the whole screen, from ultra-wide phones to 4:3 handhelds
 - Adjustable 3D resolution, any percentage from 10% to 100% (left and right change it one at a time; a tap offers the usual ones and an **Exact size**), to gain performance on modest devices. The HUD and the text are drawn at that size too, so they soften with it, unless **Low-end mode** or FSR is on: drawing them at the screen's full size over a smaller picture costs a weak phone's GPU more than it gains
+- **Upscale filter** (gear, **Graphics & Audio**): how a 3D resolution below 100% is scaled up to the screen. **Smooth** (the default) blends its pixels; **Sharp (nearest)** keeps each one a crisp block, as in the MH4U port, and looks most even at 50%. Not used while FSR runs
 - **Shadows:** turn them off for more speed, under the gear, **Graphics & Audio**, **Shadows**. On a Moto g06 it cut the GPU's work per frame by about 15% in a hunt
 - **Low-end mode:** for weak phones. It turns off bloom, depth of field and shadows, uses lighter textures and keeps the HUD sharp over a smaller 3D picture
 - **Toaster mode:** the third choice of Low-end mode, for the weakest phones and for the battery: 25% 3D resolution, 30 fps, no reverb or grass, and a lighter HUD and textures still. On a Moto g06 it held 30 fps and used about a third less power than Low-end mode at 60 fps
