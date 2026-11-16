@@ -295,10 +295,11 @@ loaded); closing the window while it builds asks first and stops it, its work ke
   library is the same, byte for byte (md5 533d6f7669e5e3fabb4a5f1adae3c146, 90,336,256 bytes): built clean in the app,
   in the app after a failed run, a cancel while compiling and Go on (the translation kept by inputs.txt), and by
   `build_game.py --pc --zig` with the PC's own Python 3.12; llvm-mingw's (90,481,664 bytes) has the same id and the same
-  import list. The game loads it and plays quest 101 (60 FPS, the limit). The developer's line answered 127.9.9.9 for
-  files.pythonhosted.org, so the Zig wheel was fetched once by hand from PyPI (its SHA-256 checked) and put where a cut
-  download goes: the app checked and unpacked it; Python's download, Cancel during it and the HTTP Range that goes on
-  were the app's own.
+  import list. The game loads it and plays quest 101 (60 FPS, the limit). The developer's line answers 127.9.9.9 for
+  files.pythonhosted.org: from a new program folder the app downloaded Python from python.org (12 MB, 5 s), skipped PyPI
+  and got Zig from ziglang.org (cancelled at 10 MB, then HTTP 206 for the rest: 65 MB in 12 s; unpacked in 7 s), built
+  in 6 min 45 s with the downloads' end, and the library was the same again (533d6f76...); `downloads\` was empty after.
+  The wheel's own path ran from a wheel fetched by hand from PyPI and put where a cut download goes.
 - **Tests:** `MHGU_LAUNCHER_PICK=<folder>` (the folder dialog's answer), `MHGU_LAUNCHER_SCRIPT="open; build; wait python 3;
   cancel; wait stopped; build; wait compile 100; cancel; wait stopped; build; wait done; shot <png>; play"` works the
   screen (also `startover`, `startover-tools`, `deletetools`, `back`, `exit`, `sleep <ms>`, `wait zig|recompile|failed`),
