@@ -198,6 +198,10 @@ Cuando dice que está listo, `libmhgugame.so` y `libmhgugame.id` están en tu ca
    python build_game.py --android C:\MHGU
    ```
 
+   Esto va en la ventana negra que abrió `cmd` (el Símbolo del sistema), no dentro de la ventana de Python (IDLE, o una
+   que dice Python 3.x con `>>>`): ahí solo contesta `SyntaxError`. Sin escribir nada: haz doble clic en `build_game.py`,
+   arrastra la carpeta del juego a la ventana que se abre y presiona Enter.
+
 La primera vez descarga el compilador de Android de Google (unos 1,8 GB). Después trabaja solo: unos 6 minutos en una PC
 rápida, más en una lenta. Cuando diga **Done**, tu carpeta tendrá dos archivos nuevos:
 
@@ -564,6 +568,7 @@ puntos, **Añadir juegos**.
 | `python` no se reconoce | Instala Python de nuevo, marca **Add python.exe to PATH** y abre otra terminal |
 | "Failed to build installable wheels" para lz4 | La herramienta desde la 0.1.9 lee el código del juego sin el paquete lz4 cuando tu Python no puede instalarlo: descárgala de nuevo |
 | `FileNotFoundError` con `hle_symbols.txt`, o la herramienta no encuentra sus propios archivos | La herramienta se usó fuera de su descarga. Descomprime entero el **Source code (zip)** y usa `build_game.py` desde su carpeta `tools`, sin moverlo |
+| `SyntaxError: invalid syntax` justo después de escribir `python build_game.py ...` | Se escribió dentro de la ventana de Python (IDLE, o la que tiene `>>>`). Ciérrala y escríbelo en la ventana negra que abre `cmd` (paso 4), o haz doble clic en `build_game.py` y arrastra tu carpeta a esa ventana |
 | "there is no exefs/main" | La ruta debe ser la carpeta que contiene `exefs` y `romfs` |
 | "Este exefs no es de la versión 1.4.0" | Usa el `exefs` con la actualización 1.4.0 |
 | "romfs está incompleto" | Usa el `romfs` del juego base con la actualización aplicada. Tiene 35.531 archivos |
@@ -738,6 +743,10 @@ El programa no trae código del juego, así que creas el tuyo a partir de tu cop
    ```
    python build_game.py --pc C:\MHGU
    ```
+
+   Esto va en la ventana negra que abrió `cmd` (el Símbolo del sistema), no dentro de la ventana de Python (IDLE, o una
+   que dice Python 3.x con `>>>`): ahí solo contesta `SyntaxError`. Sin escribir nada: haz doble clic en `build_game.py`,
+   arrastra la carpeta del juego a la ventana que se abre y presiona Enter.
 
 La primera vez descarga llvm-mingw, el compilador del juego de PC (unos 150 MB). Después trabaja solo: unos 10 minutos en una
 PC rápida, y hasta una hora en una de 2 núcleos. Cuando diga **Done**, tu carpeta tendrá dos archivos nuevos:
@@ -941,6 +950,7 @@ Para abrir `%APPDATA%`, escríbelo en la barra de direcciones del Explorador de 
 | No sabes si tus archivos del juego están bien | **F1** → **Sistema** → **Tu partida** → **Verificar archivos del juego**. Lee todos los archivos, dice qué está mal y qué hacer; la lista completa va a `log.txt`. No cambia ni descarga nada |
 | `python` no se reconoce | Instala Python de nuevo, marca **Add python.exe to PATH** y abre otra terminal |
 | `FileNotFoundError` con `hle_symbols.txt`, o la herramienta no encuentra sus propios archivos | La herramienta se usó fuera de su descarga. Descomprime entero el **Source code (zip)** y usa `build_game.py` desde su carpeta `tools`, sin moverlo |
+| `SyntaxError: invalid syntax` justo después de escribir `python build_game.py ...` | Se escribió dentro de la ventana de Python (IDLE, o la que tiene `>>>`). Ciérrala y escríbelo en la ventana negra que abre `cmd` (paso 4), o haz doble clic en `build_game.py` y arrastra tu carpeta a esa ventana |
 | "there is no exefs/main" | La ruta debe ser la carpeta que contiene `exefs` y `romfs` |
 | "Este exefs no es de la versión 1.4.0" | Usa el `exefs` con la actualización 1.4.0 |
 | "romfs está incompleto" | Usa el `romfs` del juego base con la actualización aplicada. Tiene 35.531 archivos |

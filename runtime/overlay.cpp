@@ -791,6 +791,54 @@ static bool snap_same(const ImDrawData *dd) {
     }
     return true;
 }
+
+// ---- textures: the font's, the players' pictures on the buttons (touch.cpp) and the plugins'. Each one the backend
+// makes takes a descriptor of its pool, OVERLAY_TEXTURES of them (16 until 1.0: the 17th picture's descriptor failed,
+// the backend wrote into the one it did not get and the game closed - gu-native #237). A texture past the pool is not
+// made, and draws of a texture with no descriptor are left out of the copy the render thread draws (snap_textureless)
+static const int OVERLAY_TEXTURES = 256;
+static bool g_tex_full_said, g_tex_none_said;
+// A texture of a draw command: its descriptor (VK_NULL_HANDLE: none, not made or failed)
+static ImTextureID cmd_texture(const ImDrawCmd &c) { return c.TexRef._TexData ? c.TexRef._TexData->TexID : c.TexRef._TexID; }
+// The draws of a texture without a descriptor taken out of the copy (binding none faults the driver)
+static void snap_textureless(ImDrawList *d) {
+    for (int i = 0; i < d->CmdBuffer.Size;)
+        if (!d->CmdBuffer[i].UserCallback && cmd_texture(d->CmdBuffer[i]) == ImTextureID_Invalid) {
+            if (!g_tex_none_said) LOG("[overlay] a draw of a texture that has no descriptor left out\n"), g_tex_none_said = true;
+            d->CmdBuffer.erase(d->CmdBuffer.Data + i);
+        } else {
+            i++;
+        }
+}
+// The port's own textures handed back (overlay_retire_texture): kept a second more (a frame being drawn may still use
+// it), then destroyed by the backend in the frame's uploads below (WantDestroy, its unused frames past the frames in
+// flight), and once destroyed taken out of ImGui's list and deleted
+struct Retired {
+    ImTextureData *tex;
+    uint64_t ns;
+};
+static std::vector<Retired> g_retired;
+void overlay_retire_texture(ImTextureData *tex) {
+    if (tex) g_retired.push_back({tex, SDL_GetTicksNS()});
+}
+static void retired_step(uint64_t now) {
+    for (size_t i = 0; i < g_retired.size();) {
+        ImTextureData *t = g_retired[i].tex;
+        if (t->Status == ImTextureStatus_Destroyed) {
+            ImGui::UnregisterUserTexture(t);
+            IM_DELETE(t);
+            g_retired[i] = g_retired.back();
+            g_retired.pop_back();
+            continue;
+        }
+        if (t->Status != ImTextureStatus_WantDestroy && now - g_retired[i].ns >= 1000000000ull) {
+            t->WantDestroyNextFrame = true;  // (destroyed for good: not made again, as SetStatus would for a lost one)
+            t->SetStatus(ImTextureStatus_WantDestroy);
+            t->UnusedFrames = 1 << 20;
+        }
+        i++;
+    }
+}
 #ifdef __ANDROID__
 extern "C" bool ldn_net_up(void);
 extern "C" void vi_menu_hold(bool on);
@@ -1027,9 +1075,18 @@ static void frame_once(void *cpu) {
 
     ImDrawData *dd = ImGui::GetDrawData();
     bool uploaded = false;
+    retired_step(now);
+    int made = 0;  // (textures with a descriptor of the pool: OVERLAY_TEXTURES at most)
+    if (dd->Textures)
+        for (ImTextureData *tex : *dd->Textures) made += tex->BackendUserData != nullptr;
     if (dd->Textures)  // (texture uploads: on this thread, between the render thread's submissions)
         for (ImTextureData *tex : *dd->Textures)
             if (tex->Status != ImTextureStatus_OK) {
+                if (tex->Status == ImTextureStatus_WantCreate && made >= OVERLAY_TEXTURES) {  // (its draws left out)
+                    if (!g_tex_full_said) LOG("[overlay] %d textures already: no more made\n", made), g_tex_full_said = true;
+                    continue;
+                }
+                made += tex->Status == ImTextureStatus_WantCreate;
                 vk_lock();
                 uint64_t t0 = HITCH_ON ? hitch_now() : 0;
                 ImGui_ImplVulkan_UpdateTexture(tex);
@@ -1044,7 +1101,10 @@ static void frame_once(void *cpu) {
             dd->CmdListsCount, dd->TotalVtxCount, g_snap.CmdListsCount, g_snap.TotalVtxCount);
     g_reuse_last = alone && !uploaded, g_reuse_w = w, g_reuse_h = h, g_reuse_built_ns = now;
     snap_clear();
-    for (ImDrawList *list : dd->CmdLists) g_snap.CmdLists.push_back(list->CloneOutput());
+    for (ImDrawList *list : dd->CmdLists) {
+        g_snap.CmdLists.push_back(list->CloneOutput());
+        snap_textureless(g_snap.CmdLists.back());
+    }
     g_snap.CmdListsCount = dd->CmdListsCount;
     g_snap.TotalIdxCount = dd->TotalIdxCount;
     g_snap.TotalVtxCount = dd->TotalVtxCount;
@@ -1080,7 +1140,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         info.QueueFamily = t->qfam;
         info.Queue = t->queue;
         info.PipelineCache = t->cache;
-        info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE * 2;
+        info.DescriptorPoolSize = OVERLAY_TEXTURES;  // (one a texture: the font's, the players' pictures, the plugins')
         info.MinImageCount = 2;
         info.ImageCount = 8;  // (vertex buffers in turn: more than the frames ever in flight)
         info.PipelineInfoMain.RenderPass = t->pass;

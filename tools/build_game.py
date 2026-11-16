@@ -563,5 +563,37 @@ def main(argv=None):
         say(f'PC: open {PC_EXE} and choose {game}.')
 
 
+def ask_game():
+    """Started with no arguments (a double click on build_game.py, IDLE's Run Module): the folder is asked for here, and the
+    window waits for Enter at the end, so its last lines can be read. Someone who typed the command inside Python's own
+    window got a SyntaxError and nothing else (Discord, 1.0): this way needs no command at all."""
+    say('build_game.py makes the game code from your own copy of the game (it sends nothing anywhere).')
+    say('Drag your game folder (the one with exefs and romfs) into this window, or type its path, and press Enter.')
+    say('Add --pc or --android after it for one of the two only.')
+    try:
+        line = input('> ').strip()
+    except EOFError:
+        line = ''
+    if not line:
+        fail('no folder given.')
+    # (a dragged folder comes in quotes when its path has spaces; an option may follow it)
+    args = []
+    if line[0] in '"\'':
+        end = line.find(line[0], 1)
+        args.append(line[1:end] if end > 0 else line[1:])
+        line = line[end + 1:] if end > 0 else ''
+    args += line.split()
+    return args
+
+
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) > 1:
+        main()
+    else:
+        try:
+            main(ask_game())
+        finally:
+            try:
+                input('\nPress Enter to close this window.')
+            except EOFError:
+                pass

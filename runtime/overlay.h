@@ -41,6 +41,11 @@ void overlay_pad(const OverlayPad *p);
 
 // The game's thread, once a frame (after the plugins' forge_onUpdate): the overlay's frame, plugins' UI included.
 void overlay_frame(void *cpu);
+// The game's thread, inside the overlay's frame: a texture of the port's own (IM_NEW'd and ImGui::RegisterUserTexture'd:
+// the players' pictures on the buttons, runtime/touch.cpp) no longer drawn, handed over. The overlay destroys it once no
+// frame being drawn can still use it, takes it out of ImGui's list and deletes it.
+struct ImTextureData;
+void overlay_retire_texture(struct ImTextureData *tex);
 
 // Render thread, inside the window image's render pass (runtime/nvn/vulkan/device.c, under the Vulkan lock).
 typedef struct {

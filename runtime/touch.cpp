@@ -449,7 +449,10 @@ struct Layout {
     float fps_x, fps_y;                      // the FPS counter's middle, in the screen's width and height; < 0 its own
                                              // place, at the top (fps_counter in the file)
     char image[C_COUNT][IMAGE_NAME];         // the player's own picture on a control: a file in the profiles' images
-                                             // folder (image <key> <file>); "" none
+                                             // folder (image <key> <file>); "" none. The stick's: its base
+    char knob[IMAGE_NAME];                   // the stick's knob's (image_knob <file>)
+    uint64_t bare;                           // controls whose picture is drawn as it is, without the button's round
+                                             // frame behind it, uncut (bare <key>)
 };
 // The layout editor's panel: its middle where the player dragged it (fractions of the screen's width from the left and
 // of its height from the top; below 0 its usual place, a little above the middle) and its size (EPANEL_MIN to 100 %).
@@ -535,10 +538,17 @@ void parse_layout(const std::string &text, Layout *l, EditPanel *ep) {
             int c = ctl_by_key(name);
             if (!strcmp(key, "hidden") && c >= 0) { l->off |= 1ull << c; continue; }
             if (!strcmp(key, "hold") && c >= 0) { l->hold |= 1ull << c; continue; }
+            if (!strcmp(key, "bare") && c >= 0) { l->bare |= 1ull << c; continue; }
             if (!strcmp(key, "image") && c >= 0) {  // (image <key> <file>: the name, to the line's end)
                 const char *f = strstr(line, name) + strlen(name);
                 while (*f == ' ' || *f == '\t') f++;
                 if (*f && !strchr(f, '/') && !strchr(f, '\\')) snprintf(l->image[c], IMAGE_NAME, "%s", f);
+                continue;
+            }
+            if (!strcmp(key, "image_knob")) {  // (image_knob <file>: the stick's knob, 1.0.1; an older version skips it)
+                const char *f = strstr(line, key) + strlen(key);
+                while (*f == ' ' || *f == '\t') f++;
+                if (*f && !strchr(f, '/') && !strchr(f, '\\')) snprintf(l->knob, IMAGE_NAME, "%s", f);
                 continue;
             }
         }
@@ -605,12 +615,15 @@ bool save_layout_file(const char *path, const Layout &l, const EditPanel *ep) {
     fprintf(f, "# the layout's kind (0 the port's own, 1 emulator-style), its profile (1 to %d), the FPS counter's middle (in "
                "the screen's width and height; -1 -1 its own place)\n", PROFILES_N);
     fprintf(f, "layout_kind %d\nprofile %d\nfps_counter %.4f %.4f\n", l.kind, l.profile, l.fps_x, l.fps_y);
-    fprintf(f, "# controls hidden (emulator-style), held by a tap (hold), with the player's own picture (image <key> <file>)\n");
+    fprintf(f, "# controls hidden (emulator-style), held by a tap (hold), with the player's own picture (image <key> <file>;\n"
+               "# the stick's knob: image_knob <file>), drawn without the button's frame (bare)\n");
     for (int i = 0; i < C_LAID; i++) {
         if (l.kind == KIND_EMU && (l.off >> i & 1)) fprintf(f, "hidden %s\n", DEFS[i].key);
         if (l.hold >> i & 1) fprintf(f, "hold %s\n", DEFS[i].key);
         if (l.image[i][0]) fprintf(f, "image %s %s\n", DEFS[i].key, l.image[i]);
+        if (l.bare >> i & 1) fprintf(f, "bare %s\n", DEFS[i].key);
     }
+    if (l.knob[0]) fprintf(f, "image_knob %s\n", l.knob);
     if (ep) {
         char line[80];
         epanel_line(line, *ep);
@@ -968,7 +981,7 @@ struct Zones {
     float k[HP_COUNT];
     bool hidden[HP_COUNT];
     int na;
-    float agy[64], acy[64];
+    float agx[64], agy[64], acy[64];
     uint64_t ns;
 };
 std::mutex g_zone_lock;
@@ -1170,27 +1183,66 @@ Rect zone_rect(const Zones &z, int k, float w, float h, bool touch = true) {
     r.ok = true;
     return r;
 }
-// the Hunter Arts' rows (their pieces grouped by the game's y), top to bottom: screen y ranges
+// The Hunter Arts' rows, top to bottom (the game's art 1, 2, 3): screen y ranges. A row is told by its art's name, the
+// piece at x 746 on the row's y (or its button at 726, 15 lower): one for each art equipped, an empty slot's being below
+// the canvas (one art: rows at 681, 731, 781). Each of the part's pieces goes with the row nearest it by the game's y,
+// and two rows meet halfway between their buttons, the middle of the art's plate (with the HUD at 100 and 150 %, PC).
+// Until 1.0.1 the pieces were grouped by gaps of more than 22 in y, and a
+// ready art's glow, 17 above its row (a hudtrace on the PC: 842, 664 over a row at 681), closed the gap to the row above:
+// a tap on the second of three arts (Striker) performed the first, the frame round both (gu-native #231). With neither
+// piece (a screen of the game's this doesn't know), by those gaps as before
+const float ART_NAME_X = 746.0f, ART_BUTTON_X = 726.0f, ART_BUTTON_DY = 15.0f;
 int arts_rows(const Zones &z, float w, float h, float rows[3][2]) {
-    int k = HP_ARTS, n = z.na, idx[64];
+    int k = HP_ARTS, n = z.na, nr = 0;
     if (!n || !z.nt[k] || stale(z)) return 0;
-    for (int i = 0; i < n; i++) idx[i] = i;
-    std::sort(idx, idx + n, [&](int a, int b) { return z.agy[a] < z.agy[b]; });
-    int nr = 0;
-    float last = -1e9f;
-    for (int j = 0; j < n; j++) {
-        int i = idx[j];
-        if (z.agy[i] - last > 22.0f) {
-            if (nr == 3) break;
-            rows[nr][0] = rows[nr][1] = z.acy[i], nr++;
+    float ry[3], lo[3], hi[3], mid[3];
+    for (int pass = 0; pass < 2 && !nr; pass++) {  // (the names; else the buttons)
+        float ax = pass ? ART_BUTTON_X : ART_NAME_X, dy = pass ? ART_BUTTON_DY : 0.0f;
+        for (int i = 0; i < n; i++) {
+            if (fabsf(z.agx[i] - ax) > 1.5f) continue;
+            float y = z.agy[i] - dy;
+            bool seen = false;
+            for (int r = 0; r < nr; r++) seen |= fabsf(ry[r] - y) < 8.0f;
+            if (!seen && nr < 3) ry[nr++] = y;
         }
-        rows[nr - 1][0] = std::min(rows[nr - 1][0], z.acy[i]), rows[nr - 1][1] = std::max(rows[nr - 1][1], z.acy[i]);
-        last = z.agy[i];
+    }
+    if (nr) {
+        std::sort(ry, ry + nr);
+        for (int r = 0; r < nr; r++) lo[r] = 1e30f, hi[r] = -1e30f, mid[r] = -1e30f;
+        for (int i = 0; i < n; i++) {
+            int r = 0;
+            for (int j = 1; j < nr; j++)
+                if (fabsf(z.agy[i] - ry[j]) < fabsf(z.agy[i] - ry[r])) r = j;
+            if (fabsf(z.agy[i] - ry[r]) > 40.0f) continue;  // (near no row)
+            lo[r] = std::min(lo[r], z.acy[i]), hi[r] = std::max(hi[r], z.acy[i]);
+            if (fabsf(z.agx[i] - ART_BUTTON_X) <= 1.5f) mid[r] = z.acy[i];
+        }
+        for (int r = 0; r < nr; r++)
+            if (mid[r] < -1e29f) mid[r] = (lo[r] + hi[r]) * .5f;  // (no button drawn: its pieces' middle)
+    } else {
+        int idx[64];
+        for (int i = 0; i < n; i++) idx[i] = i;
+        std::sort(idx, idx + n, [&](int a, int b) { return z.agy[a] < z.agy[b]; });
+        float last = -1e9f;
+        for (int j = 0; j < n; j++) {
+            int i = idx[j];
+            if (z.agy[i] - last > 22.0f) {
+                if (nr == 3) break;
+                lo[nr] = hi[nr] = z.acy[i], nr++;
+            }
+            lo[nr - 1] = std::min(lo[nr - 1], z.acy[i]), hi[nr - 1] = std::max(hi[nr - 1], z.acy[i]);
+            last = z.agy[i];
+        }
+        for (int r = 0; r < nr; r++) mid[r] = (lo[r] + hi[r]) * .5f;
     }
     Pic p = picture(w, h);
     float m = z.k[k];
-    for (int i = 0; i < nr; i++)
-        rows[i][0] = p.y0 + (rows[i][0] - HUD_PAD[k][1] * m - 4) * p.h / 720.0f, rows[i][1] = p.y0 + (rows[i][1] + HUD_PAD[k][3] * m + 4) * p.h / 720.0f;
+    for (int r = 0; r < nr; r++) {
+        float top = lo[r] - HUD_PAD[k][1] * m - 4, bottom = hi[r] + HUD_PAD[k][3] * m + 4;
+        if (r > 0) top = (mid[r - 1] + mid[r]) * .5f;  // (the rows meet halfway)
+        if (r + 1 < nr) bottom = (mid[r] + mid[r + 1]) * .5f;
+        rows[r][0] = p.y0 + top * p.h / 720.0f, rows[r][1] = p.y0 + bottom * p.h / 720.0f;
+    }
     return nr;
 }
 int art_row_at(const Zones &z, float w, float h, float y) {  // (the row under a finger at y, or the nearest one; -1 none)
@@ -1349,7 +1401,7 @@ struct State {
     int prof_kind[PROFILES_N];
     char prof_say[200];
     // the pictures' window (its Image button): the files of the images folder, the page shown, its button held down
-    bool img_open;
+    bool img_open, img_knob;  // (img_knob: the stick's window picks its knob's picture, not its base's)
     int img_n, img_page, img_btn;
     ImgName img_names[IMG_MAX];
     uint64_t img_scan_ns;
@@ -1722,8 +1774,10 @@ bool holdable(int i) {
 }
 // A picture of the player's (Layout.image) can be on any round button: not on the pill or the band, the stick, the
 // d-pads, the menu pad or the sprint lock's circle
+// (a picture of the player's: any round button, and since 1.0.1 the stick - its base, and its knob apart -, the d-pads
+// and the sprint lock's circle; not the attacks' pill or band, nor the menu pad)
 bool image_ok(int i) {
-    return i >= 0 && i < C_LAID && !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_RUNLOCK);
+    return i >= 0 && i < C_LAID && !(i == C_ATTACK || i == C_CORNER || i == C_MPAD);
 }
 
 // ---- the layout editor: the touch controls and the game's HUD. A panel in two rows: what is picked (smaller, bigger,
@@ -1981,8 +2035,10 @@ void prof_tap(State &s, float x, float y) {
 // ---- the pictures' window (the editor's Image button, a round button picked): the pictures in the profiles' images
 // folder, a page of them; one tapped goes on the button. None takes it off; Add pictures opens the screen that copies
 // the player's own in (Android's ImportActivity, a desktop's file dialog: runtime/pc_actions.c); the folder is read again
-// while the window is open. The pictures are the player's own, and their responsibility
-enum { IA_NONE, IA_PREV, IA_NEXT, IA_ADD, IA_CLOSE, IA_COUNT };
+// while the window is open. The pictures are the player's own, and their responsibility. Frame (1.0.1, Discord): the
+// button's round frame behind its picture, or none and the picture whole (Layout.bare); For (the stick's alone): its
+// base's picture or its knob's
+enum { IA_NONE, IA_PREV, IA_NEXT, IA_FRAME, IA_KNOB, IA_ADD, IA_CLOSE, IA_COUNT };
 const int IMG_PAGE = 12;  // (two rows of six)
 void img_window(float w, float h, Rect *win, Rect tile[IMG_PAGE], Rect btn[IA_COUNT], float *say_y) {
     float ww = std::min(w * .96f, 1.75f * h), wh = .74f * h, x0 = (w - ww) * .5f, y0 = (h - wh) * .5f;
@@ -2014,11 +2070,18 @@ void img_scan(State &s) {
     s.img_page = std::clamp(s.img_page, 0, pages - 1);
     s.img_scan_ns = SDL_GetTicksNS();
 }
+// The picture the window sets for control c: the stick's knob's while it picks that, else the control's own
+char *img_target(State &s, int c) { return c == C_STICK && s.img_knob ? s.layout.knob : s.layout.image[c]; }
+const char *img_target(const State &s, int c) { return c == C_STICK && s.img_knob ? s.layout.knob : s.layout.image[c]; }
+void img_page_of(State &s) {  // (the page of the picture the button has)
+    int c = s.sel >= 0 && s.sel < C_COUNT ? s.sel : -1;
+    for (int i = 0; i < s.img_n && c >= 0; i++)
+        if (!strcmp(s.img_names[i].n, img_target(s, c))) s.img_page = i / IMG_PAGE;
+}
 void img_open(State &s) {
-    s.img_open = true, s.prof_open = false, s.img_page = 0, s.img_btn = -1;
+    s.img_open = true, s.img_knob = false, s.prof_open = false, s.img_page = 0, s.img_btn = -1;
     img_scan(s);
-    for (int i = 0; i < s.img_n; i++)  // (the page of the picture the button has)
-        if (s.sel >= 0 && s.sel < C_COUNT && !strcmp(s.img_names[i].n, s.layout.image[s.sel])) s.img_page = i / IMG_PAGE;
+    img_page_of(s);
 }
 void request_pictures(void);  // (Add pictures: the platform's screen, below)
 void img_tap(State &s, float x, float y) {
@@ -2029,8 +2092,9 @@ void img_tap(State &s, float x, float y) {
     for (int i = 0; i < IMG_PAGE; i++) {
         int k = s.img_page * IMG_PAGE + i;
         if (k < s.img_n && tile[i].in(x, y) && c >= 0) {
-            snprintf(s.layout.image[c], IMAGE_NAME, "%s", s.img_names[k].n);
-            rt_logf("[touch] layout editor: a picture on %s (%s)\n", DEFS[c].key, s.img_names[k].n);
+            snprintf(img_target(s, c), IMAGE_NAME, "%s", s.img_names[k].n);
+            rt_logf("[touch] layout editor: a picture on %s%s (%s)\n", DEFS[c].key, c == C_STICK && s.img_knob ? "'s knob" : "",
+                    s.img_names[k].n);
             s.img_open = false;
             tap_due();
             return;
@@ -2041,8 +2105,14 @@ void img_tap(State &s, float x, float y) {
         if (!btn[i].in(x, y)) continue;
         s.img_btn = i;
         tap_due();
-        if (i == IA_NONE && c >= 0) s.layout.image[c][0] = 0, s.img_open = false;
-        else if (i == IA_PREV) s.img_page = (s.img_page + pages - 1) % pages;
+        if (i == IA_NONE && c >= 0) img_target(s, c)[0] = 0, s.img_open = false;
+        else if (i == IA_FRAME && c >= 0) {
+            s.layout.bare ^= 1ull << c;
+            rt_logf("[touch] layout editor: %s's picture %s\n", DEFS[c].key, s.layout.bare >> c & 1 ? "without its frame" : "in its frame");
+        } else if (i == IA_KNOB && c == C_STICK) {
+            s.img_knob = !s.img_knob;
+            img_page_of(s);
+        } else if (i == IA_PREV) s.img_page = (s.img_page + pages - 1) % pages;
         else if (i == IA_NEXT) s.img_page = (s.img_page + 1) % pages;
         else if (i == IA_ADD) make_folder(profiles_dir()), make_folder(images_dir()), request_pictures();
         else if (i == IA_CLOSE) s.img_open = false;
@@ -3601,7 +3671,7 @@ extern "C" void touch_hud_piece(int part, float game_x, float game_y, float canv
     if (!b.nt[part]++) b.tx0[part] = b.tx1[part] = canvas_x, b.ty0[part] = b.ty1[part] = canvas_y;
     b.tx0[part] = std::min(b.tx0[part], canvas_x), b.tx1[part] = std::max(b.tx1[part], canvas_x);
     b.ty0[part] = std::min(b.ty0[part], canvas_y), b.ty1[part] = std::max(b.ty1[part], canvas_y);
-    if (part == HP_ARTS && b.na < 64) b.agy[b.na] = game_y, b.acy[b.na] = canvas_y, b.na++;
+    if (part == HP_ARTS && b.na < 64) b.agx[b.na] = game_x, b.agy[b.na] = game_y, b.acy[b.na] = canvas_y, b.na++;
 }
 
 extern "C" void touch_hud_menu(void) { g_build_menu = true; }
@@ -4218,13 +4288,15 @@ void corner_band(ImDrawList *dl, ImFont *font, Geo g, int mask, float a) {
 // the d-pad's directions: right, left, up, down (the part's bits)
 const float DPAD_DIR[4][2] = {{1, 0}, {-1, 0}, {0, -1}, {0, 1}};
 // the direction pressed: its quarter of the well lit, and a gold arc outside the rim, which shows round the thumb
-void dpad_lit(ImDrawList *dl, ImVec2 c, float r, int part, float a) {
+void dpad_lit(ImDrawList *dl, ImVec2 c, float r, int part, float a, bool well = true) {
     for (int i = 0; i < 4; i++) {
         if (!(part & (1 << i))) continue;
         float an = atan2f(DPAD_DIR[i][1], DPAD_DIR[i][0]);
-        dl->PathLineTo(c);
-        dl->PathArcTo(c, r * .84f, an - PI * .25f, an + PI * .25f, 14);
-        dl->PathFillConvex(fade(IM_COL32(92, 62, 22, 255), a * .9f));
+        if (well) {  // (not over a picture of the player's: the arcs alone)
+            dl->PathLineTo(c);
+            dl->PathArcTo(c, r * .84f, an - PI * .25f, an + PI * .25f, 14);
+            dl->PathFillConvex(fade(IM_COL32(92, 62, 22, 255), a * .9f));
+        }
         dl->PathArcTo(c, r * 1.1f, an - PI * .23f, an + PI * .23f, 14);
         dl->PathStroke(fade(GLOW, a * .85f), ImDrawFlags_None, r * .07f);
         dl->PathArcTo(c, r * 1.2f, an - PI * .18f, an + PI * .18f, 12);
@@ -4265,11 +4337,19 @@ void dpad(ImDrawList *dl, Geo g, int part, float a) {
     }
 }
 
-void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on) {
-    float kr = r * KNOB;
+void stick_rim(ImDrawList *dl, ImVec2 base, float r, float a, bool on) {
     dl->AddCircleFilled(base, r, fade(IM_COL32(10, 7, 5, 255), a * (on ? .42f : .26f)), 48);
     dl->AddCircle(base, r, fade(BRONZE, a), 48, r * .07f);
     dl->AddCircle(base, r * .955f, fade(GOLD, a * .85f), 48, r * .025f);
+}
+void stick_knob(ImDrawList *dl, ImVec2 knob, float kr, float a, bool on) {
+    disc(dl, knob, kr, on, a);
+    float d = kr * .32f;
+    ImVec2 q[4] = {ImVec2(knob.x, knob.y - d), ImVec2(knob.x + d, knob.y), ImVec2(knob.x, knob.y + d), ImVec2(knob.x - d, knob.y)};
+    dl->AddConvexPolyFilled(q, 4, fade(GOLD, a));
+}
+void stick_base(ImDrawList *dl, ImVec2 base, float r, float a, bool on) {
+    stick_rim(dl, base, r, a, on);
     for (int i = 0; i < 8; i++) {  // (eight notches: the directions)
         float an = i * PI * .25f;
         ImVec2 o(base.x + cosf(an) * r * .82f, base.y + sinf(an) * r * .82f);
@@ -4278,10 +4358,10 @@ void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on) 
                        ImVec2(o.x - cosf(an) * d * 1.6f, o.y - sinf(an) * d * 1.6f), ImVec2(o.x + sinf(an) * d, o.y - cosf(an) * d)};
         dl->AddConvexPolyFilled(q, 4, fade(GOLD, a * .8f));
     }
-    disc(dl, knob, kr, on, a);
-    float d = kr * .32f;
-    ImVec2 q[4] = {ImVec2(knob.x, knob.y - d), ImVec2(knob.x + d, knob.y), ImVec2(knob.x, knob.y + d), ImVec2(knob.x - d, knob.y)};
-    dl->AddConvexPolyFilled(q, 4, fade(GOLD, a));
+}
+void stick(ImDrawList *dl, ImVec2 base, ImVec2 knob, float r, float a, bool on) {
+    stick_base(dl, base, r, a, on);
+    stick_knob(dl, knob, r * KNOB, a, on);
 }
 
 // The menu pad: the stick's base, smaller, with four arrows for its notches (it is the d-pad); the direction pressed
@@ -4344,34 +4424,79 @@ void item_arrow_disc(ImDrawList *dl, Geo g, int d, bool lit, float a) {
 // picture of their own on any round button, at their own responsibility): read from the profiles' images folder the
 // first time one is drawn (the game thread, inside the overlay's ImGui frame), at most PIC_SIDE pixels a side, kept as
 // ImGui textures the overlay's renderer uploads with the font's (runtime/overlay.cpp; the MH4U port's SDL renderer the
-// same way). A file that can't be read or isn't a PNG or a BMP is tried once and drawn as the button's own icon
-const int PIC_SIDE = 256, PIC_CACHE = 48;
+// same way). A file that can't be read or isn't a PNG or a BMP is tried once and drawn as the button's own icon.
+// Each picture takes one of the overlay's textures (a Vulkan descriptor of its pool, overlay.cpp OVERLAY_TEXTURES), so
+// one not drawn for a while is given back (overlay_retire_texture) and read again when it is next shown: in 1.0 every
+// picture seen stayed, and past the pool's 16 (the buttons' and a page or two of the editor's window) the game closed
+// (gu-native #237)
+const int PIC_SIDE = 256, PIC_CACHE = 64;
+const uint64_t PIC_KEEP_NS = 10000000000ull, PIC_SWAP_NS = 2000000000ull;  // (unused this long: given back; or for room)
+const int PIC_FRAMES = 8;  // (nor drawn in as many of the overlay's frames: no copy of a frame being drawn still has it)
 struct PicTex {
-    char name[IMAGE_NAME];
+    char name[IMAGE_NAME];  // (empty: a free slot)
     ImTextureData *tex;
     uint64_t tried_ns;  // (not read: tried again after a while, a picture being copied in)
+    uint64_t used_ns;   // (drawn last: when, and the overlay's frame)
+    int used_frame;
+    bool failed_said;
 };
 PicTex g_pics[PIC_CACHE];
-int g_npics;
+// A slot's picture given back to the overlay (its texture destroyed once no frame can draw it any more), the slot freed
+void pic_drop(PicTex &p) {
+    if (p.tex) overlay_retire_texture(p.tex);
+    p = PicTex{};
+}
+bool pic_idle(const PicTex &p, uint64_t now, uint64_t ns) {
+    return ImGui::GetFrameCount() - p.used_frame >= PIC_FRAMES && now - p.used_ns >= ns;
+}
+// Once a frame of the touch controls: the pictures no longer shown (another page of the editor's window, a button's
+// picture changed) given back after a while
+void pics_sweep() {
+    uint64_t now = SDL_GetTicksNS();
+    for (PicTex &p : g_pics)
+        if (p.name[0] && pic_idle(p, now, PIC_KEEP_NS)) pic_drop(p);
+}
 ImTextureData *pic_texture(const char *name) {
     if (!name || !name[0]) return nullptr;
     uint64_t now = SDL_GetTicksNS();
+    int frame = ImGui::GetFrameCount();
     PicTex *found = nullptr;
-    for (int i = 0; i < g_npics && !found; i++)
+    for (int i = 0; i < PIC_CACHE && !found; i++)
         if (!strcmp(g_pics[i].name, name)) found = &g_pics[i];
+    if (found) found->used_ns = now, found->used_frame = frame;
+    if (found && found->tex && found->tex->Status == ImTextureStatus_OK && found->tex->TexID == ImTextureID_Invalid) {
+        // (made with no descriptor for it: drawn as the button's own icon, not as an empty disc - the overlay leaves out
+        // the draws of a texture it has not)
+        if (!found->failed_said) rt_logf("[touch] picture %s: no room for it in the overlay, the icon instead\n", name);
+        found->failed_said = true;
+        return nullptr;
+    }
     if (found && (found->tex || now - found->tried_ns < 3000000000ull)) return found->tex;
-    if (!found && g_npics >= PIC_CACHE) return nullptr;
-    PicTex &p = found ? *found : g_pics[g_npics++];
+    bool fresh = !found;
+    if (!found) {  // (a free slot; else the one drawn longest ago, if it has been gone a moment)
+        for (PicTex &p : g_pics)
+            if (!p.name[0]) { found = &p; break; }
+        if (!found) {
+            PicTex *old = nullptr;
+            for (PicTex &p : g_pics)
+                if (pic_idle(p, now, PIC_SWAP_NS) && (!old || p.used_ns < old->used_ns)) old = &p;
+            if (!old) return nullptr;
+            pic_drop(*old);
+            found = old;
+        }
+        found->used_ns = now, found->used_frame = frame;
+    }
+    PicTex &p = *found;
     snprintf(p.name, sizeof p.name, "%s", name);
     p.tex = nullptr, p.tried_ns = now;
     std::string data;
     if (!read_text((images_dir() + "/" + name).c_str(), &data) || data.empty()) {
-        if (!found) rt_logf("[touch] picture %s: not in %s\n", name, images_dir().c_str());
+        if (fresh) rt_logf("[touch] picture %s: not in %s\n", name, images_dir().c_str());
         return nullptr;
     }
     SDL_Surface *src = SDL_LoadSurface_IO(SDL_IOFromConstMem(data.data(), data.size()), true);
     if (!src) {
-        if (!found) rt_logf("[touch] picture %s can't be read: %s\n", name, SDL_GetError());
+        if (fresh) rt_logf("[touch] picture %s can't be read: %s\n", name, SDL_GetError());
         return nullptr;
     }
     int w = src->w, h = src->h;
@@ -4384,7 +4509,7 @@ ImTextureData *pic_texture(const char *name) {
         rgba = small;
     }
     if (!rgba) {
-        if (!found) rt_logf("[touch] picture %s can't be converted: %s\n", name, SDL_GetError());
+        if (fresh) rt_logf("[touch] picture %s can't be converted: %s\n", name, SDL_GetError());
         return nullptr;
     }
     ImTextureData *t = IM_NEW(ImTextureData)();
@@ -4410,17 +4535,70 @@ void pic_in_rect(ImDrawList *dl, ImTextureData *t, const Rect &b, float a) {
     float w = t->Width * k, h = t->Height * k, x0 = b.x0 + (bw - w) * .5f, y0 = b.y0 + (bh - h) * .5f;
     dl->AddImage(t->GetTexRef(), ImVec2(x0, y0), ImVec2(x0 + w, y0 + h), ImVec2(0, 0), ImVec2(1, 1), fade(IM_COL32(255, 255, 255, 255), a));
 }
+// A picture without the button's frame (Layout.bare, the player's choice in the pictures' window): whole, fitted in the
+// control's square, nothing behind it; pressed, a little smaller with a glow round it
+void pic_bare(ImDrawList *dl, ImTextureData *t, ImVec2 c, float r, bool lit, float a) {
+    float k = lit ? .94f : 1.0f;
+    pic_in_rect(dl, t, Rect{c.x - r * k, c.y - r * k, c.x + r * k, c.y + r * k, true}, a);
+    if (lit) dl->AddCircle(c, r * 1.02f, fade(GLOW, a * .7f), 40, r * .06f);
+}
 // A button's picture of the player's, on its face (pressed or held, lit round it as the disc is), its letter's badge
-// over it: the button still says which of the game's buttons it is
+// over it: the button still says which of the game's buttons it is. Bare: the picture alone, as the player made it
 bool pic_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, Geo g, bool lit, const char *letter, float a, float h) {
     ImTextureData *t = image_ok(i) ? pic_texture(l.image[i]) : nullptr;
     if (!t) return false;
+    if (l.bare >> i & 1) {
+        pic_bare(dl, t, g.c, g.r, lit, a);
+        return true;
+    }
     float r = lit ? g.r * .95f : g.r;
     disc(dl, g.c, r, lit, a);
     pic_in_circle(dl, t, g.c, r * .84f, a);
     if (lit) dl->AddCircle(g.c, r * .84f, fade(GLOW, a * .8f), 40, r * .07f);
     if (letter && letter[0]) badge(dl, font, ImVec2(g.c.x + r * .7f, g.c.y + r * .7f), std::max(r * .3f, .021f * h), letter, a);
     return true;
+}
+// The d-pad with a picture of the player's (1.0.1): in the d-pad's well or bare, the arm pressed glowing round it
+bool pic_dpad(ImDrawList *dl, const Layout &l, int i, Geo g, int part, float a) {
+    ImTextureData *t = image_ok(i) ? pic_texture(l.image[i]) : nullptr;
+    if (!t) return false;
+    if (l.bare >> i & 1) pic_in_rect(dl, t, Rect{g.c.x - g.r, g.c.y - g.r, g.c.x + g.r, g.c.y + g.r, true}, a);
+    else disc(dl, g.c, g.r, false, a), pic_in_circle(dl, t, g.c, g.r * .84f, a);
+    dpad_lit(dl, g.c, g.r, part, a, false);
+    return true;
+}
+// The stick with the player's pictures (1.0.1): its base (Layout.image) in the rim or bare, its knob (Layout.knob) on its
+// disc or bare; either missing, the port's own
+void stick_of(ImDrawList *dl, const Layout &l, ImVec2 base, ImVec2 knob, float r, float a, bool on) {
+    ImTextureData *tb = pic_texture(l.image[C_STICK]), *tk = pic_texture(l.knob);
+    if (!tb && !tk) {
+        stick(dl, base, knob, r, a, on);
+        return;
+    }
+    bool bare = l.bare >> C_STICK & 1;
+    float kr = r * KNOB;
+    if (!tb) stick_base(dl, base, r, a, on);
+    else if (bare) pic_in_rect(dl, tb, Rect{base.x - r, base.y - r, base.x + r, base.y + r, true}, a);
+    else stick_rim(dl, base, r, a, on), pic_in_circle(dl, tb, base, r * .9f, a);
+    if (!tk) stick_knob(dl, knob, kr, a, on);
+    else if (bare) pic_in_rect(dl, tk, Rect{knob.x - kr, knob.y - kr, knob.x + kr, knob.y + kr, true}, a);
+    else disc(dl, knob, kr, on, a), pic_in_circle(dl, tk, knob, kr * .84f, a);
+}
+// The sprint lock's circle with a picture of the player's (1.0.1), faded in and lit as the port's (lock_circle)
+void lock_circle_of(ImDrawList *dl, const Layout &l, ImVec2 c, float cr, float a, bool armed, bool locked) {
+    ImTextureData *t = a > 0.0f ? pic_texture(l.image[C_RUNLOCK]) : nullptr;
+    if (!t) {
+        lock_circle(dl, c, cr, a, armed, locked);
+        return;
+    }
+    bool lit = armed || locked;
+    if (l.bare >> C_RUNLOCK & 1) pic_bare(dl, t, c, cr, lit, a);
+    else {
+        disc(dl, c, cr, lit, a);
+        pic_in_circle(dl, t, c, cr * .84f, a);
+        if (lit) dl->AddCircle(c, cr * .84f, fade(GLOW, a * .8f), 40, cr * .07f);
+    }
+    if (locked) dl->AddCircle(c, cr * 1.18f, fade(GLOW, a * (.6f + .3f * sinf(SDL_GetTicksNS() / 1e9f * 4))), 32, cr * .1f);
 }
 // The mark of a button a tap holds (Layout.hold): a small padlock at its upper left, closed and lit while it is held
 void hold_mark(ImDrawList *dl, Geo g, bool held, float a) {
@@ -4438,14 +4616,14 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
         return;
     }
     if (i == C_RUNLOCK) {  // (the editor's: in a hunt it shows as the thumb pushes toward it, with the stick)
-        lock_circle(dl, g.c, g.r, a * .8f, false, false);
+        lock_circle_of(dl, l, g.c, g.r, a * .8f, false, false);
         return;
     }
     if (i == C_STICK) {
         if ((s.stick_on || s.run_free) && !s.edit) {
             // (a locked run going on by itself: the knob held at the rim, forward)
             ImVec2 base(s.bx, s.by), knob = s.stick_on ? ImVec2(s.kx, s.ky) : ImVec2(s.bx, s.by - g.r);
-            stick(dl, base, knob, g.r, a, true);
+            stick_of(dl, l, base, knob, g.r, a, true);
             // the sprint lock's circle: faded in as the thumb pushes up past the rim while a lock could start; lit with
             // the thumb on it (armed) and locked
             // (toward the circle, wherever the editor put it: above the stick unless moved)
@@ -4457,7 +4635,7 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                 float reach = std::max(1.0f, ud - lg.r - .9f * g.r);
                 v = std::clamp((d - .9f * g.r) / reach, 0.0f, 1.0f) * std::clamp((up - LOCK_UP) / .15f, 0.0f, 1.0f);
             }
-            lock_circle(dl, lg.c, lg.r, a * v, s.run_over, s.run_lock);
+            lock_circle_of(dl, l, lg.c, lg.r, a * v, s.run_over, s.run_lock);
             if (s.run) {  // (running: a gold ring round the rim, and streaks behind the knob)
                 dl->AddCircle(base, g.r * 1.12f, fade(GLOW, a * .85f), 48, g.r * .07f);
                 float dx = knob.x - s.bx, dy = knob.y - s.by, n = std::max(1.0f, hypotf(dx, dy));
@@ -4469,7 +4647,7 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                 }
             }
         }
-        else stick(dl, g.c, g.c, g.r, a * .8f, false);
+        else stick_of(dl, l, g.c, g.c, g.r, a * .8f, false);
         return;
     }
     int mask = 0;
@@ -4513,7 +4691,10 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
         }
         return;
     }
-    if (is_dpad(i)) { dpad(dl, g, mask, a); return; }
+    if (is_dpad(i)) {
+        if (!pic_dpad(dl, l, i, g, mask, a)) dpad(dl, g, mask, a);
+        return;
+    }
     if (DEFS[i].icon == I_LETTER || DEFS[i].icon == I_COMBO) {  // (the diamond: the game's letter, large, as on the Switch)
         char label[32];
         if (is_combo(i)) combo_label(i, label, sizeof label);
@@ -4805,7 +4986,8 @@ void draw_pictures(ImDrawList *dl, ImFont *font, const State &s, float w, float 
     img_window(w, h, &win, tile, btn, &say_y);
     int c = s.sel >= 0 && s.sel < C_COUNT ? s.sel : -1;
     char title[96];
-    snprintf(title, sizeof title, T("Picture for: %s"), c >= 0 ? (is_combo(c) ? T("Combined button") : T(DEFS[c].name)) : "");
+    snprintf(title, sizeof title, T("Picture for: %s"), c < 0 ? "" : c == C_STICK && s.img_knob ? T("the stick's knob")
+                                                        : is_combo(c) ? T("Combined button") : T(DEFS[c].name));
     window_frame(dl, win, h, title);
     for (int i = 0; i < IMG_PAGE; i++) {
         int k = s.img_page * IMG_PAGE + i;
@@ -4814,7 +4996,7 @@ void draw_pictures(ImDrawList *dl, ImFont *font, const State &s, float w, float 
             plate(dl, r, .0035f * h, .35f, false);
             continue;
         }
-        bool on = c >= 0 && !strcmp(s.layout.image[c], s.img_names[k].n);
+        bool on = c >= 0 && !strcmp(img_target(s, c), s.img_names[k].n);
         plate(dl, r, .0035f * h, 1.0f, on);
         Rect in = {r.x0 + .012f * h, r.y0 + .012f * h, r.x1 - .012f * h, r.y1 - .04f * h, true};
         if (ImTextureData *t = pic_texture(s.img_names[k].n)) pic_in_rect(dl, t, in, 1.0f);
@@ -4827,9 +5009,12 @@ void draw_pictures(ImDrawList *dl, ImFont *font, const State &s, float w, float 
     if (!s.img_n) snprintf(line, sizeof line, "%s", T("No pictures yet: Add pictures copies yours in (PNG or JPG). They are your own responsibility."));
     else snprintf(line, sizeof line, T("Page %d of %d. The pictures you add are your own responsibility."), s.img_page + 1, pages);
     window_line(dl, font, win, say_y, h, line, INK);
-    const char *const LABEL[IA_COUNT] = {"No picture", "<", ">", "Add pictures", "Close"};
+    bool bare = c >= 0 && (s.layout.bare >> c & 1);
+    const char *const LABEL[IA_COUNT] = {"No picture", "<", ">", bare ? "Frame: Off" : "Frame: On",
+                                         s.img_knob ? "For: knob" : "For: base", "Add pictures", "Close"};
     for (int i = 0; i < IA_COUNT; i++) {
-        bool off = (i == IA_NONE && (c < 0 || !s.layout.image[c][0])) || ((i == IA_PREV || i == IA_NEXT) && pages < 2);
+        bool off = (i == IA_NONE && (c < 0 || !img_target(s, c)[0])) || ((i == IA_PREV || i == IA_NEXT) && pages < 2) ||
+                   (i == IA_KNOB && c != C_STICK) || (i == IA_FRAME && c < 0);
         window_button(dl, font, btn[i], h, T(LABEL[i]), s.img_btn == i, off, false);
     }
 }
@@ -5336,6 +5521,7 @@ extern "C" bool touch_draw_unchanged(float w, float h) {
 
 extern "C" void touch_draw(float w, float h) {
     if (g_reuse_on) g_drawn_ok = draw_key(w, h, &g_drawn);  // (MHGU_PERF_OVERLAY_REUSE: what this frame is made of)
+    pics_sweep();  // (the players' pictures not shown for a while given back)
 #ifndef __ANDROID__
     if ((!g_visible && !g_gear_only && !g_lock_mark && !g_hud_edit) || overlay_menu_open()) return;
 #else
@@ -5417,7 +5603,10 @@ extern "C" void touch_draw(float w, float h) {
     if (item.ok && config_live_touch_show(TB_ITEM_ARROWS)) {
         for (int d = -1; d <= 1; d += 2) {
             bool lit = now < s.item_flash && s.item_dir == d;
-            item_arrow_disc(dl, place(s.layout, d < 0 ? C_ITEML : C_ITEMR, w, h), d, lit, a);
+            int c = d < 0 ? C_ITEML : C_ITEMR;
+            Geo g = place(s.layout, c, w, h);
+            // (a picture of the player's on it, as the editor shows: until 1.0.1 only the editor drew it)
+            if (!pic_face(dl, font, s.layout, c, g, lit, "", a, h)) item_arrow_disc(dl, g, d, lit, a);
         }
     } else if (item.ok) {
         float cy = (item.y0 + item.y1) * .5f, ch = .03f * h;

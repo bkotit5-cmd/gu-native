@@ -1439,7 +1439,7 @@ VkDescriptorSet ImGui_ImplVulkan_AddTexture(VkImageView image_view, VkImageLayou
     VkDescriptorPool pool = bd->DescriptorPool ? bd->DescriptorPool : v->DescriptorPool;
 
     // Create Descriptor Set:
-    VkDescriptorSet descriptor_set;
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
     {
         VkDescriptorSetAllocateInfo alloc_info = {};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1448,6 +1448,10 @@ VkDescriptorSet ImGui_ImplVulkan_AddTexture(VkImageView image_view, VkImageLayou
         alloc_info.pSetLayouts = &bd->DescriptorSetLayoutTexture;
         VkResult err = vkAllocateDescriptorSets(v->Device, &alloc_info, &descriptor_set);
         check_vk_result(err);
+        // (MHGU port: a failed allocation gives no set; a Mali driver left the variable as it was and the update below
+        // wrote through it - gu-native #237)
+        if (err != VK_SUCCESS)
+            descriptor_set = VK_NULL_HANDLE;
     }
 
     // Update the Descriptor Set:
