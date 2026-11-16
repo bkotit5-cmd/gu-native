@@ -426,9 +426,9 @@ static void why(Result *r, const char *fmt, ...) {
     r->ok = false;
 }
 
-// A host the system's resolver answers with a loopback address (a provider's or a filter's block: 127.9.9.9 was
-// seen for files.pythonhosted.org): its words, for the failure
-static void blocked_note(const char *host, char *out, size_t n) {
+// The loopback (or 0.x) address the system's resolver answers for a host, "" when none: a provider's or a filter's
+// block (127.9.9.9 was seen for files.pythonhosted.org)
+static void loopback_of(const char *host, char *out, size_t n) {
     out[0] = 0;
     WSADATA w;
     if (WSAStartup(MAKEWORD(2, 2), &w)) return;
@@ -437,11 +437,17 @@ static void blocked_note(const char *host, char *out, size_t n) {
     if (!getaddrinfo(host, "443", &hints, &res) && res) {
         struct sockaddr_in *a = (struct sockaddr_in *)res->ai_addr;
         unsigned char *b = (unsigned char *)&a->sin_addr;
-        if (b[0] == 127 || (b[0] == 0))
-            snprintf(out, n, " (%s answers %u.%u.%u.%u here: the internet provider or a filter blocks it)", host, b[0], b[1], b[2], b[3]);
+        if (b[0] == 127 || b[0] == 0) snprintf(out, n, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
         freeaddrinfo(res);
     }
     WSACleanup();
+}
+// ...its words, for a failure to connect
+static void blocked_note(const char *host, char *out, size_t n) {
+    char a[32];
+    loopback_of(host, a, sizeof a);
+    out[0] = 0;
+    if (a[0]) snprintf(out, n, " (%s answers %s here: the internet provider or a filter blocks it)", host, a);
 }
 
 static Result download(const Tool *t, const wchar_t *part) {
@@ -682,14 +688,14 @@ static Result install_tool(const Tool *t) {
     MultiByteToWideChar(CP_UTF8, 0, t->name, -1, name, 32);
     in_root(dest, MAX_PATH, name);
     const Tool *other = other_source(t);
-    char host[200], note[200] = "";
+    char host[200], addr[32] = "";
     const char *h = strstr(t->url, "://");
     h = h ? h + 3 : t->url;
     snprintf(host, sizeof host, "%.*s", (int)strcspn(h, "/:"), h);
-    if (other) blocked_note(host, note, sizeof note);
-    if (note[0]) {
-        why(&r, "%s: from %s, blocked%s", t->name, t->from, note);
-        say("%s: not from %s%s: from %s instead", t->name, t->from, note, other->from);
+    if (other) loopback_of(host, addr, sizeof addr);
+    if (addr[0]) {  // (short: the page's last lines don't wrap)
+        why(&r, "%s: %s is blocked here (%s answers %s)", t->name, t->from, host, addr);
+        say("%s: %s is blocked here (%s answers %s): from %s", t->name, t->from, host, addr, other->from);
     } else {
         r = install_from(t, dest);
         if (r.ok) drop_parts(t);
