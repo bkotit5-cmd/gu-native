@@ -5960,17 +5960,38 @@ void report(bool *open) {
 double g_credits_at = -1;
 bool g_credits_asked = false;  // (Show the credits: over the menu too)
 constexpr double kCreditsShown = 8;
+// A tap closes them (1.0.1, a player's suggestion: "disappear after touching the screen"): a finger put on the screen or
+// a mouse button pressed (settings_panel_credits_tap, host_input.c, any thread) once they are in (kCreditsArm: a finger
+// already down as they opened puts none) fades them out in kCreditsOut instead of their 8 seconds. The tap still goes
+// where it went before (they never took input); they still show at every start and from Credits & Licenses
+constexpr double kCreditsArm = .4, kCreditsOut = .25;
+double g_credits_shown = kCreditsShown;  // (how long they stay this time: less once a tap closed them)
+std::atomic<bool> g_credits_tap{false};
 void credits_show() {
     g_credits_at = SDL_GetTicks() / 1000.0;
     g_credits_asked = true;
+    g_credits_shown = kCreditsShown;
+    g_credits_tap = false;  // (the tap on Show the credits is not one on them)
+}
+// (the overlay's frame, before anything reads how long they stay) a tap since the last frame
+void credits_tapped(double now) {
+    if (!g_credits_tap.exchange(false) || g_credits_at < 0)
+        return;
+    const double t = now - g_credits_at;
+    if (t < kCreditsArm || t >= g_credits_shown - kCreditsOut)
+        return;
+    g_credits_shown = t + kCreditsOut;
+    fprintf(stderr, "[settings] the credits were closed by a tap after %.1f s\n", t);
 }
 // (only inside the overlay's ImGui frame: before its first one there is no font, and a draw list taken before NewFrame
 // is the last frame's, cleared as the frame begins)
 void draw_credits() {
-    constexpr double kShown = kCreditsShown, kIn = .4, kFade = .9;
+    constexpr double kIn = .4;
     const double now = SDL_GetTicks() / 1000.0;
     if (g_credits_at < 0)
         g_credits_at = now;
+    credits_tapped(now);
+    const double kShown = g_credits_shown, kFade = kShown < kCreditsShown ? kCreditsOut : .9;
     const double t = now - g_credits_at;
     if (t > kShown || thanks_on(now))  // (the thank-you on the screen: never one on the other)
         return;
@@ -6133,7 +6154,7 @@ void online_frame(double now) {
         return;
     }
     if (g_thanks != Thanks::Done || (g_thanks_shut >= 0 && now - g_thanks_shut < THANKS_OUT_S) || g_credits_at < 0 ||
-        now - g_credits_at <= kCreditsShown)
+        now - g_credits_at <= g_credits_shown)
         return;
     g_card = Card::Online;
     g_thanks = Thanks::Open;
@@ -6355,7 +6376,7 @@ bool thanks_up(double now) {
 void thanks_frame() {
     const double now = SDL_GetTicks() / 1000.0;
     thanks_decide();
-    if (g_thanks == Thanks::Wait && g_credits_at >= 0 && now - g_credits_at > kCreditsShown + THANKS_AFTER_S)
+    if (g_thanks == Thanks::Wait && g_credits_at >= 0 && now - g_credits_at > g_credits_shown + THANKS_AFTER_S)
         thanks_open(now, false);
     online_frame(now);
     if (!thanks_on(now))
@@ -6516,8 +6537,10 @@ bool settings_panel_credits_up(void) {
     // (and the thank-you after them: it waits for them, shows and fades out over frames of its own. Asked for on Credits &
     // Licenses they need no more than their time: g_credits_asked stays set once asked, and kept frames coming for good)
     const double now = SDL_GetTicks() / 1000.0;
-    return g_credits_at < 0 || now - g_credits_at <= kCreditsShown || thanks_up(now) || g_online_asked;
+    credits_tapped(now);
+    return g_credits_at < 0 || now - g_credits_at <= g_credits_shown || thanks_up(now) || g_online_asked;
 }
+void settings_panel_credits_tap(void) { g_credits_tap = true; }
 bool settings_panel_online_ok(const char *server) {
     if (g_online_seen || config_live_online_notice() || !overlay_enabled())
         return true;

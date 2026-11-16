@@ -6,6 +6,11 @@ void settings_panel(bool *open);
 void settings_panel_idle(void);
 // (game thread) the credits are on the screen now or about to be: the overlay draws a frame for them
 bool settings_panel_credits_up(void);
+// (host event thread, C too) a finger put on the screen or a mouse button pressed: the credits, if they are up, fade out
+#ifdef __cplusplus
+extern "C"
+#endif
+void settings_panel_credits_tap(void);
 #ifdef __cplusplus
 struct ImDrawData;
 // After ImGui::Render, the same thread: what of the menu is fading out (a desktop's: closed, it takes no input) goes into

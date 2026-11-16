@@ -46,6 +46,7 @@
 #include "overlay.h"
 #include "padmap.h"
 #include "rt.h"
+#include "settings_panel.h"
 #include "textinput.h"
 #include "touch.h"
 #ifdef __ANDROID__
@@ -974,6 +975,8 @@ void host_input_event(const SDL_Event *e) {
         if (pad_down || menu_mouse()) menu_pointer_hidden = true;
     }
     if (e->type == SDL_EVENT_FINGER_UP && textinput_active()) textinput_tap();  // (the screen keyboard, if hidden)
+    if (e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+        settings_panel_credits_tap();  // (the credits shown at the start close at a tap: runtime/settings_panel.cpp)
     if (touch_event(e)) return;  // (fingers: the touch controls, or the settings menu's mouse: runtime/touch.cpp)
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
 #ifndef __ANDROID__
