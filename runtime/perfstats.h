@@ -10,7 +10,12 @@ extern "C" {
 void perfstats_poll(void);              // host main thread, each loop pass (runtime/ui.c): the phone's temperature, every 2 s
                                         // at most; a PC: its sampler told the level (runtime/platform/win_stats.c)
 bool perfstats_visible(void);           // game thread (runtime/overlay.cpp): it is to be drawn this frame
+void perfstats_tick(void);             // game thread, every frame it shows (the overlay built or its copy drawn again): the measures
 void perfstats_draw(float w, float h);  // game thread, inside the overlay's ImGui frame (display size in pixels)
+// (game thread, MHGU_PERF_OVERLAY_REUSE) the plate would draw what the overlay built last drew (a phone's; a PC: false), and
+// its copy drawn again keeps it where it is (perfstats_bottom, perfstats_rect)
+bool perfstats_same(float w, float h);
+void perfstats_kept(void);
 float perfstats_bottom(void);           // game thread: the plate's lower edge just drawn, in display pixels; 0: none shown
                                         // (or it is not at the top: moved in the layout editor)
 // (any thread) the plate as last drawn, in display pixels: x0, y0, x1, y1; false while it isn't shown (the layout

@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 
 #include <SDL3/SDL.h>
@@ -251,76 +252,135 @@ extern "C" bool perfstats_rect(float r[4]) {
 }
 
 extern "C" volatile uint64_t g_framegen_presents;  // (nvn/vulkan/framegen.c: the made pictures presented)
-extern "C" void perfstats_draw(float w, float h) {
-    // the measures: the frames presented in each half second; the longest gap between two of these calls (the game's
-    // frames) in each second, the last whole second's shown (the one going on until there is one)
-    static uint64_t last, win_t0, win_n0, sec_t0;
-    static float fps = -1, avg_ms, worst_cur, worst_ms, shown = 0;
-    static uint64_t win_g0;
+// The measures: the frames presented in each half second; the longest gap between two calls of perfstats_tick (the
+// game's frames) in each second, the last whole second's shown (the one going on until there is one). Taken every
+// frame, the overlay built or its copy drawn again (runtime/overlay.cpp, MHGU_PERF_OVERLAY_REUSE)
+static uint64_t m_last, m_win_t0, m_win_n0, m_sec_t0, m_win_g0;
+static float m_fps = -1, m_avg_ms, m_worst_cur, m_worst_ms, m_shown;
+extern "C" void perfstats_tick(void) {
     uint64_t now = SDL_GetTicksNS(), n = g_present_count, gn = g_framegen_presents;
-    if (!last || now - last > 5000000000ull) {  // (first shown, or after a long gap: hidden meanwhile, the app paused;
-                                                // a stall of a second or more still shows)
-        win_t0 = sec_t0 = now, win_n0 = n, win_g0 = gn;
-        fps = -1, worst_cur = worst_ms = 0, shown = 0;
+    if (!m_last || now - m_last > 5000000000ull) {  // (first shown, or after a long gap: hidden meanwhile, the app paused;
+                                                    // a stall of a second or more still shows)
+        m_win_t0 = m_sec_t0 = now, m_win_n0 = n, m_win_g0 = gn;
+        m_fps = -1, m_worst_cur = m_worst_ms = 0, m_shown = 0;
     } else {
-        worst_cur = std::max(worst_cur, (now - last) / 1e6f);
-        if (now - win_t0 >= 500000000ull) {
-            double s = (now - win_t0) / 1e9;
-            fps = (float)((n - win_n0) / s);
-            shown = gn > win_g0 ? (float)((n - win_n0 + gn - win_g0) / s) : 0;  // (frame generation: the frames shown)
-            avg_ms = n > win_n0 ? (float)(s * 1e3 / (double)(n - win_n0)) : 0;
-            win_t0 = now, win_n0 = n, win_g0 = gn;
+        m_worst_cur = std::max(m_worst_cur, (now - m_last) / 1e6f);
+        if (now - m_win_t0 >= 500000000ull) {
+            double s = (now - m_win_t0) / 1e9;
+            m_fps = (float)((n - m_win_n0) / s);
+            m_shown = gn > m_win_g0 ? (float)((n - m_win_n0 + gn - m_win_g0) / s) : 0;  // (frame generation: the frames shown)
+            m_avg_ms = n > m_win_n0 ? (float)(s * 1e3 / (double)(n - m_win_n0)) : 0;
+            m_win_t0 = now, m_win_n0 = n, m_win_g0 = gn;
         }
-        if (now - sec_t0 >= 1000000000ull) worst_ms = worst_cur, worst_cur = 0, sec_t0 = now;
+        if (now - m_sec_t0 >= 1000000000ull) m_worst_ms = m_worst_cur, m_worst_cur = 0, m_sec_t0 = now;
     }
-    last = now;
-    if (fps < 0) return;  // (nothing measured yet)
+    m_last = now;
+}
 
-    // the line: "60 FPS · 16.6 ms · max 24.1 · 38.5 °C (moderate)", the status only when there is one
-    bool es = config_language() == 1;
-    char f[16], ms[16], mx[16];
-    snprintf(f, sizeof f, "%.0f", fps);
-    decimal(ms, sizeof ms, avg_ms, es);
-    decimal(mx, sizeof mx, worst_ms > 0 ? worst_ms : worst_cur, es);
+namespace {
+// The plate's first line as runs of text and colour, from the measures: "60 FPS · 16.6 ms · max 24.1 · 38.5 °C
+// (moderate)", the status only when there is one. Its texts are in its own buffers.
+struct Plate {
     Run runs[64];
     int nr = 0;
-    auto add = [&](const char *t, ImU32 c) { if (nr < 64) runs[nr++] = {t, c}; };
+    char f[16], ms[16], mx[16], sh[16], tc[16];
+    void add(const char *t, ImU32 c) { if (nr < 64) runs[nr++] = {t, c}; }
+};
+void plate_runs(Plate &p, bool es) {
+    snprintf(p.f, sizeof p.f, "%.0f", m_fps);
+    decimal(p.ms, sizeof p.ms, m_avg_ms, es);
+    decimal(p.mx, sizeof p.mx, m_worst_ms > 0 ? m_worst_ms : m_worst_cur, es);
     float cap = config_live_fps();
     if (cap > FPS_PHONE_MAX) cap = 60;  // (Unlimited, or more than a phone takes: good from 60 up)
-    add(f, fps >= cap * .95f ? GOOD : fps >= cap * .75f ? GOLD : BAD);
-    add(" FPS", GOLD);
-    char sh[16];
-    if (shown > 0) {  // ([Graphics] FrameGen making pictures: "30 FPS (60 shown)")
-        snprintf(sh, sizeof sh, "%.0f", shown);
-        add(" (", DIM);
-        add(sh, INK);
-        add(es ? " mostrados)" : " shown)", GOLD);
+    p.add(p.f, m_fps >= cap * .95f ? GOOD : m_fps >= cap * .75f ? GOLD : BAD);
+    p.add(" FPS", GOLD);
+    if (m_shown > 0) {  // ([Graphics] FrameGen making pictures: "30 FPS (60 shown)")
+        snprintf(p.sh, sizeof p.sh, "%.0f", m_shown);
+        p.add(" (", DIM);
+        p.add(p.sh, INK);
+        p.add(es ? " mostrados)" : " shown)", GOLD);
     }
-    add(SEP, DIM);
-    add(avg_ms > 0 ? ms : "--", INK);
-    add(" ms", GOLD);
-    add(SEP, DIM);
-    add(es ? "m\xC3\xA1x " : "max ", GOLD);
-    add(mx, INK);
+    p.add(SEP, DIM);
+    p.add(m_avg_ms > 0 ? p.ms : "--", INK);
+    p.add(" ms", GOLD);
+    p.add(SEP, DIM);
+    p.add(es ? "m\xC3\xA1x " : "max ", GOLD);
+    p.add(p.mx, INK);
 #ifdef __ANDROID__
     static const char *const STATUS_EN[7] = {"", "light", "moderate", "severe", "critical", "emergency", "shutdown"};
     static const char *const STATUS_ES[7] = {"", "leve", "moderado", "grave", "cr\xC3\xADtico", "emergencia", "apagando"};
-    char tc[16];
     int t = g_temp, st = g_thermal;
     float room = g_headroom;  // (NaN: every comparison false)
     if (t != INT_MIN) {
         bool hot = st >= 2 || room >= 1.0f || t >= 450, warm = st == 1 || room >= .85f || t >= 420;
-        decimal(tc, sizeof tc, t / 10.0, es);
-        add(SEP, DIM);
-        add(tc, hot ? BAD : warm ? GOLD : INK);
-        add(" \xC2\xB0" "C", GOLD);  // (U+00B0)
+        decimal(p.tc, sizeof p.tc, t / 10.0, es);
+        p.add(SEP, DIM);
+        p.add(p.tc, hot ? BAD : warm ? GOLD : INK);
+        p.add(" \xC2\xB0" "C", GOLD);  // (U+00B0)
     }
     if (st >= 1 && st <= 6) {
-        if (t != INT_MIN) add(" (", GOLD); else add(SEP, DIM);
-        add(es ? STATUS_ES[st] : STATUS_EN[st], st >= 2 ? BAD : GOLD);
-        if (t != INT_MIN) add(")", GOLD);
+        if (t != INT_MIN) p.add(" (", GOLD); else p.add(SEP, DIM);
+        p.add(es ? STATUS_ES[st] : STATUS_EN[st], st >= 2 ? BAD : GOLD);
+        if (t != INT_MIN) p.add(")", GOLD);
     }
 #endif
+}
+#ifdef __ANDROID__
+// (MHGU_PERF_OVERLAY_REUSE) what the plate is made of: the display's size, its runs' texts and colours, and where the
+// layout editor put it. The same key, the same draws (a phone's plate takes nothing else: a PC's adds the sampler's
+// lines and the HUD's bounds, so a PC builds every frame with it, as before).
+uint64_t plate_key(const Plate &p, float w, float h) {
+    uint64_t k = 1469598103934665603ull;
+    auto mix = [&](const void *d, size_t n) {
+        for (size_t i = 0; i < n; i++) k = (k ^ ((const unsigned char *)d)[i]) * 1099511628211ull;
+    };
+    float x = -1, y = -1;
+    bool placed = touch_fps_place(w, h, 0, 0, &x, &y);
+    mix(&w, sizeof w), mix(&h, sizeof h), mix(&placed, sizeof placed), mix(&x, sizeof x), mix(&y, sizeof y);
+    for (int i = 0; i < p.nr; i++) mix(p.runs[i].text, strlen(p.runs[i].text) + 1), mix(&p.runs[i].col, sizeof p.runs[i].col);
+    return k;
+}
+uint64_t g_drawn_key;
+bool g_drawn_ok;  // (the overlay built last drew the plate, whose key is g_drawn_key)
+#endif
+}  // namespace
+
+// (game thread, MHGU_PERF_OVERLAY_REUSE: runtime/overlay.cpp) the plate would draw what the overlay built last drew
+extern "C" bool perfstats_same(float w, float h) {
+#ifdef __ANDROID__
+    if (!g_drawn_ok || m_fps < 0) return false;
+    Plate p;
+    plate_runs(p, config_language() == 1);
+    return plate_key(p, w, h) == g_drawn_key;
+#else
+    (void)w, (void)h;
+    return false;
+#endif
+}
+// (game thread) the overlay's copy drawn again, the plate with it: where it is, as if just drawn (perfstats_bottom,
+// perfstats_rect)
+extern "C" void perfstats_kept(void) {
+    uint64_t now = SDL_GetTicksNS();
+    if (g_plate_ns) g_plate_ns = now;
+    if (g_plate_at.load()) g_plate_at = now;
+}
+
+extern "C" void perfstats_draw(float w, float h) {
+#ifdef __ANDROID__
+    g_drawn_ok = false;
+#endif
+    if (m_fps < 0) return;  // (nothing measured yet)
+    uint64_t now = SDL_GetTicksNS();
+    bool es = config_language() == 1;
+    Plate plate;
+    plate_runs(plate, es);
+#ifdef __ANDROID__
+    g_drawn_key = plate_key(plate, w, h), g_drawn_ok = true;
+#endif
+    Run *runs = plate.runs;
+    int &nr = plate.nr;
+    auto add = [&](const char *t, ImU32 c) { plate.add(t, c); };
+    (void)add;
     // the plate: text 2.6% of the screen's height (smaller, down to 80%, if it would not fit the gap); as wide as its
     // widest line (a PC's Full readout has three or four)
     struct Span { int b, e; };  // (a line: runs[b] up to runs[e])
