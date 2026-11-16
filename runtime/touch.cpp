@@ -5603,7 +5603,10 @@ extern "C" void touch_draw(float w, float h) {
     if (item.ok && config_live_touch_show(TB_ITEM_ARROWS)) {
         for (int d = -1; d <= 1; d += 2) {
             bool lit = now < s.item_flash && s.item_dir == d;
-            item_arrow_disc(dl, place(s.layout, d < 0 ? C_ITEML : C_ITEMR, w, h), d, lit, a);
+            int c = d < 0 ? C_ITEML : C_ITEMR;
+            Geo g = place(s.layout, c, w, h);
+            // (a picture of the player's on it, as the editor shows: until 1.0.1 only the editor drew it)
+            if (!pic_face(dl, font, s.layout, c, g, lit, "", a, h)) item_arrow_disc(dl, g, d, lit, a);
         }
     } else if (item.ok) {
         float cy = (item.y0 + item.y1) * .5f, ch = .03f * h;
