@@ -214,11 +214,11 @@ static const char DEFAULT_INI[] =
     "[Performance]\n"
 #ifdef __ANDROID__
     "; Framerate cap\n"
-    "; Between 30 and 240\n"
+    "; Between 15 and 240\n"
 #else
     "; Framerate cap. Unlimited: as many frames as the PC can draw, with VSync Off (with VSync On, the monitor's\n"
     "; refresh rate is the most)\n"
-    "; Between 30 and 240, or Unlimited (a number up to 1000 is taken too)\n"
+    "; Between 15 and 240, or Unlimited (a number up to 1000 is taken too)\n"
 #endif
     "; Default: 60\n"
     "FPS = 60\n"
@@ -844,7 +844,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
-    {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, FPS_MAX, NULL, NULL, false, ERR_MISC},
+    {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, FPS_MIN, FPS_MAX, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
     {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2", NULL, true,
@@ -1574,7 +1574,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_BLOOM"))) g_config.bloom = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_GRASS"))) g_config.grass = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_EFFECTS"))) g_config.effects = atoi(e) != 0, config_live_test(&g_config);
-    if ((e = getenv("MHGU_FPS_LIMIT")) && atoi(e) >= 30 && atoi(e) <= FPS_MAX) g_config.fps = atoi(e), config_live_test(&g_config);
+    if ((e = getenv("MHGU_FPS_LIMIT")) && atoi(e) >= FPS_MIN && atoi(e) <= FPS_MAX) g_config.fps = atoi(e), config_live_test(&g_config);
     if ((e = getenv("MHGU_SCALE")) && atoi(e) >= 10 && atoi(e) <= 100) g_config.render_scale = atoi(e);
     if ((e = getenv("MHGU_SHADOWS"))) g_config.shadows = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_FSR"))) g_config.fsr = atoi(e) != 0;  // (test runs: MHGU_FSR=0|1, MHGU_FSR_QUALITY=quality...)

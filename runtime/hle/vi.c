@@ -18,7 +18,7 @@ uint32_t g_native_window;
 // (pointer in the global at 0x2326764, the same field theboy181's 60fps patch sets). The game puts 30.0 there at
 // start and resets it at some transitions, so every presented frame writes the chosen rate back (the 90 / 120 fps
 // cheat codes write this same field). The frame delta is in 60 fps frames, measured: walking speed is the same at 30,
-// 60 and ~135 fps. The settings' FPS (mhgurecomp.ini: 30..240, default 60); MHGU_FRAMERATE supplies the initial override. Above the
+// 60 and ~135 fps. The settings' FPS (mhgurecomp.ini: 15..240 since 1.0.1, 30..240 before; default 60); MHGU_FRAMERATE supplies the initial override. Above the
 // monitor's refresh rate the settings' VSync must be Off (immediate present): FIFO / mailbox wait for the display.
 #define FPS_OBJ_GLOBAL 0x2326764u
 static float framerate(void) { return config_live_fps(); }

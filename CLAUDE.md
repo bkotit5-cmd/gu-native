@@ -1160,6 +1160,11 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   Frontier's sky and the cooking pot's steam in Bherna stay with Effects off: part of the stage's models, not effect units.
   `MHGU_EFFECTS=0|1` overrides the ini in a test run. The scripts that found the classes and vtables (from a decompressed
   `main` and `generated/main`) are in the 1.0 work notes, outside the repository (dtis.py, props.py, strrefs.py).
+- The frame rate limit (`[Performance] FPS`) goes down to `FPS_MIN`, 15, since 1.0.1 (30 before; players with the weakest
+  phones asked for 20): the menu's list has 15 and 20. The engine's step is in 60 FPS frames, 4 at 15 (it caps them at 16):
+  on the PC, quest 101, the touch stick held 4 s walked the hunter 1544 units at 15 and 1576 at 60, the same 1720 once he
+  stopped. At 15 a frame is 67 ms, longer than the touch controls' 70 ms tap: `min_press` holds a tap 1.15 frames then, and
+  a drag's menu steps leave two of those between them.
 - 3D resolution (1.0): `[Display] RenderScale` takes any percent from `RENDER_SCALE_MIN` (10) to 100, the 3D picture never
   under 320x180 (`config_load`). The menu's row (`scale_row`) is a number: left / right one percent, a tap the usual ones
   (100 ... 20); on a phone the list ends with Exact size, which sets `[Display] RenderResolution` to the percent's size and

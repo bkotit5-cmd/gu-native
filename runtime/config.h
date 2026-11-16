@@ -199,7 +199,10 @@ void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
 #define LOW_END_SCALE 40  // what the menu's Low-end mode sets: RenderScale, FPS
 #define LOW_END_FPS 30
 // [Performance] FPS: the most a phone takes; a desktop also takes more, up to FPS_UNLIMITED ("Unlimited" in the file
-// and the menu: as many frames as the PC draws, the engine's limiter at 1 ms a frame, which no frame here is faster than)
+// and the menu: as many frames as the PC draws, the engine's limiter at 1 ms a frame, which no frame here is faster than).
+// The least, FPS_MIN (1.0.1: 30 before; for the weakest phones, players asked for 20): the engine's frame step is in 60
+// fps frames (runtime/hle/vi.c), 4 of them at 15, which it caps at 16
+#define FPS_MIN 15
 #define FPS_PHONE_MAX 240
 #define FPS_UNLIMITED 1000
 #ifdef __ANDROID__

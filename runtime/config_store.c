@@ -129,7 +129,7 @@ void config_runtime_init(const Config *effective) {
     const char *override = getenv("MHGU_FRAMERATE");
     if (override && *override) {
         float f = strtof(override, NULL);
-        if (!(f >= 30)) f = 30;
+        if (!(f >= FPS_MIN)) f = FPS_MIN;
         if (f > FPS_MAX) f = FPS_MAX;
         set_float(&live_fps, f);
     }

@@ -2852,12 +2852,12 @@ void rows_graphics_20(std::vector<Row> &r) {
         if (d > 0)
             v = v >= FPS_PHONE_MAX ? FPS_UNLIMITED : std::min(FPS_PHONE_MAX, v + d);
         else if (d < 0)
-            v = v > FPS_PHONE_MAX ? FPS_PHONE_MAX : std::max(30, v + d);
+            v = v > FPS_PHONE_MAX ? FPS_PHONE_MAX : std::max(FPS_MIN, v + d);
     };
     r.back().help = tr("The most frames a second. Unlimited: as many as the PC can draw, with VSync off; with VSync on, the monitor's refresh rate is the most. On a PC that can't hold 60, 30 is steadier: Toaster sets it, and Low-end mode leaves the frame rate as it is.");
 #endif
     // left / right: one frame per second more or less; Confirm: the common ones
-    static const int presets[] = {30, 60, 90, 120, 144, 240,  // (the MH4U port's same list)
+    static const int presets[] = {15, 20, 30, 60, 90, 120, 144, 240,  // (the MH4U port's same list; 15 and 20 since 1.0.1)
 #ifndef __ANDROID__
                                   FPS_UNLIMITED,
 #endif
@@ -4256,8 +4256,8 @@ const PhoneHelp PHONE_HELP[] = {
     {"UIAnchor", "On a screen wider than 16:9, where the HUD goes.", "En una pantalla más ancha que 16:9, dónde va el HUD."},
     {"FillScreen", "Movies and menu backdrops fill the screen, with a little cut above and below, instead of bars at the sides.",
      "Los videos y los fondos de los menús llenan la pantalla, con un pequeño recorte arriba y abajo, en lugar de barras a los costados."},
-    {"FPS", "The most frames a second. A lower limit heats the phone less and saves battery.",
-     "El máximo de cuadros por segundo. Un límite más bajo calienta menos el teléfono y gasta menos batería."},
+    {"FPS", "The most frames a second. A lower limit heats the phone less and saves battery. 15 and 20 are for the weakest phones: the game moves less smoothly, at the same speed.",
+     "El máximo de cuadros por segundo. Un límite más bajo calienta menos el teléfono y gasta menos batería. 15 y 20 son para los teléfonos más débiles: el juego se mueve menos fluido, a la misma velocidad."},
     {"ShowStats", "Shows the frame rate and the phone's temperature on the screen.", "Muestra los FPS y la temperatura del teléfono en la pantalla."},
     {"MSAA", "Smooths the edges of 3D models. It asks more of the GPU.", "Suaviza los bordes de los modelos 3D. Exige más a la GPU."},
     {"FXAA", "Smooths the edges of the whole picture. On Mali GPUs it can leave a green line at the edge of the screen.",

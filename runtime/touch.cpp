@@ -1455,7 +1455,14 @@ void hud_asked(const State &s) { g_hud_asked = s.hud_edit || s.hud_request || g_
 std::atomic<bool> g_hud_pad;    // (a controller is read: its B, which cancels the editor, shows on Cancel once used)
 #endif
 // (the lock-on waits so long after a turn by hand or an L, as the MH4U port's)
-const uint64_t LOCK_AFTER_TURN = 600 * MS, MIN_PRESS = 70 * MS;
+const uint64_t LOCK_AFTER_TURN = 600 * MS, MIN_PRESS_NS = 70 * MS;
+// (a quick tap's press: 70 ms, or a game frame and a bit at a frame rate under 16 a second - the FPS limit goes down to
+// 15 since 1.0.1 -, as the game reads its buttons once a frame)
+uint64_t min_press(void) {
+    float fps = config_live_fps();
+    return fps > 0 && fps < 16.0f ? std::max<uint64_t>(MIN_PRESS_NS, (uint64_t)(1.15e9f / fps)) : MIN_PRESS_NS;
+}
+#define MIN_PRESS min_press()
 // (the aim's tap: let go within this, the game's own tap of R, under its 14 frames at 60 FPS with an update to spare)
 const uint64_t AIM_TAP = 180 * MS;
 const uint64_t BAR_HOLD = 400 * MS;  // (a finger kept this long on the item bar, unmoved, holds it open: as the MH4U port)
@@ -2789,9 +2796,10 @@ extern "C" bool touch_event(const SDL_Event *e) {
             float ax = fabsf(f->swipe), ay = fabsf(f->swipe_y), step = .075f * s.h;
             if (now >= s.step_ns && std::max(ax, ay) >= step) {
                 bool across = ax > ay;  // (a step: a press that starts, as the menu pad's; felt as it presses: touch_input)
-                pulse(s, across ? (f->swipe > 0 ? DPAD_RIGHT : DPAD_LEFT) : (f->swipe_y > 0 ? DPAD_DOWN : DPAD_UP), 70 * MS, 0,
+                pulse(s, across ? (f->swipe > 0 ? DPAD_RIGHT : DPAD_LEFT) : (f->swipe_y > 0 ? DPAD_DOWN : DPAD_UP), MIN_PRESS, 0,
                       true, true);
-                s.step_ns = now + 130 * MS;  // (time to let go between steps: the game reads a press, not a hold)
+                // (time to let go between steps: the game reads a press, not a hold; at a low frame rate, a frame's time)
+                s.step_ns = now + std::max<uint64_t>(130 * MS, 2 * MIN_PRESS);
                 f->swipe = across ? f->swipe - copysignf(step, f->swipe) : 0;
                 f->swipe_y = across ? 0 : f->swipe_y - copysignf(step, f->swipe_y);
             }
