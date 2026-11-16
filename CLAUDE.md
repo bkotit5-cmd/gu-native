@@ -107,7 +107,9 @@ In Git Bash, with llvm-mingw 20241217 (UCRT) and the Android SDK's CMake 3.22.1 
    llvm-mingw (`--ndk`, `--llvm-mingw`). The Android library it makes is the same, byte for byte, as before the PC part existed.
 4. `MHGU.exe` finds the folder by itself (`runtime/gamefolder.c`): the one chosen before (`game_folder.txt` beside the settings), `data`
    beside the executable, or its own folder; else it asks with the system's folder dialog, with the checks and messages of Android's
-   `GameFolderActivity` (in English or Spanish), and then loads `mhgugame.dll` from that folder.
+   `GameFolderActivity` (in English or Spanish), and then loads `mhgugame.dll` from that folder. A folder with everything but the
+   game code (missing, or another version's) gets **Build the game code on this PC**: MHGU.exe makes it itself (below, "Making
+   the game code on PC"); step 3's command is the way by hand.
 
 - `mhgugame.dll` imports the runtime's functions from the executable by name, so it only loads into `MHGU.exe`: don't rename it. The
   tool needs no copy of it: a first link lists what nothing else provides, and `llvm-dlltool` makes the import library from that. The
@@ -230,6 +232,71 @@ screen's **Build on this phone** when the game code is missing or from another v
 - **The PC route** is unchanged: without `--zig-cc` and `--work`, the NDK build is made as before (a temporary work
   folder, the same objects and link), and the library and its id are now put in the folder whole (written beside, then
   renamed).
+
+## Making the game code on PC (1.0.1)
+
+MHGU.exe makes `mhgugame.dll` itself, with no Python or compiler of the player's: the game folder screen's **Build the game
+code on this PC** when the folder has everything but the game code (missing, or another version's:
+`gamefolder_lib_missing`), and F1, System, Game code, **Build the game code** (asked first, View::BuildCode: the game
+restarts into the builder's page; `builder_open.txt` beside the settings, `pcb_take_open_request` in `gamefolder_find`).
+`runtime/pc_builder.c` does the work and `runtime/launcher.cpp` draws its page: Android's BuilderActivity (what it uses,
+what it needs or how it goes stage by stage, the bar, the build's last lines; Build / Go on / Cancel / Play, Start over,
+Delete the tools, Open the guide for the way by hand, Back). Play starts the game in the same process (the library was never
+loaded); closing the window while it builds asks first and stops it, its work kept.
+
+- **What runs.** `tools/pc_build.py` (phone_build.py's PC twin; its @@ lines, `Stages` and inputs.txt resume stamp are
+  imported from phone_build.py, which is unchanged) runs `tools/build_game.py <folder> --pc --force --zig <zig.exe>
+  --work <dir> --no-pip`: the players' own tool. The scripts are `builder_tools.zip` beside MHGU.exe
+  (`tools/pack_builder_tools.py --pc GAMELIB_ID OUT`, written by native/build_windows.sh and checked there against the
+  PC's GAMELIB_ID), unpacked into `builder\scripts` again whenever it changes.
+- **Python and the compiler.** Downloaded the first time from their official sources over WinHTTP (the system's TLS and
+  proxy), checked against their SHA-256, unpacked beside their place and renamed when whole (`runtime/unzip.c`), in
+  `builder\` beside the settings: python.org's embeddable Python 3.14.9 for 64-bit Windows (12.0 MB; SHA-256 from
+  python.org's release page) and Zig 0.13.0 from PyPI's `ziglang` win_amd64 wheel (76.7 MB; SHA-256 from PyPI's JSON),
+  of which `zig.exe` and the lib parts `zig cc` reads for x86_64-windows-gnu (`ZIG_KEEP`). A cut download goes on with an
+  HTTP Range. Never game files. The embeddable Python reads no environment variable: its `python314._pth` is written to
+  name the scripts' `tools` (gen.py's own imports) and the work folder's `pylib` (build_game.py's LZ4 reader, `lz4_env`).
+  A download whose host the system resolves to a loopback address says so (the developer's provider answered 127.9.9.9
+  for files.pythonhosted.org: a DNS block, which a player can get around with another DNS or network).
+- **Zig instead of llvm-mingw** (`build_game.py --zig`): the same PC_CFLAGS with Zig's name for the processor
+  (`-mcpu=x86_64_v2` for `-march=x86-64-v2`) and `-target x86_64-windows-gnu` (mingw-w64 with the UCRT, as llvm-mingw's
+  UCRT build: the same `api-ms-win-crt-*` imports, plus a few of Zig's mingw startup code). Zig builds its mingw-w64 and
+  compiler-rt into its cache once (about a minute). `zig cc` takes no `-Wl,--error-limit` and lld stops at 20 errors, so
+  `link_pc_zig` finds the runtime's names a few links at a time; Zig has no nm, so the .refptr names come from the objects'
+  COFF symbol tables (`coff_defined`); the import list is llvm-mingw's (`mhgu_exe.def` the same, byte for byte). The DLL's
+  time stamp is set to 0 (lld's `--no-insert-timestamp`), so the same game code gives the same file. PC_ID_FLAGS doesn't
+  change, so neither does the id (48d9d2871c2734ec); the bytes differ from llvm-mingw's (Zig's clang is LLVM 18, llvm-mingw
+  20241217's is 19). `whole_object` reads COFF objects too (a PC `--work` resume kept none before), and a Zig compile that
+  ends with no message of its own (its clang couldn't start: seen with the PC out of commit, its system drive full) goes
+  again after 10 and 20 s.
+- **The process.** `python.exe -X utf8 -u pc_build.py ...` with CREATE_NO_WINDOW (a hidden console its children share: no
+  windows flash), BELOW_NORMAL_PRIORITY_CLASS and only its pipe inherited, in a job object with
+  JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE and the priority class for every process in it: Cancel is TerminateJobObject, and
+  MHGU.exe closing or crashing ends the build too. Compilers at once: all the cores but one, at most (the smaller of the
+  free memory and the free commit, - 1.5 GB) / 400 MB, half after a run that stopped while compiling (`last_failure.txt`).
+  Before anything is downloaded, the free space on the builder's disk is checked against what the missing tools and a
+  work folder take (3 GB; a build peaked at about 0.5 GB of work folder): not enough is the failure "space", in words. TMP/TEMP and Zig's caches are in the
+  builder's folder, never the system drive's temporary folder; the player's PYTHON* and ZIG_* variables are left out.
+- **Resuming and Start over** are Android's: the work folder (`builder\work`) stays until a build succeeds (`--clean`);
+  `state.txt` says a run was cut; Start over sets the work folder aside (and, chosen, the tools) in one rename and deletes it
+  on a thread of its own (`*.trash-*`, finished at the next start over or build). `builder_log.txt` beside the settings keeps
+  the last run; the game's log has its lines too, as `[builder]`.
+- **Measured** (2026-11-16, the developer's PC: Ryzen 5 3600XT, 6 cores / 12 threads, 32 GB, the work on a hard disk
+  shared with other builds): from a clean work folder with the tools in place, 5 min 50 s (the translation, by the
+  embeddable Python, 66 s; 11 compilers; Zig's mingw-w64 and compiler-rt built once in the work folder's cache), each
+  `zig cc` two processes of about 110 MB, the work folder at most about 0.5 GB; the tools 280 MB once unpacked (Python 23
+  MB, Zig 256 MB), unpacked in 12 s. The manual route (llvm-mingw, 12 jobs, normal priority) took 5 min 43 s. The
+  library is the same, byte for byte (md5 533d6f7669e5e3fabb4a5f1adae3c146, 90,336,256 bytes): built clean in the app,
+  in the app after a failed run, a cancel while compiling and Go on (the translation kept by inputs.txt), and by
+  `build_game.py --pc --zig` with the PC's own Python 3.12; llvm-mingw's (90,481,664 bytes) has the same id and the same
+  import list. The game loads it and plays quest 101 (60 FPS, the limit). The developer's line answered 127.9.9.9 for
+  files.pythonhosted.org, so the Zig wheel was fetched once by hand from PyPI (its SHA-256 checked) and put where a cut
+  download goes: the app checked and unpacked it; Python's download, Cancel during it and the HTTP Range that goes on
+  were the app's own.
+- **Tests:** `MHGU_LAUNCHER_PICK=<folder>` (the folder dialog's answer), `MHGU_LAUNCHER_SCRIPT="open; build; wait python 3;
+  cancel; wait stopped; build; wait compile 100; cancel; wait stopped; build; wait done; shot <png>; play"` works the
+  screen (also `startover`, `startover-tools`, `deletetools`, `back`, `exit`, `sleep <ms>`, `wait zig|recompile|failed`),
+  and `MHGU_HIDDEN=1` hides its window as the game's.
 
 ## Testing on a device
 

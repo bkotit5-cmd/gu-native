@@ -615,7 +615,9 @@ engranaje, mantén pulsado el ícono de la app: también ofrece **Compartir regi
 La misma carpeta del juego sirve en una PC con Windows: `MHGU.exe` corre tu juego de forma nativa.
 
 La descarga trae solo el programa: el código del juego (`mhgugame.dll` y `mhgugame.id`) se crea una vez a partir de tu propia
-copia, en el [paso 2 de la instalación](#paso-2-crea-el-código-del-juego-1).
+copia, con el propio programa: ábrelo, elige tu carpeta del juego y pulsa **Crear el código del juego en esta PC**
+([paso 3 de la instalación](#paso-3-crea-el-código-del-juego)). La herramienta del código fuente también lo crea
+[a mano](#crea-el-código-del-juego-a-mano).
 
 ### Qué ofrece
 
@@ -720,8 +722,9 @@ tu tarjeta gráfica y los FPS ayuda.
   Ryzen. Los más viejos no lo tienen, como un Intel Core 2 o un Atom de antes de 2013, un AMD Phenom II o Athlon II, o las
   series A y E de AMD de 2011, y el juego lo dice al arrancar.
 - **8 GB de RAM** recomendados. Con 4 GB debería funcionar si no tienes nada más abierto, con cargas más lentas, pero no se probó.
-- **Espacio libre:** unos 13 GB para tu carpeta del juego, al menos 3 GB más mientras trabaja la herramienta, y cerca de
-  medio GB para el programa y sus shaders.
+- **Espacio libre:** unos 13 GB para tu carpeta del juego, unos 3 GB más mientras se crea el código del juego, y cerca de
+  1 GB para el programa, sus shaders y las herramientas que crean el código del juego (se pueden borrar después).
+- **Conexión a internet** la primera vez que se crea el código del juego: sus herramientas ocupan unos 90 MB.
 - **Tu propia copia del juego,** actualizada a la versión 1.4.0.
 
 ### Instalación
@@ -752,9 +755,72 @@ es de otra versión.
 
 Este proyecto no explica cómo volcar un juego de tu consola y no ofrece archivos del juego, keys ni enlaces a ellos.
 
-#### Paso 2: Crea el código del juego
+#### Paso 2: Instala
 
-El programa no trae código del juego, así que creas el tuyo a partir de tu copia. Se hace en tu PC y no envía nada a ningún lado.
+No hay instalador: el programa es una carpeta.
+
+1. Descarga `MHGU-PC-<versión>.zip` desde [Releases](../../releases/latest) y descomprímelo entero en una carpeta tuya, por
+   ejemplo `C:\Juegos` (abierto desde dentro del zip, `MHGU.exe` no arranca). No en Archivos de programa: el juego guarda sus
+   ajustes, cachés, registro y las herramientas que crean el código del juego en su propia carpeta, y Windows no lo deja
+   escribir ahí. No le cambies el nombre a `MHGU.exe`: el código del juego busca el programa con ese nombre.
+2. Abre `MHGU.exe`. Windows puede decir que no conoce el programa, porque no está firmado: **Más información**, **Ejecutar de
+   todas formas**. Con el Control inteligente de aplicaciones activado, Windows lo bloquea: mira
+   [Si algo falla](#si-algo-falla-1).
+3. La primera vez, una pantalla te pide la carpeta del juego: **Elegir carpeta**, y selecciona tu carpeta `MHGU`. El juego la
+   revisa y te dice exactamente qué falta si algo está mal. La carpeta queda recordada.
+
+Si `MHGU.exe` está dentro de tu carpeta `MHGU`, junto a `exefs` y `romfs`, el juego la encuentra sin preguntar.
+
+#### Paso 3: Crea el código del juego
+
+El programa no trae código del juego, así que crea el tuyo a partir de tu propia copia, una vez, en tu PC. No se envía nada
+a ningún lado.
+
+Cuando tu carpeta tiene todo menos el código del juego, la pantalla dice que falta `mhgugame.dll`: pulsa **Crear el código
+del juego en esta PC** y después **Crear**.
+
+- La primera vez descarga sus herramientas, unos 90 MB: Python desde python.org y Zig, un compilador de C, desde PyPI. Los
+  dos son software libre, se verifican con su SHA-256 antes de usarlos y nunca se descarga nada del juego.
+- Necesita unos 3 GB libres en el disco donde está `MHGU.exe` mientras trabaja. Al terminar solo quedan las herramientas
+  (unos 300 MB, en la carpeta `builder` junto a `MHGU.exe`), y **Borrar las herramientas** las quita también.
+- En la PC del desarrollador (un procesador de 6 núcleos) tardó unos 6 minutos, más la descarga la primera vez; una PC más lenta tarda más, hasta alrededor de una hora con 2 núcleos. Usa todos los núcleos del procesador menos uno, con prioridad baja, así que puedes usar la PC mientras
+  tanto.
+- **Cancelar** lo detiene, y también cerrar la ventana o reiniciar la PC: lo que hizo se guarda, y **Seguir** continúa desde
+  ahí. **Empezar de cero** olvida una creación a medias y empieza desde el principio.
+
+Cuando diga que el código del juego está listo, tu carpeta tendrá dos archivos nuevos, y **Jugar** inicia el juego:
+
+```
+MHGU
+├─ exefs
+├─ romfs
+├─ mhgugame.dll
+└─ mhgugame.id
+```
+
+**Estos archivos salen de tu juego: guárdalos para ti y no los compartas.**
+
+El primer arranque prepara los shaders del juego de fondo mientras pasan los logos; ocupan unos 340 MB en la carpeta `cache`.
+Después un aviso dice que **F1** abre los ajustes. Para elegir otra carpeta después: **F1**, **Sistema**, **Tu partida**,
+**Carpeta del juego**; el juego la usa desde el próximo arranque. Para volver a crear el código del juego: **F1**, **Sistema**,
+**Código del juego**, **Crear el código del juego** (el juego se cierra y abre el creador).
+
+El zip tiene una carpeta con los archivos del programa y nada del juego:
+
+- `MHGU.exe`, y las bibliotecas que usa: `SDL3.dll`, `mhguffmpeg.dll` (los videos del juego) y `libxess.dll` (XeSS-SR)
+- `gamelib_id.txt`: el id del código del juego que necesita esta versión. El `mhgugame.id` de tu carpeta tiene que decir lo mismo
+- `builder_tools.zip`: las herramientas propias del proyecto que crean el código del juego (la primera creación las
+  descomprime en `builder`)
+- `pipelines.list`: estados gráficos que prepara el primer arranque
+- `extras`: los trucos opcionales para beber y comer más rápido, que el primer arranque copia, apagados, a la carpeta `cheats`
+  junto a `MHGU.exe`
+- `licenses`: el aviso legal y las licencias, también en **F1**, **Créditos y licencias**, **Licencias**
+
+<a name="paso-2-crea-el-código-del-juego-1"></a>
+#### Crea el código del juego a mano
+
+La otra forma, para una PC donde el programa no puede crearlo (sin internet, o una red que bloquea PyPI): la herramienta del
+código fuente crea el mismo código del juego (el mismo id) con un Python tuyo.
 
 1. Instala [Python](https://www.python.org/downloads/). Marca **Add python.exe to PATH** en el instalador.
 2. Baja la herramienta de la misma versión que tu zip `MHGU-PC`: en [Releases](../../releases/latest), en **Assets**, haz
@@ -773,49 +839,12 @@ El programa no trae código del juego, así que creas el tuyo a partir de tu cop
    arrastra la carpeta del juego a la ventana que se abre y presiona Enter.
 
 La primera vez descarga llvm-mingw, el compilador del juego de PC (unos 150 MB). Después trabaja solo: unos 10 minutos en una
-PC rápida, y hasta una hora en una de 2 núcleos. Cuando diga **Done**, tu carpeta tendrá dos archivos nuevos:
-
-```
-MHGU
-├─ exefs
-├─ romfs
-├─ mhgugame.dll
-└─ mhgugame.id
-```
-
-**Estos archivos salen de tu juego: guárdalos para ti y no los compartas.**
+PC rápida, y hasta una hora en una de 2 núcleos. Cuando diga **Done**, tu carpeta tendrá los mismos dos archivos nuevos
+(`mhgugame.dll` y `mhgugame.id`), y `MHGU.exe` arranca el juego con ellos.
 
 ¿También juegas en Android? Quita `--pc`: una sola corrida crea el código del juego para los dos, y agrega además
 `libmhgugame.so` y `libmhgugame.id`. Entonces también descarga el compilador de Android de Google (unos 1,8 GB). Si ya habías
 creado los del teléfono, al hacerlo de nuevo conserva esos y solo agrega los de PC.
-
-#### Paso 3: Instala
-
-No hay instalador: el programa es una carpeta.
-
-1. Descarga `MHGU-PC-<versión>.zip` desde [Releases](../../releases/latest) y descomprímelo entero en una carpeta tuya, por
-   ejemplo `C:\Juegos` (abierto desde dentro del zip, `MHGU.exe` no arranca). No en Archivos de programa: el juego guarda sus
-   ajustes, cachés y registro en su propia carpeta, y Windows no lo deja escribir ahí. No le cambies el nombre a `MHGU.exe`:
-   el código del juego busca el programa con ese nombre.
-2. Abre `MHGU.exe`. Windows puede decir que no conoce el programa, porque no está firmado: **Más información**, **Ejecutar de
-   todas formas**. Con el Control inteligente de aplicaciones activado, Windows lo bloquea: mira
-   [Si algo falla](#si-algo-falla-1).
-3. La primera vez, una pantalla te pide la carpeta del juego: **Elegir carpeta**, y selecciona tu carpeta `MHGU`. El juego la revisa,
-   te dice exactamente qué falta si algo está mal y arranca. La carpeta queda recordada.
-
-Si `MHGU.exe` está dentro de tu carpeta `MHGU`, junto a `exefs` y `romfs`, el juego la encuentra sin preguntar. El primer
-arranque prepara los shaders del juego de fondo mientras pasan los logos; ocupan unos 340 MB en la carpeta `cache`. Después un
-aviso dice que **F1** abre los ajustes. Para elegir otra carpeta después: **F1**, **Sistema**, **Tu partida**, **Carpeta del juego**;
-el juego la usa desde el próximo arranque.
-
-El zip tiene una carpeta con los archivos del programa y nada del juego:
-
-- `MHGU.exe`, y las bibliotecas que usa: `SDL3.dll`, `mhguffmpeg.dll` (los videos del juego) y `libxess.dll` (XeSS-SR)
-- `gamelib_id.txt`: el id del código del juego que necesita esta versión. El `mhgugame.id` de tu carpeta tiene que decir lo mismo
-- `pipelines.list`: estados gráficos que prepara el primer arranque
-- `extras`: los trucos opcionales para beber y comer más rápido, que el primer arranque copia, apagados, a la carpeta `cheats`
-  junto a `MHGU.exe`
-- `licenses`: el aviso legal y las licencias, también en **F1**, **Créditos y licencias**, **Licencias**
 
 ### Controles
 
@@ -941,6 +970,7 @@ PC (necesita el permiso del firewall) y una misión completa.
 |---|---|
 | Ajustes, la carpeta que elegiste, el mapeo de mandos, la posición del HUD | Junto a `MHGU.exe`: `mhgurecomp.ini` (y el del propio menú de ajustes, `forge_imgui.ini`), `game_folder.txt`, `gamepad_mappings.txt`, `touch_layout.txt` |
 | Cachés de shaders, capturas, el registro | Junto a `MHGU.exe`: `cache`, `shots`, `log.txt` (el de la sesión anterior: `log_prev.txt`) |
+| Las herramientas que crean el código del juego, y su registro | Junto a `MHGU.exe`: `builder` (Python y Zig; mientras crea, también su carpeta de trabajo), `builder_log.txt` |
 | Los trucos incluidos, y qué trucos están apagados | Junto a `MHGU.exe`: `cheats` |
 | Partidas | `%APPDATA%\MHGURecomp\save`. Una partida que importas espera en `save_import`, junto a `MHGU.exe`, hasta que el juego se reinicia, y la partida que reemplaza queda en `save_backups`, en `%APPDATA%\MHGURecomp` |
 | Trucos y mods que agregues | Las carpetas `cheats` y `mods` de tu carpeta del juego |
@@ -951,18 +981,18 @@ Para abrir `%APPDATA%`, escríbelo en la barra de direcciones del Explorador de 
 
 1. Descomprime la versión nueva y copia sus archivos encima de los viejos. Tus ajustes, la carpeta que elegiste y la posición
    del HUD se mantienen, y tus partidas quedan como estaban en cualquier caso.
-2. Si la versión nueva necesita un código del juego nuevo, el juego dice "Este mhgugame.dll es de otra versión" al arrancar.
-   Haz de nuevo el paso 2 con la herramienta de la versión nueva (**Source code (zip)** en su versión de Releases) y vuelve a
-   abrir el juego.
+2. Si la versión nueva necesita un código del juego nuevo, el juego dice "Este mhgugame.dll es de otra versión" al arrancar:
+   pulsa **Crear el código del juego en esta PC** y después **Crear** (las herramientas ya están). A mano: la herramienta de
+   la versión nueva, como en [Crea el código del juego a mano](#crea-el-código-del-juego-a-mano).
 
 ### Desinstalar
 
-- Borra la carpeta del programa, la que tiene `MHGU.exe`. Sus ajustes, cachés, capturas, registro y trucos incluidos se van
-  con ella.
+- Borra la carpeta del programa, la que tiene `MHGU.exe`. Sus ajustes, cachés, capturas, registro, trucos incluidos y las
+  herramientas del creador del código del juego (`builder`) se van con ella.
 - Tus partidas quedan en `%APPDATA%\MHGURecomp`. Borra también esa carpeta solo si quieres perderlas, y guarda una copia antes.
 - Tu carpeta del juego es tuya: guárdala para el teléfono o bórrala. Los trucos y mods que agregaste están adentro.
-- La herramienta guarda los compiladores que descargó en `.mhgu-tool`, en tu carpeta de usuario. Bórrala si no vas a crear el
-  código del juego otra vez. Si faltaba el paquete lz4 de Python, la herramienta lo instaló (`pip uninstall lz4` lo quita); y
+- Si creaste el código del juego a mano, la herramienta guarda los compiladores que descargó en `.mhgu-tool`, en tu carpeta
+  de usuario. Bórrala si no vas a crear el código del juego otra vez. Si faltaba el paquete lz4 de Python, la herramienta lo instaló (`pip uninstall lz4` lo quita); y
   Python queda, si lo instalaste para esto.
 - No se instala nada más: no hubo instalador, y el juego no guarda ajustes en el Registro de Windows. Si permitiste MHGU en
   el Firewall de Windows, esa regla queda hasta que la quites en Seguridad de Windows.
@@ -981,8 +1011,12 @@ Para abrir `%APPDATA%`, escríbelo en la barra de direcciones del Explorador de 
 | Zonas negras, partes que faltan, o se cierra, con archivos del juego que no sacaste tú | Los archivos del juego de otros lados suelen venir incompletos o dañados, y el juego no puede arreglarlos. Arma la carpeta con tu propia copia, como dice el [paso 1](#paso-1-consigue-los-archivos-de-tu-juego-1) |
 | "no se encontró SDL3.dll" | Descomprime primero el zip entero en una carpeta: `MHGU.exe` no arranca desde dentro del zip |
 | El Control inteligente de aplicaciones lo bloqueó | Bloquea los programas sin firma, sin **Ejecutar de todas formas**, y `MHGU.exe` no está firmado: solo arranca con el Control inteligente de aplicaciones desactivado (Seguridad de Windows, **Control de aplicaciones y navegador**, **Configuración de Control inteligente de aplicaciones**). Piénsalo antes: en muchas versiones de Windows no se puede volver a activar sin reinstalar Windows |
-| "En esa carpeta falta mhgugame.dll" | La descarga no lo trae: haz el [paso 2 de la instalación](#paso-2-crea-el-código-del-juego-1) (`python build_game.py --pc <tu carpeta>`) y elige esa carpeta |
-| "Este mhgugame.dll es de otra versión" | El código del juego se creó con la herramienta de otra versión. Créalo de nuevo con la herramienta de la misma versión que tu zip (**Source code (zip)** en [Releases](../../releases/latest)) y vuelve a abrir el juego |
+| "En esa carpeta falta mhgugame.dll" | La descarga no lo trae: pulsa **Crear el código del juego en esta PC** en esa pantalla ([paso 3 de la instalación](#paso-3-crea-el-código-del-juego)) |
+| "Este mhgugame.dll es de otra versión" | Se creó para otra versión: pulsa **Crear el código del juego en esta PC** en esa pantalla y se vuelve a crear para esta |
+| El creador no puede descargar sus herramientas | Revisa la conexión a internet y pulsa **Seguir**: la descarga continúa desde donde quedó. Algunos proveedores de internet o filtros bloquean `files.pythonhosted.org` (las descargas de PyPI), y el creador lo dice: otra red, u otro DNS como 1.1.1.1, lo evita; o crea el código del juego [a mano](#crea-el-código-del-juego-a-mano) |
+| Tu antivirus avisa, bloquea o borra `zig.exe` o `python.exe` de la carpeta `builder` | Son el Zig y el Python oficiales, verificados con su SHA-256 antes de usarlos; algunos antivirus desconfían de un compilador recién descargado. Permite la carpeta `builder` junto a `MHGU.exe` y pulsa **Seguir**, o crea el código del juego [a mano](#crea-el-código-del-juego-a-mano) |
+| El creador dice que no hay espacio suficiente | Necesita unos 3 GB libres en el disco donde está `MHGU.exe` mientras trabaja. Libera espacio, o mueve la carpeta del programa a otro disco, y pulsa **Seguir** |
+| El creador se detuvo y **Seguir** vuelve a fallar | **Empezar de cero** borra lo que hizo y empieza desde el principio. Si sigue fallando, adjunta `builder_log.txt` (junto a `MHGU.exe`) a un [issue](../../issues) |
 | "A este procesador le faltan instrucciones que necesita el código del juego" | El juego de PC necesita un procesador con SSE4.2: mira [Qué necesitas](#qué-necesitas-1) |
 | "Este programa tiene que llamarse MHGU.exe" | Vuelve a ponerle `MHGU.exe` |
 | "La tarjeta gráfica de esta PC no tiene controlador Vulkan" | Instala el último driver desde el sitio del fabricante de tu tarjeta. Las más viejas no tienen: mira [Qué necesitas](#qué-necesitas-1) |
