@@ -4344,34 +4344,79 @@ void item_arrow_disc(ImDrawList *dl, Geo g, int d, bool lit, float a) {
 // picture of their own on any round button, at their own responsibility): read from the profiles' images folder the
 // first time one is drawn (the game thread, inside the overlay's ImGui frame), at most PIC_SIDE pixels a side, kept as
 // ImGui textures the overlay's renderer uploads with the font's (runtime/overlay.cpp; the MH4U port's SDL renderer the
-// same way). A file that can't be read or isn't a PNG or a BMP is tried once and drawn as the button's own icon
-const int PIC_SIDE = 256, PIC_CACHE = 48;
+// same way). A file that can't be read or isn't a PNG or a BMP is tried once and drawn as the button's own icon.
+// Each picture takes one of the overlay's textures (a Vulkan descriptor of its pool, overlay.cpp OVERLAY_TEXTURES), so
+// one not drawn for a while is given back (overlay_retire_texture) and read again when it is next shown: in 1.0 every
+// picture seen stayed, and past the pool's 16 (the buttons' and a page or two of the editor's window) the game closed
+// (gu-native #237)
+const int PIC_SIDE = 256, PIC_CACHE = 64;
+const uint64_t PIC_KEEP_NS = 10000000000ull, PIC_SWAP_NS = 2000000000ull;  // (unused this long: given back; or for room)
+const int PIC_FRAMES = 8;  // (nor drawn in as many of the overlay's frames: no copy of a frame being drawn still has it)
 struct PicTex {
-    char name[IMAGE_NAME];
+    char name[IMAGE_NAME];  // (empty: a free slot)
     ImTextureData *tex;
     uint64_t tried_ns;  // (not read: tried again after a while, a picture being copied in)
+    uint64_t used_ns;   // (drawn last: when, and the overlay's frame)
+    int used_frame;
+    bool failed_said;
 };
 PicTex g_pics[PIC_CACHE];
-int g_npics;
+// A slot's picture given back to the overlay (its texture destroyed once no frame can draw it any more), the slot freed
+void pic_drop(PicTex &p) {
+    if (p.tex) overlay_retire_texture(p.tex);
+    p = PicTex{};
+}
+bool pic_idle(const PicTex &p, uint64_t now, uint64_t ns) {
+    return ImGui::GetFrameCount() - p.used_frame >= PIC_FRAMES && now - p.used_ns >= ns;
+}
+// Once a frame of the touch controls: the pictures no longer shown (another page of the editor's window, a button's
+// picture changed) given back after a while
+void pics_sweep() {
+    uint64_t now = SDL_GetTicksNS();
+    for (PicTex &p : g_pics)
+        if (p.name[0] && pic_idle(p, now, PIC_KEEP_NS)) pic_drop(p);
+}
 ImTextureData *pic_texture(const char *name) {
     if (!name || !name[0]) return nullptr;
     uint64_t now = SDL_GetTicksNS();
+    int frame = ImGui::GetFrameCount();
     PicTex *found = nullptr;
-    for (int i = 0; i < g_npics && !found; i++)
+    for (int i = 0; i < PIC_CACHE && !found; i++)
         if (!strcmp(g_pics[i].name, name)) found = &g_pics[i];
+    if (found) found->used_ns = now, found->used_frame = frame;
+    if (found && found->tex && found->tex->Status == ImTextureStatus_OK && found->tex->TexID == ImTextureID_Invalid) {
+        // (made with no descriptor for it: drawn as the button's own icon, not as an empty disc - the overlay leaves out
+        // the draws of a texture it has not)
+        if (!found->failed_said) rt_logf("[touch] picture %s: no room for it in the overlay, the icon instead\n", name);
+        found->failed_said = true;
+        return nullptr;
+    }
     if (found && (found->tex || now - found->tried_ns < 3000000000ull)) return found->tex;
-    if (!found && g_npics >= PIC_CACHE) return nullptr;
-    PicTex &p = found ? *found : g_pics[g_npics++];
+    bool fresh = !found;
+    if (!found) {  // (a free slot; else the one drawn longest ago, if it has been gone a moment)
+        for (PicTex &p : g_pics)
+            if (!p.name[0]) { found = &p; break; }
+        if (!found) {
+            PicTex *old = nullptr;
+            for (PicTex &p : g_pics)
+                if (pic_idle(p, now, PIC_SWAP_NS) && (!old || p.used_ns < old->used_ns)) old = &p;
+            if (!old) return nullptr;
+            pic_drop(*old);
+            found = old;
+        }
+        found->used_ns = now, found->used_frame = frame;
+    }
+    PicTex &p = *found;
     snprintf(p.name, sizeof p.name, "%s", name);
     p.tex = nullptr, p.tried_ns = now;
     std::string data;
     if (!read_text((images_dir() + "/" + name).c_str(), &data) || data.empty()) {
-        if (!found) rt_logf("[touch] picture %s: not in %s\n", name, images_dir().c_str());
+        if (fresh) rt_logf("[touch] picture %s: not in %s\n", name, images_dir().c_str());
         return nullptr;
     }
     SDL_Surface *src = SDL_LoadSurface_IO(SDL_IOFromConstMem(data.data(), data.size()), true);
     if (!src) {
-        if (!found) rt_logf("[touch] picture %s can't be read: %s\n", name, SDL_GetError());
+        if (fresh) rt_logf("[touch] picture %s can't be read: %s\n", name, SDL_GetError());
         return nullptr;
     }
     int w = src->w, h = src->h;
@@ -4384,7 +4429,7 @@ ImTextureData *pic_texture(const char *name) {
         rgba = small;
     }
     if (!rgba) {
-        if (!found) rt_logf("[touch] picture %s can't be converted: %s\n", name, SDL_GetError());
+        if (fresh) rt_logf("[touch] picture %s can't be converted: %s\n", name, SDL_GetError());
         return nullptr;
     }
     ImTextureData *t = IM_NEW(ImTextureData)();
@@ -5336,6 +5381,7 @@ extern "C" bool touch_draw_unchanged(float w, float h) {
 
 extern "C" void touch_draw(float w, float h) {
     if (g_reuse_on) g_drawn_ok = draw_key(w, h, &g_drawn);  // (MHGU_PERF_OVERLAY_REUSE: what this frame is made of)
+    pics_sweep();  // (the players' pictures not shown for a while given back)
 #ifndef __ANDROID__
     if ((!g_visible && !g_gear_only && !g_lock_mark && !g_hud_edit) || overlay_menu_open()) return;
 #else
