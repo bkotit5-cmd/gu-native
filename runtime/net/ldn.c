@@ -147,7 +147,39 @@ typedef struct {
     volatile uint64_t udp_rx_ns;  // last datagram from the other end
     uint32_t relay_pair;          // through the hub server (0: direct): its pair id and our secret for UDP
     uint64_t relay_secret;
+    uint32_t st_n[4], st_max[4];  // game packets for the log (LS_*): how many and the largest (the game's bytes)
+    uint64_t st_since;
 } Link;
+
+// The log's line a minute for each link that carried game packets (link_stats_log): how many went and came by UDP and by
+// the TCP link, and the largest of each. A link whose small datagrams get through (the 2 s hellos, so UDP stays in use)
+// while large ones are lost - a mobile network with a smaller MTU, or one that drops fragments - shows large ones sent
+// and none of that size received at the other end (1.0.1, for hubs that can't be entered on mobile data: gu-native #242).
+// A datagram is the game's bytes + 28 (+ 16 through the hub server).
+enum { LS_UDP_OUT, LS_UDP_IN, LS_TCP_OUT, LS_TCP_IN };
+static void link_stat(Link *l, int k, uint32_t len) {
+    __atomic_fetch_add(&l->st_n[k], 1, __ATOMIC_RELAXED);
+    if (len > __atomic_load_n(&l->st_max[k], __ATOMIC_RELAXED)) __atomic_store_n(&l->st_max[k], len, __ATOMIC_RELAXED);
+}
+// (from the link's own loop, often: a line once a minute if it carried any; node 0: a station's link to its host)
+static void link_stats_log(Link *l, int node) {
+    uint64_t now = plat_now_ns();
+    if (now - l->st_since < 60000000000ull) return;
+    uint32_t n[4], mx[4];
+    for (int k = 0; k < 4; k++) {
+        n[k] = __atomic_exchange_n(&l->st_n[k], 0, __ATOMIC_RELAXED);
+        mx[k] = __atomic_exchange_n(&l->st_max[k], 0, __ATOMIC_RELAXED);
+    }
+    l->st_since = now;
+    if (!(n[0] | n[1] | n[2] | n[3])) return;
+    char who[40];
+    if (node) snprintf(who, sizeof who, "node %d", node);
+    else snprintf(who, sizeof who, "the host");
+    LOG("[ldn] %s%s, game packets the last minute: by UDP %u sent (largest %u bytes), %u received (largest %u); "
+        "by TCP %u sent (largest %u), %u received (largest %u)\n",
+        who, l->relay_pair ? " (through the hub server)" : "", n[LS_UDP_OUT], mx[LS_UDP_OUT], n[LS_UDP_IN],
+        mx[LS_UDP_IN], n[LS_TCP_OUT], mx[LS_TCP_OUT], n[LS_TCP_IN], mx[LS_TCP_IN]);
+}
 
 static struct {
     pthread_mutex_t mu;
@@ -406,8 +438,12 @@ static void host_route(int from, const VPacket *p, const void *data, uint32_t le
         Link *l = &L.nodes[i];
         if (i == from || !l->alive || !(all || l->ip == p->dst_ip)) continue;
         hsock ds = L.disc_s;
-        if (!(ds != BADSOCK && udp_usable(l) && udp_send(ds, &l->uaddr, l, U_DATA, p, data, len)))
+        if (ds != BADSOCK && udp_usable(l) && udp_send(ds, &l->uaddr, l, U_DATA, p, data, len)) {
+            link_stat(l, LS_UDP_OUT, len);
+        } else {
             link_send(l, F_PACKET, p, sizeof *p, data, len);
+            link_stat(l, LS_TCP_OUT, len);
+        }
     }
 }
 
@@ -425,8 +461,12 @@ void ldn_send(const VPacket *p, const void *data, uint32_t len) {
     if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);  // (a broadcast reaches the sender too)
     if (p->dst_ip == L.own_ip) return;
     hsock us = L.us;
-    if (!(us != BADSOCK && udp_usable(&L.up) && udp_send(us, NULL, &L.up, U_DATA, p, data, len)))
+    if (us != BADSOCK && udp_usable(&L.up) && udp_send(us, NULL, &L.up, U_DATA, p, data, len)) {
+        link_stat(&L.up, LS_UDP_OUT, len);
+    } else {
         link_send(&L.up, F_PACKET, p, sizeof *p, data, len);
+        link_stat(&L.up, LS_TCP_OUT, len);
+    }
 }
 
 // The port's own messages to every other game in the network (reliable, in order: the TCP link).
@@ -569,6 +609,7 @@ static void *station_thread(void *arg) {
     l->th = pthread_self();
     l->token = arc4random() | 1, l->udp_up = false, l->udp_rx_ns = 0;
     l->relay_pair = acc.relay_pair, l->relay_secret = acc.relay_secret;
+    memset(l->st_n, 0, sizeof l->st_n), memset(l->st_max, 0, sizeof l->st_max), l->st_since = plat_now_ns();
     l->uaddr = acc.from;  // (relayed: the server, whose UDP port is its TCP port)
     if (l->relay_pair && L.disc_s != BADSOCK) relay_register(L.disc_s, l);
     uint8_t *nd = node_at(L.info, slot);
@@ -596,6 +637,7 @@ static void *station_thread(void *arg) {
             VPacket p;
             memcpy(&p, buf, sizeof p);
             p.src_ip = l->ip;  // (a station speaks for itself only)
+            link_stat(l, LS_TCP_IN, (uint32_t)n - sizeof p);
             link_received(slot, &p, buf + sizeof p, (uint32_t)n - sizeof p);
         } else if (type == F_AUX && n > 0) {  // to the host's own game and on to the other stations
             emsync_aux_received(buf, (uint32_t)n);
@@ -636,6 +678,8 @@ static void *host_thread(void *arg) {
             for (int i = 1; i < MAX_NODES; i++)
                 if (L.nodes[i].alive && L.nodes[i].relay_pair && !udp_usable(&L.nodes[i])) relay_register(ds, &L.nodes[i]);
         }
+        for (int i = 1; i < MAX_NODES; i++)
+            if (L.nodes[i].alive) link_stats_log(&L.nodes[i], i);
         fd_set r;
         FD_ZERO(&r);
         FD_SET(ls, &r);
@@ -677,6 +721,7 @@ static void *host_thread(void *arg) {
                     VPacket p;
                     memcpy(&p, probe + sizeof h, sizeof p);
                     p.src_ip = l->ip;
+                    link_stat(l, LS_UDP_IN, (uint32_t)n - sizeof h - sizeof p);
                     link_received(slot, &p, probe + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
                 }
                 continue;
@@ -860,11 +905,31 @@ static void *lobby_attach_thread(void *arg) {
     return station_thread(a);
 }
 
+// Hunter Search's network: in a village's multiplayer mode, Hunter Search on keeps a network of 2 up with the hunter's
+// card in its advertise data, whose byte 0x1C is 0xFF where a hub's (of 2, 3 or 4 players) holds 1. A game that gets one
+// from a hub server shows it neither in its hub list nor in its Hunter Search (checked on the PC with a real server's
+// answer: 11 of its 18 networks were these, the hub list showed the other 7 and Hunter Search none), so they are not
+// listed: each took a place of the server's answer (18 at most), hiding a hub from that search, and told its player
+// "Your hub is not listed online" when the server was down, in a village with no hub. The LAN still finds them.
+static bool hunter_search_net(const uint8_t *info) {
+    return info[NI_NODE_MAX] == 2 && rd16(info + NI_ADV_SIZE) > 0x1C && info[NI_ADV + 0x1C] == 0xFF;
+}
+static bool hunter_search_now(void) {
+    pthread_mutex_lock(&L.mu);
+    bool hs = hunter_search_net(L.info);
+    pthread_mutex_unlock(&L.mu);
+    return hs;
+}
+
 static void *lobby_thread(void *arg) {
     plat_thread_name("ldn-lobby");
     uint32_t gen = (uint32_t)(uintptr_t)arg;
     static __thread uint8_t buf[MAX_FRAME];
     uint8_t req[LOBBY_HEADER + NETINFO_SIZE], type;
+    bool told = false;  // (Hunter Search's network: logged once)
+    // (the game sets a new network's advertise data right after making it - until then it holds the last network's:
+    // a moment for it before telling a hub from Hunter Search's network)
+    if (!lobby_wait(gen, 1000)) return NULL;
     while (lobby_gen == gen) {
         char srv[LOBBY_NAME];
         struct sockaddr_in addr;
@@ -872,6 +937,12 @@ static void *lobby_thread(void *arg) {
         if (!lobby_server(srv)) break;
         if (!online_ok(srv, 0)) {  // (listed once the notice is closed)
             if (!lobby_wait(gen, 500)) break;
+            continue;
+        }
+        if (hunter_search_now()) {  // (not listed; looked at again in case the game makes it a hub)
+            if (!told) LOG("[ldn] Hunter Search's network: not listed on the hub server %s (only hubs are)\n", srv);
+            told = true;
+            if (!lobby_wait(gen, 2000)) break;
             continue;
         }
         bool named = resolve_host(srv, LOBBY_PORT, &addr);
@@ -905,6 +976,7 @@ static void *lobby_thread(void *arg) {
             keyed ? "players with the same matchmaking key see it" : "public, every player sees it");
         hub_report(NOTE_HOST, srv, HUB_ONLINE, (int)((plat_now_ns() - asked) / 1000000), -1);
         uint64_t now = plat_now_ns(), last_rx = now, next_ping = now + LOBBY_PING_NS;
+        bool unlisted = false;  // (it turned out to be Hunter Search's network: the server's connection closed on purpose)
         while (lobby_gen == gen) {
             now = plat_now_ns();
             if (L.lobby_dirty) {
@@ -913,6 +985,7 @@ static void *lobby_thread(void *arg) {
                 memcpy(info, L.info, NETINFO_SIZE);
                 L.lobby_dirty = false;
                 pthread_mutex_unlock(&L.mu);
+                if (hunter_search_net(info)) { unlisted = true; break; }  // (closing the connection takes it off the list)
                 if (!frame_send(s, S_UPDATE, info, NETINFO_SIZE, NULL, 0)) break;
             }
             if (now >= next_ping) {
@@ -937,6 +1010,7 @@ static void *lobby_thread(void *arg) {
         }
         hclose(s);
         if (lobby_gen != gen) break;
+        if (unlisted) continue;
         LOG("[ldn] lost the hub server: this hub is not listed online (trying again in 10 s)\n");
         hub_report(NOTE_HOST, srv, HUB_LOST, -1, -1);
         if (!lobby_wait(gen, 10000)) break;
@@ -1152,6 +1226,7 @@ static void *uplink_thread(void *arg) {
         if (type == F_PACKET && n >= (int)sizeof(VPacket)) {
             VPacket p;
             memcpy(&p, buf, sizeof p);
+            link_stat(&L.up, LS_TCP_IN, (uint32_t)n - sizeof p);
             link_received(0, &p, buf + sizeof p, (uint32_t)n - sizeof p);
         } else if (type == F_INFO && n >= NETINFO_SIZE && info_sane(buf)) {
             pthread_mutex_lock(&L.mu);
@@ -1189,6 +1264,7 @@ static void *station_udp_thread(void *arg) {
     hset_timeout(us, 250);
     while (L.uth_run) {
         uint64_t now = plat_now_ns();
+        link_stats_log(&L.up, 0);
         if (now >= next_hello) {
             udp_send(us, NULL, &L.up, U_HELLO, NULL, NULL, 0);
             next_hello = now + (L.up.udp_up ? 2000000000ull : 500000000ull);
@@ -1206,6 +1282,7 @@ static void *station_udp_thread(void *arg) {
         } else if (h.kind == U_DATA && n >= (int)(sizeof h + sizeof(VPacket))) {
             VPacket p;
             memcpy(&p, buf + sizeof h, sizeof p);
+            link_stat(&L.up, LS_UDP_IN, (uint32_t)n - sizeof h - sizeof p);
             link_received(0, &p, buf + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
         }
         if (L.up.udp_up && plat_now_ns() - L.up.udp_rx_ns > UDP_SILENCE_NS) {
@@ -1819,6 +1896,7 @@ static uint32_t connect_network(const uint8_t *info, const uint8_t *user, uint16
     L.up.s = s, L.up.alive = true, L.up.ip = L.subnet | 1;
     L.up.token = rd32(buf + 4), L.up.udp_up = false, L.up.udp_rx_ns = 0;
     L.up.relay_pair = pair, L.up.relay_secret = secret;
+    memset(L.up.st_n, 0, sizeof L.up.st_n), memset(L.up.st_max, 0, sizeof L.up.st_max), L.up.st_since = plat_now_ns();
     L.state = ST_STATION_CONNECTED, L.reason = DR_NONE;
     pthread_mutex_unlock(&L.mu);
     L.up.has_thread = pthread_create(&L.up.th, NULL, uplink_thread, NULL) == 0;
