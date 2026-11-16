@@ -968,7 +968,7 @@ struct Zones {
     float k[HP_COUNT];
     bool hidden[HP_COUNT];
     int na;
-    float agy[64], acy[64];
+    float agx[64], agy[64], acy[64];
     uint64_t ns;
 };
 std::mutex g_zone_lock;
@@ -1170,27 +1170,66 @@ Rect zone_rect(const Zones &z, int k, float w, float h, bool touch = true) {
     r.ok = true;
     return r;
 }
-// the Hunter Arts' rows (their pieces grouped by the game's y), top to bottom: screen y ranges
+// The Hunter Arts' rows, top to bottom (the game's art 1, 2, 3): screen y ranges. A row is told by its art's name, the
+// piece at x 746 on the row's y (or its button at 726, 15 lower): one for each art equipped, an empty slot's being below
+// the canvas (one art: rows at 681, 731, 781). Each of the part's pieces goes with the row nearest it by the game's y,
+// and two rows meet halfway between their buttons, the middle of the art's plate (with the HUD at 100 and 150 %, PC).
+// Until 1.0.1 the pieces were grouped by gaps of more than 22 in y, and a
+// ready art's glow, 17 above its row (a hudtrace on the PC: 842, 664 over a row at 681), closed the gap to the row above:
+// a tap on the second of three arts (Striker) performed the first, the frame round both (gu-native #231). With neither
+// piece (a screen of the game's this doesn't know), by those gaps as before
+const float ART_NAME_X = 746.0f, ART_BUTTON_X = 726.0f, ART_BUTTON_DY = 15.0f;
 int arts_rows(const Zones &z, float w, float h, float rows[3][2]) {
-    int k = HP_ARTS, n = z.na, idx[64];
+    int k = HP_ARTS, n = z.na, nr = 0;
     if (!n || !z.nt[k] || stale(z)) return 0;
-    for (int i = 0; i < n; i++) idx[i] = i;
-    std::sort(idx, idx + n, [&](int a, int b) { return z.agy[a] < z.agy[b]; });
-    int nr = 0;
-    float last = -1e9f;
-    for (int j = 0; j < n; j++) {
-        int i = idx[j];
-        if (z.agy[i] - last > 22.0f) {
-            if (nr == 3) break;
-            rows[nr][0] = rows[nr][1] = z.acy[i], nr++;
+    float ry[3], lo[3], hi[3], mid[3];
+    for (int pass = 0; pass < 2 && !nr; pass++) {  // (the names; else the buttons)
+        float ax = pass ? ART_BUTTON_X : ART_NAME_X, dy = pass ? ART_BUTTON_DY : 0.0f;
+        for (int i = 0; i < n; i++) {
+            if (fabsf(z.agx[i] - ax) > 1.5f) continue;
+            float y = z.agy[i] - dy;
+            bool seen = false;
+            for (int r = 0; r < nr; r++) seen |= fabsf(ry[r] - y) < 8.0f;
+            if (!seen && nr < 3) ry[nr++] = y;
         }
-        rows[nr - 1][0] = std::min(rows[nr - 1][0], z.acy[i]), rows[nr - 1][1] = std::max(rows[nr - 1][1], z.acy[i]);
-        last = z.agy[i];
+    }
+    if (nr) {
+        std::sort(ry, ry + nr);
+        for (int r = 0; r < nr; r++) lo[r] = 1e30f, hi[r] = -1e30f, mid[r] = -1e30f;
+        for (int i = 0; i < n; i++) {
+            int r = 0;
+            for (int j = 1; j < nr; j++)
+                if (fabsf(z.agy[i] - ry[j]) < fabsf(z.agy[i] - ry[r])) r = j;
+            if (fabsf(z.agy[i] - ry[r]) > 40.0f) continue;  // (near no row)
+            lo[r] = std::min(lo[r], z.acy[i]), hi[r] = std::max(hi[r], z.acy[i]);
+            if (fabsf(z.agx[i] - ART_BUTTON_X) <= 1.5f) mid[r] = z.acy[i];
+        }
+        for (int r = 0; r < nr; r++)
+            if (mid[r] < -1e29f) mid[r] = (lo[r] + hi[r]) * .5f;  // (no button drawn: its pieces' middle)
+    } else {
+        int idx[64];
+        for (int i = 0; i < n; i++) idx[i] = i;
+        std::sort(idx, idx + n, [&](int a, int b) { return z.agy[a] < z.agy[b]; });
+        float last = -1e9f;
+        for (int j = 0; j < n; j++) {
+            int i = idx[j];
+            if (z.agy[i] - last > 22.0f) {
+                if (nr == 3) break;
+                lo[nr] = hi[nr] = z.acy[i], nr++;
+            }
+            lo[nr - 1] = std::min(lo[nr - 1], z.acy[i]), hi[nr - 1] = std::max(hi[nr - 1], z.acy[i]);
+            last = z.agy[i];
+        }
+        for (int r = 0; r < nr; r++) mid[r] = (lo[r] + hi[r]) * .5f;
     }
     Pic p = picture(w, h);
     float m = z.k[k];
-    for (int i = 0; i < nr; i++)
-        rows[i][0] = p.y0 + (rows[i][0] - HUD_PAD[k][1] * m - 4) * p.h / 720.0f, rows[i][1] = p.y0 + (rows[i][1] + HUD_PAD[k][3] * m + 4) * p.h / 720.0f;
+    for (int r = 0; r < nr; r++) {
+        float top = lo[r] - HUD_PAD[k][1] * m - 4, bottom = hi[r] + HUD_PAD[k][3] * m + 4;
+        if (r > 0) top = (mid[r - 1] + mid[r]) * .5f;  // (the rows meet halfway)
+        if (r + 1 < nr) bottom = (mid[r] + mid[r + 1]) * .5f;
+        rows[r][0] = p.y0 + top * p.h / 720.0f, rows[r][1] = p.y0 + bottom * p.h / 720.0f;
+    }
     return nr;
 }
 int art_row_at(const Zones &z, float w, float h, float y) {  // (the row under a finger at y, or the nearest one; -1 none)
@@ -3601,7 +3640,7 @@ extern "C" void touch_hud_piece(int part, float game_x, float game_y, float canv
     if (!b.nt[part]++) b.tx0[part] = b.tx1[part] = canvas_x, b.ty0[part] = b.ty1[part] = canvas_y;
     b.tx0[part] = std::min(b.tx0[part], canvas_x), b.tx1[part] = std::max(b.tx1[part], canvas_x);
     b.ty0[part] = std::min(b.ty0[part], canvas_y), b.ty1[part] = std::max(b.ty1[part], canvas_y);
-    if (part == HP_ARTS && b.na < 64) b.agy[b.na] = game_y, b.acy[b.na] = canvas_y, b.na++;
+    if (part == HP_ARTS && b.na < 64) b.agx[b.na] = game_x, b.agy[b.na] = game_y, b.acy[b.na] = canvas_y, b.na++;
 }
 
 extern "C" void touch_hud_menu(void) { g_build_menu = true; }
