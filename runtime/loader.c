@@ -285,6 +285,48 @@ const char *loader_symbol_at(uint32_t addr, uint32_t *offset) {
     return best;
 }
 
+// (loader_load's relocation pass) every module's defined symbols by name, the first of each name in module and symbol
+// order: loader_find_symbol's answer without its walk over all of them. main's imports of the sdk's functions each
+// walked the sdk's 20,490 symbols: relocating main took 3.9 s of a Moto g06's start. Built for that pass and dropped
+// after it (a plugin's relocation, later, walks as before). MHGU_PERF_SYMIDX=0: the walk; =2: both, compared (a test).
+typedef struct { const char *name; uint32_t addr; } SymSlot;
+static SymSlot *g_symidx;
+static uint32_t g_symidx_mask;
+static int g_symidx_check, g_symidx_asked, g_symidx_differ;
+static uint32_t symidx_hash(const char *s) {
+    uint32_t h = 2166136261u;
+    for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+    return h;
+}
+static void symidx_build(void) {
+    const char *e = getenv("MHGU_PERF_SYMIDX");
+    if (e && atoi(e) == 0) return;
+    g_symidx_check = e && atoi(e) == 2;
+    uint64_t n = 0;
+    for (int mi = 0; mi < g_nmodules; mi++) n += g_modules[mi].nsyms;
+    uint32_t cap = 1024;
+    while (cap < 2 * n && cap < (1u << 30)) cap <<= 1;
+    if (!(g_symidx = calloc(cap, sizeof *g_symidx))) return;
+    g_symidx_mask = cap - 1;
+    for (int mi = 0; mi < g_nmodules; mi++) {
+        Module *m = &g_modules[mi];
+        for (uint32_t i = 1; i < m->nsyms; i++) {
+            const Elf32Sym *s = sym(m, i);
+            if (!s->shndx) continue;
+            const char *nm = symname(m, s);
+            for (uint32_t k = symidx_hash(nm) & g_symidx_mask;; k = (k + 1) & g_symidx_mask) {
+                if (!g_symidx[k].name) { g_symidx[k] = (SymSlot){nm, m->base + s->value}; break; }
+                if (!strcmp(g_symidx[k].name, nm)) break;  // (an earlier one of that name answers)
+            }
+        }
+    }
+}
+static uint32_t symidx_find(const char *name) {
+    for (uint32_t k = symidx_hash(name) & g_symidx_mask; g_symidx[k].name; k = (k + 1) & g_symidx_mask)
+        if (!strcmp(g_symidx[k].name, name)) return g_symidx[k].addr;
+    return 0;
+}
+
 // plugin: a module loaded at run time, whose imports the log names when nothing provides them (calls return 0)
 static uint32_t resolve(Module *m, uint32_t symidx, bool plugin) {
     const Elf32Sym *s = sym(m, symidx);
@@ -292,7 +334,12 @@ static uint32_t resolve(Module *m, uint32_t symidx, bool plugin) {
     if (s->shndx) return m->base + s->value;
     HostFn impl = hle_lookup_impl(name);
     if (impl) return hle_register(name, impl);  // a host implementation wins over the guest SDK's
-    uint32_t a = loader_find_symbol(name);
+    uint32_t a = g_symidx ? symidx_find(name) : loader_find_symbol(name);
+    if (g_symidx && g_symidx_check) {
+        uint32_t b = loader_find_symbol(name);
+        g_symidx_asked++;
+        if (a != b && g_symidx_differ++ < 5) LOG("[loader] symbol index check: %s %08x, the walk %08x\n", name, a, b);
+    }
     if (a) return a;
     if ((s->info >> 4) == 2) return 0;  // weak undefined
     if (plugin) LOG("[forge] [WARN] %s: import %s is not provided (calls return 0)\n", m->name, name);
@@ -462,7 +509,10 @@ void loader_load(const char *exefs) {
         lo = base + size;
     }
     g_nexefs = g_nmodules;
+    symidx_build();
     for (int i = 0; i < g_nmodules; i++) relocate(&g_modules[i], false);
+    if (g_symidx_check) LOG("[loader] symbol index check: %d lookups, %d differ from the walk\n", g_symidx_asked, g_symidx_differ);
+    free(g_symidx), g_symidx = NULL;
     for (int i = 2; i < g_nexefs; i++) {  // (a subsdk's code runs in the interpreter, as Forge plugins' does)
         Module *m = &g_modules[i];
         interp_add_range(m->base + m->text_off, m->base + m->text_off + m->text_size);

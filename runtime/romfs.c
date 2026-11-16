@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,7 @@ struct Dir {
     File **files;
     int ndirs, nfiles, cdirs, cfiles;
     uint32_t off;
+    bool gone;  // (scan_par) it could not be listed: taken out of its parent once the scan is over
 };
 
 static int by_name_dir(const void *a, const void *b) { return strcmp((*(Dir *const *)a)->name, (*(Dir *const *)b)->name); }
@@ -53,9 +55,11 @@ static void add_file(Dir *d, File *f) {
 }
 
 // Entries a scan couldn't read (stat or opendir refused: the game then misses those files), the first few logged
-static int g_unread;
+// (from several threads at once: scan_par)
+static _Atomic int g_unread;
 static void unread(const char *p) {
-    if (g_unread++ < 5) LOG("[romfs] WARNING: can't read %s: %s\n", p, strerror(errno));
+    int err = errno;
+    if (atomic_fetch_add(&g_unread, 1) < 5) LOG("[romfs] WARNING: can't read %s: %s\n", p, strerror(err));
 }
 
 static Dir *scan(const char *path, const char *name, int depth);
@@ -101,10 +105,135 @@ static void scan_listed(const char *name, int kind, uint64_t size, void *arg) {
         scan_entry(at->dir, p, name, kind == PLAT_DIR_FOLDER, kind == PLAT_DIR_FILE, size, at->depth);
     }
 }
+#else
+// (Android, Linux) The folder tree read by several threads at once (scan_par). On Android's shared storage each
+// folder's listing goes through the system's FUSE daemon, and that is where a scan's time went: on an RG406V listing
+// the game's 2,321 folders alone took 11.4 s, with a stat of every file 11.8 s, with a stat by the whole path (1.0.1's
+// scan) 12.9 s, warm or not (a test program on the phone, the shell's same /storage/emulated/0). The daemon answers
+// several at once: 7.9 s with 2 threads, 5.5 with 4, 2.9 with 8, 1.9 with 16, the same files, folders and bytes. A job
+// is one folder: its worker lists it, stats what the listing doesn't say is a folder (fstatat on the listing's own
+// descriptor: one lookup, not the path's every part), and adds its files and its folders (each a new job) to that
+// folder's own lists, so no two threads touch one Dir. One that can't be listed is marked and taken out at the end,
+// as scan() leaves it out. The tree is scan()'s: the same entries (sort_tree orders them by name), sizes and paths.
+// MHGU_PERF_ROMFS=0: one thread, 1.0.1's walk; =<n>: n threads (2 to 32).
+#define SCAN_THREADS 8
+static bool g_scan_one;  // (romfs_check: 1.0.1's walk, one thread)
+static int scan_threads(void) {
+    static int n;
+    if (!n) {
+        const char *e = getenv("MHGU_PERF_ROMFS");
+        n = !e ? SCAN_THREADS : atoi(e) <= 1 ? 1 : atoi(e) > 32 ? 32 : atoi(e);
+        if (e) LOG("[perf] MHGU_PERF_ROMFS=%s: the game's folder listed by %d thread(s)\n", e, n);
+    }
+    return n;
+}
+
+typedef struct ScanJob { Dir *dir; char *path; int depth; struct ScanJob *next; } ScanJob;
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+    ScanJob *head;
+    int busy;  // (folders being listed: they may still add jobs)
+} ScanQueue;
+
+static void scan_push(ScanQueue *q, Dir *dir, char *path, int depth) {
+    ScanJob *j = malloc(sizeof *j);
+    j->dir = dir, j->path = path, j->depth = depth;
+    pthread_mutex_lock(&q->lock);
+    j->next = q->head, q->head = j;
+    pthread_cond_signal(&q->cond);
+    pthread_mutex_unlock(&q->lock);
+}
+
+static void scan_job(ScanQueue *q, ScanJob *j) {
+    int fd = open(j->path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    DIR *dd = fd >= 0 ? fdopendir(fd) : NULL;
+    if (!dd) {
+        if (j->depth) unread(j->path);  // (a top folder that isn't there is told where it is opened)
+        if (fd >= 0) close(fd);
+        j->dir->gone = true;
+        return;
+    }
+    struct dirent *e;
+    while ((e = readdir(dd))) {
+        if (e->d_name[0] == '.') continue;
+        char *p = join(j->path, e->d_name);
+        bool is_dir = e->d_type == DT_DIR, is_file = false;
+        uint64_t size = 0;
+        if (!is_dir) {  // (a file, a link: what it points at, as stat; a file system without types)
+            struct stat st;
+            if (fstatat(dirfd(dd), e->d_name, &st, 0) != 0) { unread(p), free(p); continue; }
+            is_dir = S_ISDIR(st.st_mode), is_file = S_ISREG(st.st_mode), size = (uint64_t)st.st_size;
+        }
+        if (is_dir) {
+            if (j->depth + 1 > 32) { free(p); continue; }  // (scan's depth rule)
+            Dir *c = calloc(1, sizeof *c);
+            c->name = strdup(e->d_name);
+            add_dir(j->dir, c);
+            scan_push(q, c, p, j->depth + 1);
+        } else if (is_file) {
+            File *f = calloc(1, sizeof *f);
+            f->name = strdup(e->d_name), f->path = p, f->size = size;
+            add_file(j->dir, f);
+        } else {
+            free(p);
+        }
+    }
+    closedir(dd);
+}
+
+static void *scan_worker(void *arg) {
+    ScanQueue *q = arg;
+    pthread_mutex_lock(&q->lock);
+    for (;;) {
+        while (!q->head && q->busy) pthread_cond_wait(&q->cond, &q->lock);
+        if (!q->head) break;  // (nothing queued and nothing being listed: done)
+        ScanJob *j = q->head;
+        q->head = j->next, q->busy++;
+        pthread_mutex_unlock(&q->lock);
+        scan_job(q, j);
+        free(j->path), free(j);
+        pthread_mutex_lock(&q->lock);
+        if (!--q->busy && !q->head) pthread_cond_broadcast(&q->cond);
+    }
+    pthread_cond_broadcast(&q->cond);
+    pthread_mutex_unlock(&q->lock);
+    return NULL;
+}
+
+static void scan_prune(Dir *d) {  // (folders that couldn't be listed out, as scan() leaves them out)
+    int k = 0;
+    for (int i = 0; i < d->ndirs; i++) {
+        Dir *c = d->dirs[i];
+        if (c->gone) { free(c->name), free(c->dirs), free(c->files), free(c); continue; }
+        scan_prune(c);
+        d->dirs[k++] = c;
+    }
+    d->ndirs = k;
+}
+
+static Dir *scan_par(const char *path, const char *name, int threads) {
+    ScanQueue q = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, NULL, 0};
+    Dir *root = calloc(1, sizeof *root);
+    root->name = strdup(name);
+    scan_push(&q, root, strdup(path), 0);
+    pthread_t th[32];
+    int n = 0;
+    while (n < threads - 1 && pthread_create(&th[n], NULL, scan_worker, &q) == 0) n++;
+    scan_worker(&q);  // (this thread lists too)
+    for (int i = 0; i < n; i++) pthread_join(th[i], NULL);
+    pthread_cond_destroy(&q.cond), pthread_mutex_destroy(&q.lock);
+    if (root->gone) { free(root->name), free(root); return NULL; }
+    scan_prune(root);
+    return root;
+}
 #endif
 
 static Dir *scan(const char *path, const char *name, int depth) {
     if (depth > 32) return NULL;
+#ifndef _WIN32
+    if (!depth && !g_scan_one && scan_threads() > 1) return scan_par(path, name, scan_threads());
+#endif
 #ifdef _WIN32
     Dir *dir = calloc(1, sizeof *dir);
     dir->name = strdup(name);
@@ -271,13 +400,84 @@ static void mod_bytes(const Dir *d, int *files, uint64_t *bytes, int *tex, uint6
     for (int i = 0; i < d->ndirs; i++) mod_bytes(d->dirs[i], files, bytes, tex, tex_bytes);
 }
 
+// ---- main.c's count of the game's files at the start (romfs_prescan): that scan's tree is the one build() takes, so
+// the folder is listed once, not twice (up to 1.0.1 the count listed every folder, and the game's first fsp-srv call
+// listed them all again: a Moto g06 spent 8.5 s on the one and 7.5 on the other)
+static struct { char *dir; Dir *root; double ms; int unread; } g_pre;
+
+#ifndef _WIN32
+static int count_tree(const Dir *d) {
+    int n = d->nfiles;
+    for (int i = 0; i < d->ndirs; i++) n += count_tree(d->dirs[i]);
+    return n;
+}
+#endif
+
+int romfs_prescan(const char *base_dir) {
+#ifdef _WIN32
+    return plat_count_files(base_dir);
+#else
+    if (scan_threads() <= 1) return plat_count_files(base_dir);  // (MHGU_PERF_ROMFS=0: counted now, scanned again later)
+    int u0 = g_unread;
+    uint64_t t0 = plat_now_ns();
+    Dir *root = scan(base_dir, "", 0);
+    if (!root) return 0;
+    g_pre.ms = (plat_now_ns() - t0) / 1e6;
+    g_pre.dir = strdup(base_dir), g_pre.root = root, g_pre.unread = g_unread - u0;
+    return count_tree(root);
+#endif
+}
+
+#ifndef _WIN32
+// (MHGU_ROMFS_CHECK=1, a test) the tree the threads gave against 1.0.1's one-thread walk of the same folder, before any
+// mod is merged: every folder by its path and every file by its host path and size, both sorted, compared line by line
+typedef struct { char **v; int n, cap; } Lines;
+static void tree_lines(const Dir *d, const char *at, Lines *l) {
+    for (int i = 0; i < d->nfiles + d->ndirs; i++) {
+        size_t n = 1300;
+        char *s = malloc(n);
+        if (i < d->nfiles) snprintf(s, n, "%s\t%llu", d->files[i]->path, (unsigned long long)d->files[i]->size);
+        else snprintf(s, n, "%s%s/", at, d->dirs[i - d->nfiles]->name);
+        if (l->n == l->cap) l->v = realloc(l->v, sizeof *l->v * (l->cap = l->cap ? l->cap * 2 : 4096));
+        l->v[l->n++] = s;
+        if (i >= d->nfiles) tree_lines(d->dirs[i - d->nfiles], s, l);
+    }
+}
+static int by_str(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+static void romfs_check(const Dir *root, const char *base_dir) {
+    g_scan_one = true;
+    uint64_t t0 = plat_now_ns();
+    Dir *one = scan(base_dir, "", 0);
+    double ms = (plat_now_ns() - t0) / 1e6;
+    g_scan_one = false;
+    Lines a = {0}, b = {0};
+    tree_lines(root, "", &a);
+    if (one) tree_lines(one, "", &b);
+    qsort(a.v, a.n, sizeof *a.v, by_str), qsort(b.v, b.n, sizeof *b.v, by_str);
+    int differ = a.n != b.n;
+    for (int i = 0; i < a.n && i < b.n; i++)
+        if (strcmp(a.v[i], b.v[i]) && differ++ < 3) LOG("[romfs] check: %s | %s\n", a.v[i], b.v[i]);
+    LOG("[romfs] check: the threads' tree %s one thread's (%d and %d entries; one thread listed it in %.0f ms)\n",
+        differ ? "DIFFERS from" : "is the same as", a.n, b.n, ms);
+    for (int i = 0; i < a.n; i++) free(a.v[i]);
+    for (int i = 0; i < b.n; i++) free(b.v[i]);
+    free(a.v), free(b.v);  // (the one-thread tree itself is left: a test)
+}
+#endif
+
 static bool build(RomfsImage *im, const char *base_dir, const char *const *overlays, int noverlays, bool game) {
     int unread0 = g_unread;
     uint64_t t0 = plat_now_ns();
-    Dir *root = scan(base_dir, "", 0);
-    double scan_ms = (plat_now_ns() - t0) / 1e6;
+    Dir *root;
+    double scan_ms;
+    const bool pre = game && g_pre.root && !strcmp(g_pre.dir, base_dir);  // (scanned at the start: romfs_prescan)
+    if (pre) root = g_pre.root, scan_ms = g_pre.ms, unread0 -= g_pre.unread, g_pre.root = NULL;
+    else root = scan(base_dir, "", 0), scan_ms = (plat_now_ns() - t0) / 1e6;
     if (!root) { LOG("[romfs] cannot read %s\n", base_dir); return false; }
     uint64_t own = 0, movies = 0;
+#ifndef _WIN32
+    if (game && getenv("MHGU_ROMFS_CHECK")) romfs_check(root, base_dir);  // (a test: the threads' tree against one thread's)
+#endif
     if (game) own_bytes(root, 0, false, &own, &movies);
     int unread_own = g_unread - unread0;
     for (int i = 0; i < noverlays; i++) {
@@ -357,7 +557,12 @@ static bool build(RomfsImage *im, const char *base_dir, const char *const *overl
     im->files = l.files;  // (flatten order is data order)
     im->nfiles = l.nf;
     free(l.dirs);
+#ifdef _WIN32
     LOG("[romfs] %d files, %d folders, image %.1f GB (its folder listed in %.0f ms)\n", l.nf, l.nd, im->size / 1e9, scan_ms);
+#else
+    LOG("[romfs] %d files, %d folders, image %.1f GB (its folder listed in %.0f ms by %d thread%s%s)\n", l.nf, l.nd,
+        im->size / 1e9, scan_ms, scan_threads(), scan_threads() > 1 ? "s" : "", pre ? ", as the game started" : "");
+#endif
     if (!game) return true;
     // (version 1.4.0's is 12.3 GB, 1.4 of them its movies, and none of its files is empty. A copy cut short, with every
     // file there but some of them empty or short, starts and then fails in ways that look like the port's: a black

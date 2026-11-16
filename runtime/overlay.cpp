@@ -69,6 +69,7 @@ static float g_scale;
 // MHGU_PERF_OVERLAY_REUSE (read once, overlay_init): 1 frames of the touch controls alone that would come out the same
 // are not built again; 2 they are, and compared (a check); 0 every frame built (1, the default)
 static int g_perf_overlay_reuse;
+static bool g_perf_stats_reuse;  // (MHGU_PERF_STATS_REUSE, unset on: frames with the FPS plate drawn again too)
 static bool g_reuse_last;  // (the frame built last had the touch controls alone, and uploaded no texture)
 static uint32_t g_reuse_w, g_reuse_h;
 static uint64_t g_reuse_built_ns, g_reuse_log_ns, g_reuse_n[2];
@@ -497,6 +498,9 @@ void overlay_init(const char *font_path, float font_size, int menu_key) {
         const char *e = getenv("MHGU_PERF_OVERLAY_REUSE");  // (read once: frame_once)
         g_perf_overlay_reuse = e ? std::clamp(atoi(e), 0, 2) : 1;  // (unset: on)
         if (g_perf_overlay_reuse) touch_reuse_begin();
+        const char *st = getenv("MHGU_PERF_STATS_REUSE");  // (=0: a frame with the FPS plate always built, as up to 1.0.1)
+        g_perf_stats_reuse = !(st && atoi(st) == 0);
+        if (st) LOG("[perf] MHGU_PERF_STATS_REUSE=%d\n", (int)g_perf_stats_reuse);
         if (e) LOG("[perf] MHGU_PERF_OVERLAY_REUSE=%d\n", g_perf_overlay_reuse);
     }
     g_enabled = true;
@@ -919,6 +923,7 @@ static void frame_once(void *cpu) {
     ImGuiIO &io = ImGui::GetIO();
     bool touch = touch_drawn();  // (hidden, the settings button still shows)
     bool stats = perfstats_visible();  // ([Performance] ShowStats: runtime/perfstats.cpp)
+    if (stats) perfstats_tick();  // (every frame, built or its copy drawn again: the longest gap is between the game's frames)
     bool fading = settings_panel_fading();  // (the settings menu closed a moment ago: fading out, taking no input)
     if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !credits && !fading) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
@@ -929,15 +934,20 @@ static void frame_once(void *cpu) {
     }
     uint32_t w = g_disp_w, h = g_disp_h;
     if (!w || !h) return;
-    // MHGU_PERF_OVERLAY_REUSE=1: a frame with the touch controls alone (no menu, notice, chat, stats, credits or plugin's
+    // MHGU_PERF_OVERLAY_REUSE=1: a frame with the touch controls alone (no menu, notice, chat, credits or plugin's
     // drawing) whose controls would draw the very same lists as the frame built last (touch_draw_unchanged: nothing of
     // theirs moving, nothing they show changed) is not built again: the render thread draws the copy it has (g_snap), as
     // it does every frame. Once a second it is built anyway. =2, a check: such frames are built, compared with the copy
-    // (snap_same) and a difference logged
-    bool alone = touch && !open && !free_render && !notice && !plate && !chat && !chat_over && !stats && !credits && !fading && !g_modal_open &&
+    // (snap_same) and a difference logged. The FPS plate ([Performance] ShowStats) may be there too (a phone, after
+    // 1.0.1) when its figures say what the copy's say (perfstats_same: they change twice a second); with it every frame
+    // was built, on this game thread. The Moto g06 at quest 101's camp, Low-end 40 %, 60 FPS, the plate on: 0 of ~3,470
+    // frames a minute drawn again, now ~3,300; the overlay's share of this thread 3.8 % -> 0.3 % (about 0.4 ms a frame);
+    // =2 compared 6,659 such frames, none differed. MHGU_PERF_STATS_REUSE=0: frames with the plate built, as before
+    bool alone = touch && !open && !free_render && !notice && !plate && !chat && !chat_over && !credits && !fading && !g_modal_open &&
                  !g_settings_open && !g_forge_open && !settings_panel_confirming();
     bool same = g_perf_overlay_reuse && alone && g_reuse_last && g_snap.Valid && w == g_reuse_w && h == g_reuse_h &&
-                now - g_reuse_built_ns < 1000000000ull && touch_draw_unchanged((float)w, (float)h);
+                now - g_reuse_built_ns < 1000000000ull && (!stats || (g_perf_stats_reuse && perfstats_same((float)w, (float)h))) &&
+                touch_draw_unchanged((float)w, (float)h);
     if (g_perf_overlay_reuse && now - g_reuse_log_ns >= 60000000000ull) {
         if (g_reuse_log_ns)
             LOG("[perf] overlay: %llu frames built, %llu %s (a minute)\n", (unsigned long long)g_reuse_n[0],
@@ -946,6 +956,7 @@ static void frame_once(void *cpu) {
     }
     g_reuse_n[same]++;
     if (same && g_perf_overlay_reuse == 1) {
+        if (stats) perfstats_kept();  // (the plate drawn again with the copy: where it is, for the notices and the editor)
         apply_input(io);  // (keep the queue short: nothing reaches it with no menu open)
         g_last_ns = now;
         return;
