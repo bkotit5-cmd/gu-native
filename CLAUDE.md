@@ -451,12 +451,16 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   in the frame (the smithy's parchment and its model, the quest counter's quest card: under the window beside them), so a window of
   this frame or the two before tells (`ui_window_frame`); by the pass alone they went Right, over that window. hudtrace marks them.
   A town's world map (X) and its "Choose a destination" list are on layer 100 too (x 291..985, y 192..522), with no window of
-  layer 97 beside them: in a town (`g_town_ns`, its update within 500 ms) layer 100 above y 600 and left of x 1000 keeps the
-  middle as well, its prompts at the bottom right the edge. Up to 0.1.9.3 the map and the list sat right of the middle with
-  Edges / 21:9 (128 of the canvas's units at 1600:720, hudtrace on the RG406V: GU#219). With one of layer 100's stretched panels
-  in this frame or the two before (`ui_panel_frame`: the multiplayer menu, the Create Hub form, the hub list, x 782..1254) the
-  whole of it keeps the middle, its pieces right of x 1000 too (Bottom, as the rest of it): until 1.0.1 those went Right and
-  the window came apart with Edges / 21:9 (hudtrace on the PC at 2520x1080: x 1018 and 1254 "RT", 784 "CB").
+  layer 97 beside them: in a town (`g_town_ns`, its update within 500 ms; a hub too) all of layer 100 between y 10 and 712 keeps
+  the middle as well, each window whole, but the town's prompts at the bottom right (x 1090.., y 530..: their bars at x 1102, a
+  row every 34 units up from y 674), which stay at the edge. Up to 0.1.9.3 the whole layer went Right (each window whole, at the
+  edge; the map and the list right of the middle: 128 of the canvas's units at 1600:720, hudtrace on the RG406V: GU#219). 1.0
+  (72b9365) kept the middle only left of x 1000 and above y 600, and 1.0.1's first fix (8831010) a whole window with one of
+  layer 100's stretched panels (`ui_panel_frame`: the multiplayer menu, the Create Hub form, the hub list, x 782..1254): the
+  rest came apart with Edges / 21:9 (the Guild Card's Weapon Usage, its icons at y 621 "RB" under numbers at 573 "CB"; its page
+  counter "RT" off its plate; a hub's player list and posted quest's card; Bherna's Control Type list: Discord "Bug hud",
+  GU#247). The stretched panels' right part still takes the vertical anchor of their left (Bottom). A town has no hunt's parts:
+  the Guild Card's R at 1200, 54.6, the target camera's place, was taken for it and drawn 250 units left with the touch controls.
 - Layer 110 holds the loading screen's strips (y 168, 433, 570, the 168 ones first in the pass) and, in the field, a gun's
   quick-aim reticle (one piece at about 650, 433), the lock-on markers and effects: those keep the middle at any HUD anchor, as
   the 3D picture they are on does. Up to 0.1.9.3 the reticle went right by place with Edges / 21:9, and in frames where its y
