@@ -398,7 +398,8 @@ const float KNOB = .45f;             // the stick's knob, in its base's radius
 // port's touch.cpp
 const float RUN_ON = 1.6f, RUN_OFF = 1.45f, LOCK_AT = 2.4f, LOCK_R = .42f, LOCK_GRAB = .55f, LOCK_EDGE = .02f;
 const float LOCK_UP = .7f;  // (the thumb's way within about 45 degrees of straight up: the circle shows)
-const uint64_t RUN_X_WAIT = 400 * 1000000ull;  // (X pressed: no run's R until this long after: touch_input)
+const uint64_t RUN_X_WAIT = 400 * 1000000ull;  // (X pressed: no run's R until this long after, but for X + A in a run
+                                               // whose R was held this long already: touch_input)
 // The lock circle's middle, for a stick at (bx, by) of radius r on a screen h high
 ImVec2 lock_spot(float bx, float by, float r, float h) { return ImVec2(bx, std::max(by - LOCK_AT * r, LOCK_R * r + LOCK_EDGE * h)); }
 const float CAMERA_COUNTS = 1150.0f; // mouse counts for a drag the screen's height (hle/mousecam.c: 0.08 degrees each)
@@ -449,10 +450,9 @@ struct Layout {
     float fps_x, fps_y;                      // the FPS counter's middle, in the screen's width and height; < 0 its own
                                              // place, at the top (fps_counter in the file)
     char image[C_COUNT][IMAGE_NAME];         // the player's own picture on a control: a file in the profiles' images
-                                             // folder (image <key> <file>); "" none. The stick's: its base
+                                             // folder (image <key> <file>); "" none. The stick's: its base. Drawn in
+                                             // place of the control's whole look (pic_only)
     char knob[IMAGE_NAME];                   // the stick's knob's (image_knob <file>)
-    uint64_t bare;                           // controls whose picture is drawn as it is, without the button's round
-                                             // frame behind it, uncut (bare <key>)
 };
 // The layout editor's panel: its middle where the player dragged it (fractions of the screen's width from the left and
 // of its height from the top; below 0 its usual place, a little above the middle) and its size (EPANEL_MIN to 100 %).
@@ -538,7 +538,8 @@ void parse_layout(const std::string &text, Layout *l, EditPanel *ep) {
             int c = ctl_by_key(name);
             if (!strcmp(key, "hidden") && c >= 0) { l->off |= 1ull << c; continue; }
             if (!strcmp(key, "hold") && c >= 0) { l->hold |= 1ull << c; continue; }
-            if (!strcmp(key, "bare") && c >= 0) { l->bare |= 1ull << c; continue; }
+            if (!strcmp(key, "bare")) continue;  // (1.0.1's first test builds: a picture without the button's frame.
+                                                 // Every picture is drawn alone now: the line is read and left out)
             if (!strcmp(key, "image") && c >= 0) {  // (image <key> <file>: the name, to the line's end)
                 const char *f = strstr(line, name) + strlen(name);
                 while (*f == ' ' || *f == '\t') f++;
@@ -616,12 +617,11 @@ bool save_layout_file(const char *path, const Layout &l, const EditPanel *ep) {
                "the screen's width and height; -1 -1 its own place)\n", PROFILES_N);
     fprintf(f, "layout_kind %d\nprofile %d\nfps_counter %.4f %.4f\n", l.kind, l.profile, l.fps_x, l.fps_y);
     fprintf(f, "# controls hidden (emulator-style), held by a tap (hold), with the player's own picture (image <key> <file>;\n"
-               "# the stick's knob: image_knob <file>), drawn without the button's frame (bare)\n");
+               "# the stick's knob: image_knob <file>)\n");
     for (int i = 0; i < C_LAID; i++) {
         if (l.kind == KIND_EMU && (l.off >> i & 1)) fprintf(f, "hidden %s\n", DEFS[i].key);
         if (l.hold >> i & 1) fprintf(f, "hold %s\n", DEFS[i].key);
         if (l.image[i][0]) fprintf(f, "image %s %s\n", DEFS[i].key, l.image[i]);
-        if (l.bare >> i & 1) fprintf(f, "bare %s\n", DEFS[i].key);
     }
     if (l.knob[0]) fprintf(f, "image_knob %s\n", l.knob);
     if (ep) {
@@ -1303,8 +1303,13 @@ struct Finger {
     uint64_t btn;          // a control of the ranged layout: what it pressed when it landed (the weapon may go out under it)
     int sent;              // the menu pad's: the direction it presses now (dpad_part's; a tab, Minus: 1 pressed), which
                            // follows part
-    uint64_t keep;         // a thumb from Guard slid onto the attacks ([Touch] GuardSlide): R kept with them
+    uint64_t keep;         // a thumb slid from a button onto another ([Touch] SlideBoth; GuardSlide: Guard onto the
+                           // attacks): the first one's kept with it
     bool on_bar;           // ...or one on Guard slid onto the item bar: R + Y while it is there
+    int home;              // the control it landed on (a slide back onto it: that one alone again)...
+    uint64_t home_keep;    // ...and what it pressed there as it slid off it ([Touch] SlideBoth: kept with the next ones)
+    bool hold_ok;          // it landed where no control is, the only finger: held still, it hides or shows the controls
+                           // ([Touch] HoldToHide, touch_input); moved or joined by another finger, no longer
 };
 struct Pulse {
     uint64_t buttons, from, until;  // (held from .. until: a sequence starts some later)
@@ -1337,6 +1342,7 @@ struct State {
     bool run_can;            // a lock could start now (StickRun, sheathed, no menu, the hunter played: the circle shows)
     bool rim;                // the thumb past the rim runs (RUN_ON, down to RUN_OFF)
     uint64_t run_x_until;    // an attack that draws the weapon (X) was pressed: no run's R until then (#151)
+    uint64_t run_t0;         // when the run's R began (held since: a sprint going on, which X + A doesn't stop)
     float fx, fy;            // the stick's thumb where it is (the knob stops at the rim)
     bool lock;               // the lock-on is on (hle/mousecam.c turns the hunt camera to the monster)
     uint64_t hunt_ns;        // when the hunt camera last ran (away 10 s: the lock-on goes off)
@@ -1379,6 +1385,11 @@ struct State {
     float w, h;              // the screen, pixels
     Layout layout, saved;
     bool loaded, touched, auto_wait;
+    float smooth_x, smooth_y;  // a drag's turn not given to the camera yet, counts ([Touch] CameraSmoothing: touch_input)
+    uint64_t smooth_ns;        // ...and the pass that gave the last of it
+    bool user_hidden;        // the controls hidden by a long press where no control is ([Touch] HoldToHide), until another
+    uint64_t hint_until;     // ...the line that says how to show them again, until then (the first time in a session)
+    bool hint_said, hint_first;  // (the first time in a session: the line also says where to turn it off)
     bool menu;  // a menu of the game's is open (game_menu, at the last touch_input)  // (auto_wait: a desktop's Auto, waiting for the first finger)
     bool edit, edit_request;  // the layout editor
     int edit_prof;            // ...the HUD it shows and edits (HUD_*: the switch)
@@ -1441,6 +1452,12 @@ struct TapAfterUnlock {
 };
 std::atomic<bool> g_visible;
 std::atomic<bool> g_gear_only;  // (the controls hidden: only the settings button shows, and answers)
+std::atomic<bool> g_hold_hint;  // (hidden by a long press, the first time: the line that says how to show them, State::hint_until)
+std::atomic<bool> g_hold_hidden;  // (hidden by the player's long press where they would show: the HUD stays as with them)
+std::atomic<bool> g_hold_ring;    // (a finger held still where no control is, past HOLD_RING: its ring fills, touch_draw)
+// (a long press where no control is, [Touch] HoldToHide: held this long it hides or shows the controls; its ring shows from
+// HOLD_RING. The MH4U port's the same)
+const uint64_t HOLD_HIDE = 750 * 1000000ull, HOLD_RING = 250 * 1000000ull;
 // (Android) a text entry of the game's open (the hunter's name at character creation...), the port's menu closed: the
 // controls hide for the phone's keyboard, and a Keyboard plate at the top shows. A tap on it opens the menu's keyboard
 // view for the entry (SETTINGS_VIEW_GAME_TEXT): the phone's keyboard comes up there, and its own keys type where the
@@ -1454,7 +1471,14 @@ void hud_asked(const State &s) { g_hud_asked = s.hud_edit || s.hud_request || g_
 std::atomic<bool> g_hud_pad;    // (a controller is read: its B, which cancels the editor, shows on Cancel once used)
 #endif
 // (the lock-on waits so long after a turn by hand or an L, as the MH4U port's)
-const uint64_t LOCK_AFTER_TURN = 600 * MS, MIN_PRESS = 70 * MS;
+const uint64_t LOCK_AFTER_TURN = 600 * MS, MIN_PRESS_NS = 70 * MS;
+// (a quick tap's press: 70 ms, or a game frame and a bit at a frame rate under 16 a second - the FPS limit goes down to
+// 15 since 1.0.1 -, as the game reads its buttons once a frame)
+uint64_t min_press(void) {
+    float fps = config_live_fps();
+    return fps > 0 && fps < 16.0f ? std::max<uint64_t>(MIN_PRESS_NS, (uint64_t)(1.15e9f / fps)) : MIN_PRESS_NS;
+}
+#define MIN_PRESS min_press()
 // (the aim's tap: let go within this, the game's own tap of R, under its 14 frames at 60 FPS with an update to spare)
 const uint64_t AIM_TAP = 180 * MS;
 const uint64_t BAR_HOLD = 400 * MS;  // (a finger kept this long on the item bar, unmoved, holds it open: as the MH4U port)
@@ -1735,6 +1759,50 @@ const char *target_letter(void) {
          : b & B(BTN_RIGHT) ? ">" : b & B(BTN_LEFT) ? "<" : b ? "ZL" : "";
 }
 
+// [Touch] SlideBoth ("Slide between buttons: both pressed", on by default; 1.0.1, Discord: "R to B, like R to X"; the MH4U
+// port's the same): a thumb that slides from one of the game's face or shoulder buttons onto another keeps the first pressed
+// with the second, as two fingers would - Guard onto Evade as onto the attacks, Evade onto an attack, one attack onto the
+// other, the emulator-style layout's A, B, X, Y and shoulders, the combined buttons, a bow's or gun's reload, crouching fire,
+// evade and sheathe. What the thumb pressed as it left the button it landed on stays pressed (`Finger.home_keep`), with
+// the button it is on now: one it only passed over on the way (the pill between Guard and Evade) is let go again, as the
+// MH4U port's; slid back onto the one it landed on, that one alone again. The weapon
+// out or sheathed, never in a menu of the game's (slide_both). Not: the run (sliding onto an attack lets its R go, a draw
+// attack), the stick, the d-pads, the arrows, nor a bow's or gun's fire and aim (a slide on them aims). Off: 1.0's slides
+// exactly - a thumb from Guard or Evade slid onto the attacks becomes that attack, Guard keeping R with GuardSlide
+bool slide_both(const State &s) { return config_live_touch_show(TB_SLIDE_BOTH) && !s.menu; }
+bool slide_keeps(int c) {
+    switch (c) {
+    case C_ATTACK: case C_CORNER: case C_HEAVY: case C_LIGHT: case C_R: case C_DODGE: case C_SHEATHE: case C_ZR: case C_ZL:
+    case C_L: case C_RSECOND: case C_RSPECIAL: case C_RDODGE: case C_RSHEATHE:
+    case C_EA: case C_EB: case C_EX: case C_EY: case C_EL: case C_ER: case C_EZL: case C_EZR:
+        return true;
+    default:
+        return is_combo(c);
+    }
+}
+// The thumb at (x, y), on such a button, is now on another (true): it presses that one, with what it pressed on the one it
+// landed on kept (or that one alone, back on it). On the same control (the pill's or the band's other part) it is the slide
+// along it (false)
+bool slide_to(State &s, Finger *f, float x, float y) {
+    int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, s.menu);
+    if (c < 0 || c == f->ctl || !slide_keeps(c)) return false;
+    // (as at the landing: the buttons whose places reach the item bar don't take a finger on it)
+    if ((c == C_R || c == C_DODGE || c == C_CORNER || c == C_RSECOND) && zone_rect(zones(), HP_ITEMS, s.w, s.h).in(x, y)) return false;
+    int from = f->ctl;
+    if (from == f->home) f->home_keep = finger_buttons(*f) & ~(f->on_bar ? B(BTN_Y) : 0);  // (leaving it: what it pressed there)
+    f->ctl = c, f->part = part, f->on_bar = false, f->keep = 0;
+    f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, s.menu) : c == C_ZL ? target_buttons() : c == C_L ? camera_buttons() : 0;
+    if (c != f->home) f->keep = f->home_keep & ~finger_buttons(*f);
+    recompute_held(s);
+    tap_due();
+    static int dbg = -1;
+    if (dbg < 0) dbg = getenv("MHGU_TOUCH_LOG") != nullptr;
+    if (dbg)
+        rt_logf("[touch] slid from %s onto %s: %llx kept, %llx pressed\n", DEFS[from].key, DEFS[c].key, (unsigned long long)f->keep,
+                (unsigned long long)finger_buttons(*f));
+    return true;
+}
+
 // the port's settings menu takes the fingers as its mouse (overlay.cpp)
 void to_menu(const SDL_Event *e) {
     SDL_Window *win = ui_window();
@@ -1772,13 +1840,10 @@ bool holdable(int i) {
     return !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_SETTINGS || i == C_LOCKON ||
              i == C_ITEML || i == C_ITEMR || i == C_RUNLOCK || i == C_AMMO_UP || i == C_AMMO_DOWN || i == C_RAIM);
 }
-// A picture of the player's (Layout.image) can be on any round button: not on the pill or the band, the stick, the
-// d-pads, the menu pad or the sprint lock's circle
-// (a picture of the player's: any round button, and since 1.0.1 the stick - its base, and its knob apart -, the d-pads
-// and the sprint lock's circle; not the attacks' pill or band, nor the menu pad)
-bool image_ok(int i) {
-    return i >= 0 && i < C_LAID && !(i == C_ATTACK || i == C_CORNER || i == C_MPAD);
-}
+// A picture of the player's (Layout.image) can be on every control the editor places (1.0.1, the owner's call: the round
+// buttons as in 1.0, and the stick - its base, and its knob apart -, both d-pads, the sprint lock's circle, the item bar's
+// arrows, the attacks' pill and corner band, the menu pad), drawn in place of the control's whole look (pic_only)
+bool image_ok(int i) { return i >= 0 && i < C_LAID; }
 
 // ---- the layout editor: the touch controls and the game's HUD. A panel in two rows: what is picked (smaller, bigger,
 // hide or show a part - or a control of the emulator-style layout -, back to its default, held by a tap, a picture of
@@ -2035,10 +2100,9 @@ void prof_tap(State &s, float x, float y) {
 // ---- the pictures' window (the editor's Image button, a round button picked): the pictures in the profiles' images
 // folder, a page of them; one tapped goes on the button. None takes it off; Add pictures opens the screen that copies
 // the player's own in (Android's ImportActivity, a desktop's file dialog: runtime/pc_actions.c); the folder is read again
-// while the window is open. The pictures are the player's own, and their responsibility. Frame (1.0.1, Discord): the
-// button's round frame behind its picture, or none and the picture whole (Layout.bare); For (the stick's alone): its
-// base's picture or its knob's
-enum { IA_NONE, IA_PREV, IA_NEXT, IA_FRAME, IA_KNOB, IA_ADD, IA_CLOSE, IA_COUNT };
+// while the window is open. The pictures are the player's own, and their responsibility. A picture is the control's
+// whole look (pic_only: 1.0.1). For (the stick's alone): its base's picture or its knob's
+enum { IA_NONE, IA_PREV, IA_NEXT, IA_KNOB, IA_ADD, IA_CLOSE, IA_COUNT };
 const int IMG_PAGE = 12;  // (two rows of six)
 void img_window(float w, float h, Rect *win, Rect tile[IMG_PAGE], Rect btn[IA_COUNT], float *say_y) {
     float ww = std::min(w * .96f, 1.75f * h), wh = .74f * h, x0 = (w - ww) * .5f, y0 = (h - wh) * .5f;
@@ -2106,10 +2170,7 @@ void img_tap(State &s, float x, float y) {
         s.img_btn = i;
         tap_due();
         if (i == IA_NONE && c >= 0) img_target(s, c)[0] = 0, s.img_open = false;
-        else if (i == IA_FRAME && c >= 0) {
-            s.layout.bare ^= 1ull << c;
-            rt_logf("[touch] layout editor: %s's picture %s\n", DEFS[c].key, s.layout.bare >> c & 1 ? "without its frame" : "in its frame");
-        } else if (i == IA_KNOB && c == C_STICK) {
+        else if (i == IA_KNOB && c == C_STICK) {
             s.img_knob = !s.img_knob;
             img_page_of(s);
         } else if (i == IA_PREV) s.img_page = (s.img_page + pages - 1) % pages;
@@ -2653,7 +2714,12 @@ extern "C" bool touch_event(const SDL_Event *e) {
             if (g.kind == F_NONE) { f = &g; break; }
         if (!f) return true;
         *f = {};
-        f->id = e->tfinger.fingerID, f->x = f->x0 = x, f->y = f->y0 = y, f->t0 = now;
+        f->id = e->tfinger.fingerID, f->x = f->x0 = x, f->y = f->y0 = y, f->t0 = now, f->home = -1;
+        // (another finger down: no long press hides the controls, neither this one's nor one held already - multi-touch is
+        // a thumb on the stick and one on the camera, not a press on an empty spot)
+        bool alone = true;
+        for (Finger &g : s.f)
+            if (&g != f && g.kind != F_NONE) alone = false, g.hold_ok = false;
         if (overlay_menu_open()) {
             f->kind = F_MENU;
             bool other = false;
@@ -2692,6 +2758,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 return true;
             }
             f->kind = F_CAMERA;  // (hidden: a drag still turns the camera)
+            f->hold_ok = alone;  // (held still, the controls the player hid show again: touch_input)
             return true;
         }
         Zones z = zones();
@@ -2720,7 +2787,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
         }
         if (c >= 0) {
             if (c == C_RAIM) s.bow_leave = 0;
-            f->kind = F_BUTTON, f->ctl = c, f->part = part;
+            f->kind = F_BUTTON, f->ctl = c, f->part = part, f->home = c;
             f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, s.menu) : c == C_ZL ? target_buttons() : c == C_L ? camera_buttons() : 0;
             if ((c == C_AMMO_UP || c == C_AMMO_DOWN) && !s.menu)
                 ammo_step(s, c == C_AMMO_UP ? 1 : -1), f->repeat_ns = now + 550 * MS;  // (held: more steps, touch_input)
@@ -2760,6 +2827,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
             if (hypotf(x - lg.c.x, y - lg.c.y) >= LOCK_GRAB / LOCK_R * lg.r) s.run_armed = true;
         } else {
             f->kind = F_CAMERA;
+            f->hold_ok = alone;  // (an empty spot: held still, a long press hides the controls, touch_input)
         }
         recompute_held(s);
         static int dbg = -1;  // (MHGU_TOUCH_LOG=1: what each finger landed on)
@@ -2795,9 +2863,10 @@ extern "C" bool touch_event(const SDL_Event *e) {
             float ax = fabsf(f->swipe), ay = fabsf(f->swipe_y), step = .075f * s.h;
             if (now >= s.step_ns && std::max(ax, ay) >= step) {
                 bool across = ax > ay;  // (a step: a press that starts, as the menu pad's; felt as it presses: touch_input)
-                pulse(s, across ? (f->swipe > 0 ? DPAD_RIGHT : DPAD_LEFT) : (f->swipe_y > 0 ? DPAD_DOWN : DPAD_UP), 70 * MS, 0,
+                pulse(s, across ? (f->swipe > 0 ? DPAD_RIGHT : DPAD_LEFT) : (f->swipe_y > 0 ? DPAD_DOWN : DPAD_UP), MIN_PRESS, 0,
                       true, true);
-                s.step_ns = now + 130 * MS;  // (time to let go between steps: the game reads a press, not a hold)
+                // (time to let go between steps: the game reads a press, not a hold; at a low frame rate, a frame's time)
+                s.step_ns = now + std::max<uint64_t>(130 * MS, 2 * MIN_PRESS);
                 f->swipe = across ? f->swipe - copysignf(step, f->swipe) : 0;
                 f->swipe_y = across ? 0 : f->swipe_y - copysignf(step, f->swipe_y);
             }
@@ -2824,12 +2893,15 @@ extern "C" bool touch_event(const SDL_Event *e) {
             if (part != f->part) f->part = part, recompute_held(s), tap_due();
         } else if (f->kind == F_BUTTON && f->ctl == C_MPAD) {  // the menu pad: the same (pressed by touch_input, as a
             f->part = mpad_part(place(s.layout, C_MPAD, s.w, s.h), x, y, f->part);  // menu takes it: hle/input.c)
+        } else if (f->kind == F_BUTTON && !f->done && slide_both(s) && slide_keeps(f->ctl) && slide_to(s, f, x, y)) {
+            // (onto another of the game's buttons, the first kept with it, or back onto the one it landed on: slide_to)
         } else if (f->kind == F_BUTTON && (f->ctl == C_ATTACK || f->ctl == C_CORNER)) {  // sliding along it: another part
             int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, s.menu);
             if (c == f->ctl && part != f->part) {
-                // (the corner's guard onto its attacks: R kept, [Touch] GuardSlide; back onto the guard, the guard alone)
-                if (f->ctl == C_CORNER && (f->part == 3 || f->keep) && part != 3 && guard_slide(s)) f->keep = B(BTN_R);
-                if (part == 3) f->keep = 0;
+                // (the corner's guard onto its attacks: R kept, [Touch] GuardSlide; back onto the guard, the guard alone - and
+                // what another button the thumb came from kept stays)
+                if (f->ctl == C_CORNER && f->part == 3 && part != 3 && (guard_slide(s) || slide_both(s))) f->keep |= B(BTN_R);
+                if (part == 3) f->keep &= ~B(BTN_R);
                 f->part = part, f->on_bar = false, recompute_held(s), tap_due();
             } else if (c == C_R && f->keep) {  // (a guard kept, back onto Guard: Guard again)
                 f->ctl = C_R, f->part = 0, f->keep = 0, recompute_held(s), tap_due();
@@ -3078,7 +3150,41 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
 #else
     bool screen = s.touched;  // (a desktop: Auto shows them once a finger has touched the screen)
 #endif
-    bool visible = s.edit || (!typing && (mode == TOUCH_ON || (mode == TOUCH_AUTO && !pad_connected && screen)));
+    bool shown = !typing && (mode == TOUCH_ON || (mode == TOUCH_AUTO && !pad_connected && screen));  // (by the settings)
+    // A long press where no control is ([Touch] HoldToHide, 1.0.1; Discord: the controls off to watch a cutscene took the
+    // settings menu): the finger landed on an empty spot, the only one down, held HOLD_HIDE without moving past the slop a
+    // drag of the camera starts with - the controls hide, every one, the settings button too; another long press shows them
+    // again, anywhere (hidden, every finger is the camera's). Not a hold that began on a control, the item bar or the
+    // Hunter Arts, nor with a second finger down at any moment (hold_ok, touch_event); not while the port's menu, the editor
+    // or a text entry is up. From HOLD_RING on a gold ring fills round the finger (touch_draw's hold_ring), so a press is
+    // told from a drag before anything happens; each time they hide a line says how to show them again (the first time in a
+    // session, also where to turn it off). The HUD keeps the touch controls' arrangement meanwhile (it doesn't jump), and the
+    // setting turned off shows them again. The MH4U port's the same times
+    bool hold_on = config_live_touch_show(TB_HOLD_HIDE) != 0, ring = false;
+    for (Finger &f : s.f) {
+        if (f.kind != F_CAMERA || !f.hold_ok || f.moved) continue;
+        if (!hold_on || menu || s.edit || typing || (!shown && !s.user_hidden)) {
+            if (now - f.t0 >= HOLD_HIDE) f.hold_ok = false;
+            continue;
+        }
+        if (now - f.t0 < HOLD_HIDE) {
+            ring |= now - f.t0 >= HOLD_RING;
+            continue;
+        }
+        f.hold_ok = false;
+        s.user_hidden = !s.user_hidden;
+        f.kind = F_MENU, f.part = 0;  // (nothing more of this finger until it lifts: no turn of the camera, no menu step)
+        s.cam_dx = s.cam_dy = 0;
+        tap_due();
+        rt_logf("[touch] controls %s by a long press where no control is\n", s.user_hidden ? "hidden" : "shown again");
+        s.hint_first = s.user_hidden && !s.hint_said;
+        s.hint_until = !s.user_hidden ? 0 : now + (s.hint_first ? 5000 : 2500) * MS;
+        if (s.user_hidden) s.hint_said = true;
+        break;
+    }
+    g_hold_ring = ring;
+    if (s.user_hidden && (!hold_on || s.edit)) s.user_hidden = false, s.hint_until = 0;  // (turned off, the editor: shown)
+    bool visible = s.edit || (shown && !s.user_hidden);
     s.auto_wait = !s.edit && !typing && mode == TOUCH_AUTO && !pad_connected && !screen;
 #ifndef __ANDROID__
     if (s.hud_edit) visible = s.auto_wait = false;  // (the HUD editor: the HUD as it is with them hidden, nothing of theirs)
@@ -3086,7 +3192,8 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     g_visible = visible;
     // (hidden, by a controller or by Off: the settings button alone stays, or a phone without a controller had no way
     // back to the menu but clearing the app's data)
-    g_gear_only = !visible && !typing && screen;
+    g_gear_only = !visible && !typing && screen && !s.user_hidden;
+    g_hold_hint = now < s.hint_until;
 #ifdef __ANDROID__
     g_text_plate = typing && textinput_active() && !menu;
 #endif
@@ -3096,12 +3203,13 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     {
         static int was = -1;
         if (was != (int)visible) {
-            rt_logf("[touch] controls %s (setting %d, controller %d, typing %d, editor %d)\n",
-                    visible ? "shown" : "hidden", mode, (int)pad_connected, (int)typing, (int)s.edit);
+            rt_logf("[touch] controls %s (setting %d, controller %d, typing %d, editor %d, hidden by a long press %d)\n",
+                    visible ? "shown" : "hidden", mode, (int)pad_connected, (int)typing, (int)s.edit, (int)s.user_hidden);
             was = visible;
         }
     }
-    g_touch_hud = visible && config_live_touch_hud();
+    g_hold_hidden = shown && s.user_hidden;
+    g_touch_hud = (visible || g_hold_hidden) && config_live_touch_hud();
     // (the buttons a tap held down: let go with the controls hidden or edited; one alone once it is off the screen - the
     // ranged layout's as the weapon goes, Run as a menu opens -, or no longer held by a tap; the pictures' window read
     // again now and then, for the pictures being added)
@@ -3127,10 +3235,11 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     if (s.run_lock && !s.run_can)
         run_end(s, !stick_run ? "StickRun off" : menu ? "the settings menu" : !visible || s.edit ? "the controls hidden or edited"
                  : s.menu ? "a menu of the game's" : s.drawn == 1 ? "the weapon out" : "the hunter not played");
+    bool ran = s.run;  // (the run's R in the last update that got to the end: below)
     s.run = false;
     // (while a menu is open the fingers are its mouse: nothing of theirs reaches the game or the menu's controller)
     if (menu) {
-        s.cam_dx = s.cam_dy = 0;
+        s.cam_dx = s.cam_dy = s.smooth_x = s.smooth_y = 0;
         return;
     }
     for (Pulse &p : s.pulse) {
@@ -3148,8 +3257,30 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     }
     if (now < s.ammo_hold) *buttons |= B(BTN_L);
     if (s.h > 0 && !s.edit) {
-        float k = CAMERA_COUNTS * config_live_touch_camera() / s.h;
-        *cam_dx += s.cam_dx * k, *cam_dy += s.cam_dy * k;
+        float k = CAMERA_COUNTS * config_live_touch_camera() / s.h, ox = s.cam_dx * k, oy = s.cam_dy * k;
+        // [Touch] CameraSmoothing (1.0.1, gu-native #244): the drag's turn eased in rather than given at once - what is
+        // left of it goes out a part each pass, by the time passed (the same at any polling rate: e^(-dt / tau), tau 12 ms
+        // to 152 ms for 1 to 100), so the camera glides after the finger and stops a moment after it lifts. Every count of
+        // the drag still comes; 0, the default: all of it at once, as before
+        int smooth = std::clamp(config_live_touch_cam_smooth(), 0, 100);
+        float dt = s.smooth_ns ? std::min((now - s.smooth_ns) / 1e9f, .1f) : 0.0f;
+        s.smooth_ns = now;
+        if (smooth > 0) {
+            s.smooth_x += ox, s.smooth_y += oy;
+            float part = 1.0f - expf(-dt / (.012f + .14f * smooth / 100.0f));
+            ox = s.smooth_x * part, oy = s.smooth_y * part;
+            s.smooth_x -= ox, s.smooth_y -= oy;
+        }
+        if (smooth <= 0 || fabsf(s.smooth_x) + fabsf(s.smooth_y) < .05f) ox += s.smooth_x, oy += s.smooth_y, s.smooth_x = s.smooth_y = 0;
+        *cam_dx += ox, *cam_dy += oy;
+        static float given;  // (MHGU_TOUCH_LOG: what went to the camera and what waits, every 50 ms while a drag is eased)
+        static uint64_t said_ns;
+        given += ox;
+        if (dbg && smooth > 0 && (given != 0 || s.smooth_x != 0) && now - said_ns >= 50 * MS)
+            rt_logf("[touch] camera smoothing %d: %.1f counts across given in %.0f ms, %.1f to come\n", smooth, given,
+                    (now - said_ns) / 1e6, s.smooth_x), given = 0, said_ns = now;
+    } else {
+        s.smooth_x = s.smooth_y = 0;
     }
     s.cam_dx = s.cam_dy = 0;
     if (!visible || s.edit) return;
@@ -3221,7 +3352,12 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     // lifted on the lock circle above the stick, come from inside the rim while a lock can start, locks the run with a
     // click; it goes on forward (above) until run_end. StickRun Off: the Run button, while held. No run's R with X pressed
     // or just after: X draws the weapon, and R + X + A is another move (the Great Sword's guard from the sheath came out of
-    // a run and a draw attack: #151)
+    // a run and a draw attack: #151, the rim's R starting as the sheathe ended, in the same update as the X + A). But a
+    // run whose R was held RUN_X_WAIT already, a sprint going on, keeps it as X and A come together: R + X + A, as with a
+    // controller's R held through a sprint. It is the Charge Blade's draw into the axe, sheathed (X + A alone does nothing
+    // there): 0.1.8 had it from the rim's run, and from 0.1.9 the tap on the seam did nothing in a run (Discord, 1.0;
+    // PC, a Charge Blade in Striker: the rim's run and the seam, 0002:002 and nothing; with R kept, 0010:000). X alone
+    // still lets it go (a draw attack: with R held the same one, 0010:033)
     int drawn = s.drawn;
     static int drawn_was = -2;
     if (drawn != drawn_was) {
@@ -3247,11 +3383,16 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     for (const Finger &f : s.f) run_held |= f.kind == F_BUTTON && !f.done && f.ctl == C_RUN;
     run_held |= (s.latched >> C_RUN & 1) != 0;  // (held by a tap)
     bool want = s.run_lock || s.rim || (run_held && !stick_run && drawn != 1 && !s.menu);
-    if (*buttons & B(BTN_X)) s.run_x_until = now + RUN_X_WAIT;
-    s.run = want && now >= s.run_x_until;
+    const uint64_t XA = B(BTN_X) | B(BTN_A);
+    bool keep = ran && now - s.run_t0 >= RUN_X_WAIT && (*buttons & XA) == XA;
+    if ((*buttons & B(BTN_X)) && !keep) s.run_x_until = now + RUN_X_WAIT;
+    s.run = want && (keep || now >= s.run_x_until);
+    if (s.run && !ran) s.run_t0 = now;
     if (s.run) *buttons |= B(BTN_R);
-    static bool said_x, said_run;  // (the log: once a change, what held R said as it lets go too)
+    static bool said_x, said_run, said_keep;  // (the log: once a change, what held R said as it lets go too)
     static const char *said_why = "";
+    if (dbg && keep && s.run && !said_keep) rt_logf("[touch] run: R kept with X + A (a sprint: the game's R + X + A)\n");
+    said_keep = keep && s.run;
     if (dbg && want && !s.run && !said_x) rt_logf("[touch] run: no R while X draws the weapon\n");
     said_x = want && !s.run;
     if (s.run) said_why = s.run_lock ? "the lock" : s.rim ? "the stick's rim" : "the Run button";
@@ -3274,7 +3415,8 @@ extern "C" bool touch_busy(void) {
         if (p.until > now) return true;
     if (s.stick_on || s.run || s.run_lock || s.run_free || s.lock || s.bar_open || s.edit || s.edit_request || s.pinch)
         return true;
-    if (s.held || s.tapped || s.pad_held || s.cam_dx != 0 || s.cam_dy != 0 || g_tap_due) return true;
+    if (s.held || s.tapped || s.pad_held || s.cam_dx != 0 || s.cam_dy != 0 || s.smooth_x != 0 || s.smooth_y != 0 || g_tap_due)
+        return true;
     if (now < s.ammo_hold || now < s.ammo_ready || now < s.run_x_until || now < s.lit_until || now < s.rs_until ||
         now < s.item_flash || now < s.art_flash)
         return true;
@@ -3286,12 +3428,13 @@ extern "C" bool touch_busy(void) {
     return false;
 }
 
-extern "C" bool touch_visible(void) { return g_visible; }
+// (nvn/vulkan/exec.c: the HUD moved for them - shown, or hidden by the player's long press, when it stays as it was)
+extern "C" bool touch_visible(void) { return g_visible || g_hold_hidden; }
 extern "C" uint64_t touch_menu_buttons(void) { return g_menu_buttons; }
 #ifndef __ANDROID__
-extern "C" bool touch_drawn(void) { return g_visible || g_gear_only || (g_lock_mark && target_seen()) || g_hud_edit || g_text_plate; }
+extern "C" bool touch_drawn(void) { return g_visible || g_gear_only || (g_lock_mark && target_seen()) || g_hud_edit || g_text_plate || g_hold_hint || g_hold_ring; }
 #else
-extern "C" bool touch_drawn(void) { return g_visible || g_gear_only || (g_lock_mark && target_seen()) || g_text_plate; }
+extern "C" bool touch_drawn(void) { return g_visible || g_gear_only || (g_lock_mark && target_seen()) || g_text_plate || g_hold_hint || g_hold_ring; }
 #endif
 extern "C" bool touch_game_menu(void) { return g_game_menu.load(); }
 
@@ -3656,7 +3799,7 @@ extern "C" void touch_reset(void) {
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
     drop_fingers(s);
-    s.cam_dx = s.cam_dy = 0;
+    s.cam_dx = s.cam_dy = s.smooth_x = s.smooth_y = 0;
 }
 
 extern "C" void touch_hud_piece(int part, float game_x, float game_y, float canvas_x, float canvas_y, float k, int flags) {
@@ -4288,15 +4431,13 @@ void corner_band(ImDrawList *dl, ImFont *font, Geo g, int mask, float a) {
 // the d-pad's directions: right, left, up, down (the part's bits)
 const float DPAD_DIR[4][2] = {{1, 0}, {-1, 0}, {0, -1}, {0, 1}};
 // the direction pressed: its quarter of the well lit, and a gold arc outside the rim, which shows round the thumb
-void dpad_lit(ImDrawList *dl, ImVec2 c, float r, int part, float a, bool well = true) {
+void dpad_lit(ImDrawList *dl, ImVec2 c, float r, int part, float a) {
     for (int i = 0; i < 4; i++) {
         if (!(part & (1 << i))) continue;
         float an = atan2f(DPAD_DIR[i][1], DPAD_DIR[i][0]);
-        if (well) {  // (not over a picture of the player's: the arcs alone)
-            dl->PathLineTo(c);
-            dl->PathArcTo(c, r * .84f, an - PI * .25f, an + PI * .25f, 14);
-            dl->PathFillConvex(fade(IM_COL32(92, 62, 22, 255), a * .9f));
-        }
+        dl->PathLineTo(c);
+        dl->PathArcTo(c, r * .84f, an - PI * .25f, an + PI * .25f, 14);
+        dl->PathFillConvex(fade(IM_COL32(92, 62, 22, 255), a * .9f));
         dl->PathArcTo(c, r * 1.1f, an - PI * .23f, an + PI * .23f, 14);
         dl->PathStroke(fade(GLOW, a * .85f), ImDrawFlags_None, r * .07f);
         dl->PathArcTo(c, r * 1.2f, an - PI * .18f, an + PI * .18f, 12);
@@ -4522,83 +4663,100 @@ ImTextureData *pic_texture(const char *name) {
     p.tex = t;
     return t;
 }
-// A picture in a circle of radius r (its middle square), or in a rectangle (r 0: the whole picture, fitted)
-void pic_in_circle(ImDrawList *dl, ImTextureData *t, ImVec2 c, float r, float a) {
-    float w = (float)t->Width, h = (float)t->Height, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
-    if (w > h) u0 = (w - h) * .5f / w, u1 = 1 - u0;
-    else if (h > w) v0 = (h - w) * .5f / h, v1 = 1 - v0;
-    dl->AddImageRounded(t->GetTexRef(), ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ImVec2(u0, v0), ImVec2(u1, v1),
-                        fade(IM_COL32(255, 255, 255, 255), a), r);
-}
 void pic_in_rect(ImDrawList *dl, ImTextureData *t, const Rect &b, float a) {
     float bw = b.x1 - b.x0, bh = b.y1 - b.y0, k = std::min(bw / (float)t->Width, bh / (float)t->Height);
     float w = t->Width * k, h = t->Height * k, x0 = b.x0 + (bw - w) * .5f, y0 = b.y0 + (bh - h) * .5f;
     dl->AddImage(t->GetTexRef(), ImVec2(x0, y0), ImVec2(x0 + w, y0 + h), ImVec2(0, 0), ImVec2(1, 1), fade(IM_COL32(255, 255, 255, 255), a));
 }
-// A picture without the button's frame (Layout.bare, the player's choice in the pictures' window): whole, fitted in the
-// control's square, nothing behind it; pressed, a little smaller with a glow round it
-void pic_bare(ImDrawList *dl, ImTextureData *t, ImVec2 c, float r, bool lit, float a) {
-    float k = lit ? .94f : 1.0f;
-    pic_in_rect(dl, t, Rect{c.x - r * k, c.y - r * k, c.x + r * k, c.y + r * k, true}, a);
-    if (lit) dl->AddCircle(c, r * 1.02f, fade(GLOW, a * .7f), 40, r * .06f);
+// ---- a control drawn as the player's picture (1.0.1, the owner's call: "que solo quede el png"). The picture alone,
+// whole and uncut, fitted in the control's square (its shape kept), with nothing of the port's look - no disc, ring,
+// frame, letter badge or glow; up to 1.0.1's first test builds it sat cut round on the button's bronze disc, its letter
+// badged over it. A press shows on the picture itself: pressed (press 1), a little smaller and darker; a state that
+// lasts (the run locked, the lock-on following) pulses it. Without a picture every control is drawn as before
+const float PIC_PRESS_SCALE = .08f, PIC_PRESS_DARK = .25f;
+ImU32 pic_tint(float press, float a) {  // (white, darkened by the press, at the control's opacity)
+    int v = (int)lroundf(255.0f * (1.0f - PIC_PRESS_DARK * std::clamp(press, 0.0f, 1.0f)));
+    return fade(IM_COL32(v, v, v, 255), a);
 }
-// A button's picture of the player's, on its face (pressed or held, lit round it as the disc is), its letter's badge
-// over it: the button still says which of the game's buttons it is. Bare: the picture alone, as the player made it
-bool pic_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, Geo g, bool lit, const char *letter, float a, float h) {
-    ImTextureData *t = image_ok(i) ? pic_texture(l.image[i]) : nullptr;
+float pic_pulse(void) { return .45f + .4f * (.5f + .5f * sinf(SDL_GetTicksNS() / 1e9f * 4)); }
+// The picture fitted in a box of half sizes hw x hh about c, its shape kept
+void pic_fit(ImDrawList *dl, ImTextureData *t, ImVec2 c, float hw, float hh, ImU32 col) {
+    float k = std::min(hw / (float)t->Width, hh / (float)t->Height), w = t->Width * k, h = t->Height * k;
+    dl->AddImage(t->GetTexRef(), ImVec2(c.x - w, c.y - h), ImVec2(c.x + w, c.y + h), ImVec2(0, 0), ImVec2(1, 1), col);
+}
+// A control's picture in its square (r: half its side), pressed by press (0..1), moved by shift (a d-pad's direction)
+void pic_only(ImDrawList *dl, ImTextureData *t, ImVec2 c, float r, float press, float a, ImVec2 shift = ImVec2(0, 0)) {
+    float k = 1.0f - PIC_PRESS_SCALE * std::clamp(press, 0.0f, 1.0f);
+    pic_fit(dl, t, ImVec2(c.x + shift.x, c.y + shift.y), r * k, r * k, pic_tint(press, a));
+}
+ImTextureData *pic_of(const Layout &l, int i) { return image_ok(i) ? pic_texture(l.image[i]) : nullptr; }
+// A round control's picture (a button, an item bar's arrow, the menu pad), if it has one
+bool pic_face(ImDrawList *dl, const Layout &l, int i, Geo g, float press, float a, ImVec2 shift = ImVec2(0, 0)) {
+    ImTextureData *t = pic_of(l, i);
     if (!t) return false;
-    if (l.bare >> i & 1) {
-        pic_bare(dl, t, g.c, g.r, lit, a);
-        return true;
-    }
-    float r = lit ? g.r * .95f : g.r;
-    disc(dl, g.c, r, lit, a);
-    pic_in_circle(dl, t, g.c, r * .84f, a);
-    if (lit) dl->AddCircle(g.c, r * .84f, fade(GLOW, a * .8f), 40, r * .07f);
-    if (letter && letter[0]) badge(dl, font, ImVec2(g.c.x + r * .7f, g.c.y + r * .7f), std::max(r * .3f, .021f * h), letter, a);
+    pic_only(dl, t, g.c, g.r, press, a, shift);
     return true;
 }
-// The d-pad with a picture of the player's (1.0.1): in the d-pad's well or bare, the arm pressed glowing round it
+// The way a d-pad's (or the menu pad's) picture leans while a direction is pressed (dpad_part's bits): toward it
+ImVec2 pic_lean(int part, float r) {
+    ImVec2 v(0, 0);
+    for (int i = 0; i < 4; i++)
+        if (part & (1 << i)) v.x += DPAD_DIR[i][0] * r * .07f, v.y += DPAD_DIR[i][1] * r * .07f;
+    return v;
+}
 bool pic_dpad(ImDrawList *dl, const Layout &l, int i, Geo g, int part, float a) {
-    ImTextureData *t = image_ok(i) ? pic_texture(l.image[i]) : nullptr;
+    return pic_face(dl, l, i, g, part ? .6f : 0.0f, a, pic_lean(part, g.r));
+}
+// The attack pill's picture: along the pill, tilted with it - the picture's width along the pill's length, its right
+// end up at A's end, its top on the pill's upper side -, fitted in the capsule's length and thickness (a wide picture,
+// about 3:1, fills it). Each half darker while its attack is pressed (the seam: both); mask's bits: 1 A, 2 X
+bool pic_pill(ImDrawList *dl, const Layout &l, Geo g, int mask, float a) {
+    ImTextureData *t = pic_of(l, C_ATTACK);
     if (!t) return false;
-    if (l.bare >> i & 1) pic_in_rect(dl, t, Rect{g.c.x - g.r, g.c.y - g.r, g.c.x + g.r, g.c.y + g.r, true}, a);
-    else disc(dl, g.c, g.r, false, a), pic_in_circle(dl, t, g.c, g.r * .84f, a);
-    dpad_lit(dl, g.c, g.r, part, a, false);
+    float L = g.r * (PILL_HALF + 1.0f), H = g.r, aspect = (float)t->Width / (float)t->Height;
+    float hw = aspect >= L / H ? L : H * aspect, hh = aspect >= L / H ? L / aspect : H;
+    ImVec2 u = PILL_U, n(-PILL_U.y, PILL_U.x);  // (the picture's right; its down: the pill's lower side)
+    auto at = [&](float x, float y) { return ImVec2(g.c.x + u.x * x * hw + n.x * y * hh, g.c.y + u.y * x * hw + n.y * y * hh); };
+    for (int half = 0; half < 2; half++) {  // (0 the lower half, X: the picture's left; 1 the upper, A)
+        float x0 = half ? 0.0f : -1.0f, x1 = half ? 1.0f : 0.0f, u0 = half ? .5f : 0.0f, u1 = half ? 1.0f : .5f;
+        bool on = mask & (half ? 1 : 2);
+        dl->AddImageQuad(t->GetTexRef(), at(x0, -1), at(x1, -1), at(x1, 1), at(x0, 1), ImVec2(u0, 0), ImVec2(u1, 0), ImVec2(u1, 1),
+                         ImVec2(u0, 1), pic_tint(on ? 1.0f : 0.0f, a));
+    }
     return true;
 }
-// The stick with the player's pictures (1.0.1): its base (Layout.image) in the rim or bare, its knob (Layout.knob) on its
-// disc or bare; either missing, the port's own
+// The corner band's picture: fitted in the band's box, from its left end along the bottom to its top up the side
+// (a picture of the band's shape, transparent inside its bend, fills it), darker while any of its parts is pressed
+bool pic_band(ImDrawList *dl, const Layout &l, Geo g, int mask, float a) {
+    ImTextureData *t = pic_of(l, C_CORNER);
+    if (!t) return false;
+    float th = g.r * BAND_T, x0 = g.c.x - BAND_LEFT * g.r - th, x1 = g.c.x + g.r + th, y0 = g.c.y - BAND_UP * g.r - th, y1 = g.c.y + g.r + th;
+    pic_fit(dl, t, ImVec2((x0 + x1) * .5f, (y0 + y1) * .5f), (x1 - x0) * .5f, (y1 - y0) * .5f, pic_tint(mask ? 1.0f : 0.0f, a));
+    return true;
+}
+// The stick with the player's pictures: its base (Layout.image) and its knob (Layout.knob), each alone in its place (the
+// knob pressed while the thumb is on it); either missing, the port's own of that one
 void stick_of(ImDrawList *dl, const Layout &l, ImVec2 base, ImVec2 knob, float r, float a, bool on) {
     ImTextureData *tb = pic_texture(l.image[C_STICK]), *tk = pic_texture(l.knob);
     if (!tb && !tk) {
         stick(dl, base, knob, r, a, on);
         return;
     }
-    bool bare = l.bare >> C_STICK & 1;
     float kr = r * KNOB;
-    if (!tb) stick_base(dl, base, r, a, on);
-    else if (bare) pic_in_rect(dl, tb, Rect{base.x - r, base.y - r, base.x + r, base.y + r, true}, a);
-    else stick_rim(dl, base, r, a, on), pic_in_circle(dl, tb, base, r * .9f, a);
-    if (!tk) stick_knob(dl, knob, kr, a, on);
-    else if (bare) pic_in_rect(dl, tk, Rect{knob.x - kr, knob.y - kr, knob.x + kr, knob.y + kr, true}, a);
-    else disc(dl, knob, kr, on, a), pic_in_circle(dl, tk, knob, kr * .84f, a);
+    if (tb) pic_only(dl, tb, base, r, 0.0f, a);
+    else stick_base(dl, base, r, a, on);
+    if (tk) pic_only(dl, tk, knob, kr, on ? 1.0f : 0.0f, a);
+    else stick_knob(dl, knob, kr, a, on);
 }
-// The sprint lock's circle with a picture of the player's (1.0.1), faded in and lit as the port's (lock_circle)
+// The sprint lock's circle with a picture of the player's, faded in as the port's (lock_circle): pressed while armed,
+// pulsing while locked
 void lock_circle_of(ImDrawList *dl, const Layout &l, ImVec2 c, float cr, float a, bool armed, bool locked) {
     ImTextureData *t = a > 0.0f ? pic_texture(l.image[C_RUNLOCK]) : nullptr;
     if (!t) {
         lock_circle(dl, c, cr, a, armed, locked);
         return;
     }
-    bool lit = armed || locked;
-    if (l.bare >> C_RUNLOCK & 1) pic_bare(dl, t, c, cr, lit, a);
-    else {
-        disc(dl, c, cr, lit, a);
-        pic_in_circle(dl, t, c, cr * .84f, a);
-        if (lit) dl->AddCircle(c, cr * .84f, fade(GLOW, a * .8f), 40, cr * .07f);
-    }
-    if (locked) dl->AddCircle(c, cr * 1.18f, fade(GLOW, a * (.6f + .3f * sinf(SDL_GetTicksNS() / 1e9f * 4))), 32, cr * .1f);
+    pic_only(dl, t, c, cr, locked ? pic_pulse() : armed ? 1.0f : 0.0f, a);
 }
 // The mark of a button a tap holds (Layout.hold): a small padlock at its upper left, closed and lit while it is held
 void hold_mark(ImDrawList *dl, Geo g, bool held, float a) {
@@ -4608,11 +4766,20 @@ void hold_mark(ImDrawList *dl, Geo g, bool held, float a) {
     dl->AddCircle(c, s * .62f, fade(held ? GLOW : GOLD, a), 20, s * .08f);
     padlock(dl, ImVec2(c.x, c.y - s * .04f), s * .62f, held, fade(held ? GLOW : INK, a), fade(DEEP, a));
 }
+// The parts of control i lit for buttons a slide kept ([Touch] SlideBoth, GuardSlide): the pill's halves and the band's three parts by
+// their buttons, a button whose own buttons are all kept
+int kept_mask(int i, uint64_t keep) {
+    if (i == C_ATTACK) return (keep & B(BTN_A) ? 1 : 0) | (keep & B(BTN_X) ? 2 : 0);
+    if (i == C_CORNER) return (keep & B(BTN_A) ? 1 : 0) | (keep & B(BTN_X) ? 2 : 0) | (keep & B(BTN_R) ? 4 : 0);
+    if (!slide_keeps(i) || is_combo(i)) return 0;
+    uint64_t own = DEFS[i].buttons;
+    return own && (keep & own) == own ? 1 : 0;
+}
 void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, float h, const State &s, float a) {
     Geo g = place(l, i, w, h);
     bool held = (s.latched >> i & 1) != 0;  // (a tap holds it down: lit)
     if (i == C_ITEML || i == C_ITEMR) {  // (the editor's: in a hunt they go with the item bar)
-        if (!pic_face(dl, font, l, i, g, false, "", a, h)) item_arrow_disc(dl, g, i == C_ITEML ? -1 : 1, false, a);
+        if (!pic_face(dl, l, i, g, 0.0f, a)) item_arrow_disc(dl, g, i == C_ITEML ? -1 : 1, false, a);
         return;
     }
     if (i == C_RUNLOCK) {  // (the editor's: in a hunt it shows as the thumb pushes toward it, with the stick)
@@ -4636,7 +4803,8 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                 v = std::clamp((d - .9f * g.r) / reach, 0.0f, 1.0f) * std::clamp((up - LOCK_UP) / .15f, 0.0f, 1.0f);
             }
             lock_circle_of(dl, l, lg.c, lg.r, a * v, s.run_over, s.run_lock);
-            if (s.run) {  // (running: a gold ring round the rim, and streaks behind the knob)
+            if (s.run && !pic_texture(l.image[C_STICK])) {  // (running: a gold ring round the rim, and streaks behind the
+                                                            // knob; not round a picture of the player's)
                 dl->AddCircle(base, g.r * 1.12f, fade(GLOW, a * .85f), 48, g.r * .07f);
                 float dx = knob.x - s.bx, dy = knob.y - s.by, n = std::max(1.0f, hypotf(dx, dy));
                 dx /= n, dy /= n;
@@ -4664,15 +4832,25 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                 thumb = d > m ? ImVec2(g.c.x + dx / d * m, g.c.y + dy / d * m) : ImVec2(f.x, f.y);
             }
             if (i == C_HEAVY && f.ctl == C_LIGHT && f.part) mask |= 1;  // (the seam between them: both lit)
-            if (f.keep & B(BTN_R)) mask |= i == C_R ? 1 : i == C_CORNER && f.ctl == C_CORNER ? 4 : 0;  // (a guard kept)
+            if (f.keep && f.ctl != i) mask |= kept_mask(i, f.keep);  // (what a slide kept: lit where it was pressed)
+            else if (f.keep & B(BTN_R) && i == C_CORNER) mask |= 4;  // (the band's own guard, kept onto its attacks)
         }
     if (of_mpad(i) && s.lit_ctl == i && SDL_GetTicksNS() < s.lit_until) mask |= i == C_MPAD ? s.lit_part : 1;  // (a tap)
     if (held && !s.edit) mask |= 1;
-    if (i == C_ATTACK) { pill(dl, font, g, mask, a); return; }
-    if (i == C_MPAD) { menu_pad(dl, g, thumb, mask, a, thumb.x != g.c.x || thumb.y != g.c.y); return; }
+    if (i == C_ATTACK) {
+        if (!pic_pill(dl, l, g, mask, a)) pill(dl, font, g, mask, a);
+        return;
+    }
+    if (i == C_MPAD) {  // (a picture of the player's leans toward the direction pressed, as a d-pad's)
+        if (!pic_face(dl, l, i, g, mask ? .6f : 0.0f, a, pic_lean(mask, g.r))) menu_pad(dl, g, thumb, mask, a, thumb.x != g.c.x || thumb.y != g.c.y);
+        return;
+    }
     if (is_tab(i)) { tab(dl, font, g, i == C_ML || i == C_MZL, mpad_label(i), mask != 0, a); return; }
-    if (i == C_CORNER) { corner_band(dl, font, g, mask, a); return; }
-    if ((i == C_HEAVY || i == C_LIGHT) && pic_face(dl, font, l, i, g, mask != 0, DEFS[i].letter, a, h)) return;
+    if (i == C_CORNER) {
+        if (!pic_band(dl, l, g, mask, a)) corner_band(dl, font, g, mask, a);
+        return;
+    }
+    if ((i == C_HEAVY || i == C_LIGHT) && pic_face(dl, l, i, g, mask ? 1.0f : 0.0f, a)) return;
     if (i == C_HEAVY || i == C_LIGHT) {  // (a great sword, a small one, as on the pill)
         float r = mask ? g.r * .95f : g.r;
         disc(dl, g.c, r, mask != 0, a);
@@ -4699,7 +4877,7 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
         char label[32];
         if (is_combo(i)) combo_label(i, label, sizeof label);
         else snprintf(label, sizeof label, "%s", DEFS[i].letter);
-        if (pic_face(dl, font, l, i, g, mask != 0, label, a, h)) return;
+        if (pic_face(dl, l, i, g, mask ? 1.0f : 0.0f, a)) return;
         float r = mask ? g.r * .95f : g.r, fs = r * 1.05f;
         disc(dl, g.c, r, mask != 0, a);
         ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, label);
@@ -4710,6 +4888,11 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
     }
     float r = mask ? g.r * .95f : g.r;
     if (i == C_RUN && s.drawn == 1 && !s.edit) a *= .45f, mask = 0;  // (the weapon out: dimmed, it presses nothing)
+    {  // (a picture of the player's: it alone, pressed; the Lock-on button's lit while the lock-on is on, pulsing while the
+       // camera follows the monster)
+        bool on = i == C_LOCKON && s.lock && !s.edit;
+        if (pic_face(dl, l, i, g, mask ? 1.0f : on ? (mousecam_lock_following() ? pic_pulse() : .5f) : 0.0f, a)) return;
+    }
     disc(dl, g.c, r, mask != 0, a);
     if (i == C_RUN && s.run) dl->AddCircle(g.c, g.r * 1.16f, fade(GLOW, a * (.6f + .3f * sinf(SDL_GetTicksNS() / 1e9f * 4))), 40, g.r * .09f);
     // (the lock-on, as the MH4U port's: a ring round its button while it is on, pulsing while the camera follows the
@@ -4723,7 +4906,6 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                                           : i == C_L && !s.edit && camera_buttons() == B(BTN_ZL) ? "ZL" : DEFS[i].letter);
     if (is_ranged(i)) ranged_face(i, s.edit ? 1 : s.drawn, &ic, letter, sizeof letter);
     bool lit = mask || (i == C_LOCKON && s.lock && !s.edit);  // (the Lock-on button lit while the lock-on is on)
-    if (pic_face(dl, font, l, i, g, lit, strchr("v<>", letter[0]) && letter[0] ? "" : letter, a, h)) return;
     icon(dl, ic, g.c, i == C_RFIRE ? r * .94f : r, fade(lit ? GLOW : INK, a), fade(DEEP, a));
     float br = std::max(r * (i == C_RFIRE ? .22f : .3f), .021f * h);  // (the large one's as large as the others')
     ImVec2 bc(g.c.x + r * .7f, g.c.y + r * .7f);
@@ -4731,11 +4913,12 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
     else if (i != C_MMINUS) badge(dl, font, bc, br, letter, a);  // (the small Minus: its glyph)
 }
 
-// A control, and over it the mark of a button a tap holds: in the editor, and while it is held
+// A control, and over it the mark of a button a tap holds: in the editor, and while it is held (in play not over a
+// picture of the player's, which shows it pressed itself)
 void control(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w, float h, const State &s, float a) {
     control_face(dl, font, l, i, w, h, s, a);
     bool held = (s.latched >> i & 1) != 0;
-    if ((l.hold >> i & 1) && holdable(i) && (s.edit || held)) hold_mark(dl, place(l, i, w, h), held && !s.edit, a);
+    if ((l.hold >> i & 1) && holdable(i) && (s.edit || (held && !pic_of(l, i)))) hold_mark(dl, place(l, i, w, h), held && !s.edit, a);
 }
 
 // a plate in the game's window style: wine-dark, a black edge, red and green rules top and bottom
@@ -5009,12 +5192,10 @@ void draw_pictures(ImDrawList *dl, ImFont *font, const State &s, float w, float 
     if (!s.img_n) snprintf(line, sizeof line, "%s", T("No pictures yet: Add pictures copies yours in (PNG or JPG). They are your own responsibility."));
     else snprintf(line, sizeof line, T("Page %d of %d. The pictures you add are your own responsibility."), s.img_page + 1, pages);
     window_line(dl, font, win, say_y, h, line, INK);
-    bool bare = c >= 0 && (s.layout.bare >> c & 1);
-    const char *const LABEL[IA_COUNT] = {"No picture", "<", ">", bare ? "Frame: Off" : "Frame: On",
-                                         s.img_knob ? "For: knob" : "For: base", "Add pictures", "Close"};
+    const char *const LABEL[IA_COUNT] = {"No picture", "<", ">", s.img_knob ? "For: knob" : "For: base", "Add pictures", "Close"};
     for (int i = 0; i < IA_COUNT; i++) {
         bool off = (i == IA_NONE && (c < 0 || !img_target(s, c)[0])) || ((i == IA_PREV || i == IA_NEXT) && pages < 2) ||
-                   (i == IA_KNOB && c != C_STICK) || (i == IA_FRAME && c < 0);
+                   (i == IA_KNOB && c != C_STICK);
         window_button(dl, font, btn[i], h, T(LABEL[i]), s.img_btn == i, off, false);
     }
 }
@@ -5356,6 +5537,18 @@ bool under_mpad(const Layout &l, int i, float w, float h) {
     return hypotf(g.c.x - p.c.x, g.c.y - p.c.y) < p.r + g.r;
 }
 
+// A long press where no control is, on its way ([Touch] HoldToHide): from HOLD_RING a gold ring round the finger fills
+// until HOLD_HIDE, when the controls hide or show
+void hold_ring(ImDrawList *dl, const State &s, float h, uint64_t now) {
+    for (const Finger &f : s.f) {
+        if (f.kind != F_CAMERA || !f.hold_ok || f.moved || now - f.t0 < HOLD_RING || now - f.t0 >= HOLD_HIDE) continue;
+        float p = (float)(now - f.t0 - HOLD_RING) / (float)(HOLD_HIDE - HOLD_RING), r = .055f * h;
+        ImVec2 c(f.x, f.y);
+        dl->AddCircle(c, r, IM_COL32(28, 20, 15, 150), 40, .012f * h);
+        dl->PathArcTo(c, r, -PI * .5f, -PI * .5f + 2 * PI * p, 40);
+        dl->PathStroke(fade(GLOW, .9f), ImDrawFlags_None, .008f * h);
+    }
+}
 // (MHGU_PERF_OVERLAY_REUSE, runtime/overlay.cpp) Everything touch_draw's picture is made of, for one frame: the controls'
 // state (its clocks that draw nothing cleared, those that do as what they draw), what shows and where (in_mode, the HUD
 // parts' places), the settings (their generation), the weapon's layout, the game's buttons named on the badges, the
@@ -5386,7 +5579,7 @@ bool draw_key(float w, float h, DrawKey *k) {
     bool idle = untouched > 5.0f;
     k->pad_a = s.menu ? std::min(1.0f, (float)(now - s.menu_on_ns) / (float)MPAD_IN) * mpad_fade(now) : 0.0f;
     k->mpad_out = s.menu ? mpad_fade(now) : 0.0f;
-    if (s.edit || s.edit_request || s.stick_on || s.run || s.run_lock || s.run_free || s.lock || g_lock_mark)
+    if (s.edit || s.edit_request || s.stick_on || s.run || s.run_lock || s.run_free || s.lock || g_lock_mark || now < s.hint_until)
         return false;
 #ifndef __ANDROID__
     if (s.hud_edit || g_hud_edit) return false;
@@ -5395,8 +5588,9 @@ bool draw_key(float w, float h, DrawKey *k) {
         if (f.kind != F_NONE) return false;
     if ((k->pad_a > 0 && k->pad_a < 1) || (k->mpad_out > 0 && k->mpad_out < 1)) return false;
     // (clocks: those that draw something as what they draw; the others, which move while nothing changes, cleared)
-    s.last_ns = s.menu_on_ns = s.item_flash = s.art_flash = s.lit_until = 0;
-    s.hunt_ns = s.hunter_ns = s.cam_ns = s.step_ns = s.others_ns = s.stuck_ns = 0;
+    s.last_ns = s.menu_on_ns = s.item_flash = s.art_flash = s.lit_until = s.hint_until = 0;
+    s.hunt_ns = s.hunter_ns = s.cam_ns = s.step_ns = s.others_ns = s.stuck_ns = s.smooth_ns = 0;
+    s.smooth_x = s.smooth_y = 0;  // (the camera's, which the controls don't draw)
     k->flags = (int)g_visible | (int)g_gear_only << 1 | (int)overlay_menu_open() << 2 | (int)lit << 3 | (int)item_lit << 4 |
                (int)art_lit << 5 | (int)idle << 6 | (int)menu_pages_zl() << 7;
     k->w = w, k->h = h;
@@ -5523,9 +5717,9 @@ extern "C" void touch_draw(float w, float h) {
     if (g_reuse_on) g_drawn_ok = draw_key(w, h, &g_drawn);  // (MHGU_PERF_OVERLAY_REUSE: what this frame is made of)
     pics_sweep();  // (the players' pictures not shown for a while given back)
 #ifndef __ANDROID__
-    if ((!g_visible && !g_gear_only && !g_lock_mark && !g_hud_edit) || overlay_menu_open()) return;
+    if ((!g_visible && !g_gear_only && !g_lock_mark && !g_hud_edit && !g_hold_hint && !g_hold_ring) || overlay_menu_open()) return;
 #else
-    if ((!g_visible && !g_gear_only && !g_lock_mark && !g_text_plate) || overlay_menu_open()) return;
+    if ((!g_visible && !g_gear_only && !g_lock_mark && !g_text_plate && !g_hold_hint && !g_hold_ring) || overlay_menu_open()) return;
 #endif
     State s;
     {
@@ -5570,6 +5764,22 @@ extern "C" void touch_draw(float w, float h) {
             text_center(dl, font, .036f * h, ImVec2((r.x0 + r.x1) * .5f, (r.y0 + r.y1) * .5f), INK, T("Keyboard"), w);
         }
         if (g_gear_only) control(dl, font, s.layout, C_SETTINGS, w, h, s, a * .75f);
+        hold_ring(dl, s, h, now);
+        if (now < s.hint_until) {  // (hidden by a long press: how to show them again - the first time in a session also
+                                   // where to turn it off -, a few seconds, small, fading out)
+            g_language = config_editable().language;
+            const char *t1 = T("Long-press an empty spot to show the controls");
+            const char *t2 = s.hint_first ? T("Settings › Controls › Touch controls can turn this off.") : nullptr;
+            float fs = .026f * h, k = std::min(1.0f, (s.hint_until - now) / 600e6f);
+            float tw = std::max(font->CalcTextSizeA(fs, FLT_MAX, 0, t1).x, t2 ? font->CalcTextSizeA(fs * .85f, FLT_MAX, 0, t2).x : 0.0f);
+            if (tw > w * .6f) fs *= w * .6f / tw, tw = w * .6f;  // (a narrow screen, a long line: smaller)
+            float lines = t2 ? 2.15f : 1.0f;
+            ImVec2 c(w * .5f, .24f * h);
+            dl->AddRectFilled(ImVec2(c.x - tw * .5f - fs * .6f, c.y - fs * .8f), ImVec2(c.x + tw * .5f + fs * .6f, c.y + fs * (lines * 1.0f - .2f)),
+                              fade(IM_COL32(28, 20, 15, 255), .78f * k), fs * .35f);
+            text_center(dl, font, fs, c, fade(GOLD, k), t1, w);
+            if (t2) text_center(dl, font, fs * .85f, ImVec2(c.x, c.y + fs * 1.15f), fade(INK, k), t2, w);
+        }
         if (g_lock_mark && target.ok) lock_mark(dl, target, 1.0f, h, now);
         Rect arts = zone_rect(z, HP_ARTS, w, h);  // (a Hunter Art tapped: its row lit a moment, as with them shown)
         float rows[3][2];
@@ -5606,7 +5816,7 @@ extern "C" void touch_draw(float w, float h) {
             int c = d < 0 ? C_ITEML : C_ITEMR;
             Geo g = place(s.layout, c, w, h);
             // (a picture of the player's on it, as the editor shows: until 1.0.1 only the editor drew it)
-            if (!pic_face(dl, font, s.layout, c, g, lit, "", a, h)) item_arrow_disc(dl, g, d, lit, a);
+            if (!pic_face(dl, s.layout, c, g, lit ? 1.0f : 0.0f, a)) item_arrow_disc(dl, g, d, lit, a);
         }
     } else if (item.ok) {
         float cy = (item.y0 + item.y1) * .5f, ch = .03f * h;
@@ -5623,4 +5833,5 @@ extern "C" void touch_draw(float w, float h) {
         if (s.art_row < nr)
             dl->AddRect(ImVec2(arts.x0, rows[s.art_row][0]), ImVec2(arts.x1, rows[s.art_row][1]), fade(GLOW, a), .01f * h, 0, .005f * h);
     }
+    hold_ring(dl, s, h, now);
 }

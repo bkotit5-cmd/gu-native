@@ -190,6 +190,13 @@ screen's **Build on this phone** when the game code is missing or from another v
   left as it was if the system refuses): Zig 0.13's clang compiles one very large MH4U function into one of a few
   objects depending on where its memory is (the same object 16 times out of 16 in a shell on the RG406V with it; inside
   the app two MH4U builds still differed in that one function, so it doesn't rule that out).
+- **Start over** (1.0.1, Discord: a half-done build to clear): the builder screen's button (`BuilderService.startOver`, shown
+  while `halfDone`: a work folder, a run cut or that failed or was cancelled; never during a build), asked first. The work
+  folder (the translated C, the objects, `inputs.txt`, Zig's cache) is renamed aside in one step (`work.trash-<time>`) and
+  deleted on a thread of its own, and `state.txt` goes, so the next build starts from the beginning and no run finds half a
+  folder; the downloaded tools stay unless the player picks "Start over and delete the tools" (the whole builder folder, as
+  `builder.trash-<time>`). A deletion cut short is finished at the next start over or build (`dropTrash`). The game folder and
+  a library already made are not touched.
 - **Heat and battery** (`BuilderService.watchHeat`, every 5 s): thermal status moderate, only two compilers run (the
   others SIGSTOP'd); severe or worse, the whole build waits until light; 15 % battery or less and not charging, it waits.
   Compilers at once: the free memory / 300 MB, at most the cores, half after a run that stopped while compiling.
@@ -467,11 +474,38 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   on forward (the stick held full up: the camera steers) until the stick or the lit circle is touched again, the weapon
   comes out, a menu opens or the hunter isn't played (an area change too: `run_end` logs why under MHGU_TOUCH_LOG). It locks
   for a thumb that landed anew (not in the circle) or came back inside the rim since a lock ended (`run_armed`). X holds the run's R back for 400 ms: a thumb at the rim through a sheathe started R in the same update
-  as an X + A, and the game read R + X + A (#151). Off: a Run button (`run_button` in touch_layout.txt: the old left-side
+  as an X + A, and the game read R + X + A (#151). But X + A in a run whose R was held 400 ms already (a sprint) keeps R
+  (`run_t0`): sprinting with R held and pressing X + A is the game's R + X + A, the Charge Blade's draw into the axe
+  (sheathed X + A alone does nothing for it; 0.1.8 gave it, 0.1.9 to 1.0 didn't: Discord, 1.0.1). X alone still lets R go
+  (with R held the draw attack is the same one). `MHGU_LOG_MOVES` shows it: 0010:000 the axe draw, 0010:033 the
+  forward slash. Off: a Run button (`run_button` in touch_layout.txt: the old left-side
   `run` line every saved layout has is dropped), held only, dimmed with the weapon out, hidden in menus; slid onto an attack
   it is that attack; in a corner layout saved before it, it starts in the band's hollow.
   `[Touch] GuardSlide` (off by default): a thumb from Guard keeps R as it slides onto the attacks (`Finger.keep`), and is
   R + Y on the item bar.
+  `[Touch] SlideBoth` (on by default, 1.0.1; "Slide between buttons: both pressed", the MH4U port's the same name and
+  default): a thumb that slides from one of the game's face or shoulder buttons onto another keeps the first pressed with it,
+  as two fingers would (`slide_both`, `slide_keeps`, `slide_to`): Guard onto Evade as onto the attacks (R + B, Discord: "like
+  R to X"), Evade onto an attack, one attack onto the other, the emulator-style layout's A, B, X, Y and shoulders, the
+  combined buttons, a bow's or gun's reload, crouching fire, evade and sheathe; each one slid over stays pressed, and slid
+  back onto the one it landed on (`Finger.home`) it is that one alone again. The weapon out or sheathed, never in the game's
+  menus. Not the run (onto an attack its R goes: a draw attack), the stick, the d-pads, the arrows, nor a bow's or gun's fire
+  and aim (their slides aim). Off: 1.0's slides exactly (Guard and Evade slid onto the attacks become the attack; GuardSlide
+  keeps R).
+- `[Touch] HoldToHide` (on by default, 1.0.1, Discord: the controls off for a cutscene took the menu): a finger that lands
+  where no control is (not a control, the item bar, the Hunter Arts, the stick's reach), the only one down, held still
+  `HOLD_HIDE` (750 ms; a gold ring fills round it from `HOLD_RING`, 250 ms: `hold_ring`) - moved past the drag's slop of 0.025
+  screen heights, or joined by any other finger, it is not (`Finger.hold_ok`) - hides every touch control, the settings
+  button too (`State.user_hidden`); then every finger is the camera's and another long press anywhere shows them again. The
+  HUD keeps the touch controls' arrangement meanwhile (`touch_visible`); the editor or the setting off shows them. Each time
+  they hide "Long-press an empty spot to show the controls" shows for 2.5 s, the first time in a session 5 s with where to
+  turn it off (`hint_until`, `g_hold_hint`). The MH4U port has the same times. A controller's hiding is apart: a long press
+  then changes nothing.
+- `[Touch] CameraSmoothing` (0 by default, 0..100; 1.0.1, gu-native #244): a drag's turn of the camera eased in, a part of
+  what is left each pass by the time passed (e^(-dt / tau), tau 12 to 152 ms; `State.smooth_x`), every count still given.
+  `[Controls] CameraShake` (0 by default, 0..100): while the game rumbles (`input_rumble`), the hunt camera's smoothed angles
+  (+0x9e0 / +0x9e4) get a random nudge each update (1.2 degrees at 100 and a full rumble), the angles it heads for untouched,
+  so the game's own smoothing pulls it back (`hle/mousecam.c shake`); `shaketest <ms>` in the control file fakes a rumble.
 - The item bar's long press (#109): bit 0 of the hunter's word +0x2770 is the bar open (its neighbouring items shown); the
   item bar's handler clears it and sets it while L is held (vfuncs +0x25c / +0x260 / +0x264 test, set and clear its bits).
   `itembar_hold` sets it after the handler, past the same checks, with no L pressed (L would turn the camera).
@@ -1023,8 +1057,12 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   full) is handed to `overlay_retire_texture`, destroyed a second later and read again when shown; the overlay makes no texture
   past the pool and leaves out the draws of one with no descriptor (`snap_textureless`). The backend's `AddTexture` returns no
   set when the allocation fails (a two-line change in `third_party/cimgui/imgui/backends/imgui_impl_vulkan.cpp`). Since 1.0.1
-  the stick (its base; `image_knob` its knob), the d-pads and the sprint lock's circle take pictures too, and a control's
-  picture may go without the round frame behind it, whole and uncut (`bare <key>`, the window's Frame button).
+  every control the editor places takes a picture (`image_ok`): the round buttons, the stick (its base; `image_knob` its
+  knob), both d-pads, the sprint lock's circle, the item bar's arrows, the attacks' pill (drawn along it, tilted: `pic_pill`),
+  the corner band (in its box: `pic_band`) and the menu pad; and a picture is the control's whole look (`pic_only`, the
+  owner's call: "que solo quede el png"): whole, fitted in the control's square, no disc, ring, badge or glow; pressed, 8 %
+  smaller and 25 % darker; a d-pad's or the menu pad's leans toward the direction pressed; a state that lasts (the run
+  locked, the lock-on following) pulses it. 1.0.1's first test builds' `bare <key>` lines are read and left out.
 - Phone tests of the touch controls without the player's save: `MHGU_SAVE_DIR` to a copy and `MHGU_CONFIG` to a copy of the ini
   (`Controls = On`). On the Moto g06 adb can't read the app's save files (the app's uid, rw-rw----): copy a save from another phone's backup.
   A folder the game made in an `MHGU_SAVE_DIR` (a new game's save_0) is the app's and adb can't remove it.
@@ -1129,8 +1167,8 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
     band, stick, d-pads, menu pad, arrows, settings, Lock-on or aim); in play a tap latches what it presses (`State.latched`,
     `latch_btn`, ORed in `recompute_held`), lit with a closed padlock, the next tap lets go; all let go with the controls
     hidden, the editor, the background, or the control leaving the screen (Run in a menu, the ranged layout's).
-  - Pictures (S06): the port keeps its one button style; `image <key> <file>` puts a player's picture on a round button
-    (`image_ok`), its letter's badge kept. Read with SDL's PNG/BMP loader, at most 256 px, as ImGui user textures
+  - Pictures (S06): `image <key> <file>` puts a player's picture on a control (`image_ok`), drawn instead of the control
+    (1.0.1; up to 1.0 on the round buttons only, cut round on the button's disc, its letter badged over it). Read with SDL's PNG/BMP loader, at most 256 px, as ImGui user textures
     (`pic_texture`: `RegisterUserTexture`, `GetTexRef`, uploaded by the overlay with the font). Added by the editor's Add
     pictures or the settings' Button images: Android's `PicturesActivity` (any picture Android decodes, made PNG at 256 px),
     a desktop's file dialog (`pc_import_pictures`, PNG and BMP).
@@ -1152,6 +1190,11 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   Frontier's sky and the cooking pot's steam in Bherna stay with Effects off: part of the stage's models, not effect units.
   `MHGU_EFFECTS=0|1` overrides the ini in a test run. The scripts that found the classes and vtables (from a decompressed
   `main` and `generated/main`) are in the 1.0 work notes, outside the repository (dtis.py, props.py, strrefs.py).
+- The frame rate limit (`[Performance] FPS`) goes down to `FPS_MIN`, 15, since 1.0.1 (30 before; players with the weakest
+  phones asked for 20): the menu's list has 15 and 20. The engine's step is in 60 FPS frames, 4 at 15 (it caps them at 16):
+  on the PC, quest 101, the touch stick held 4 s walked the hunter 1544 units at 15 and 1576 at 60, the same 1720 once he
+  stopped. At 15 a frame is 67 ms, longer than the touch controls' 70 ms tap: `min_press` holds a tap 1.15 frames then, and
+  a drag's menu steps leave two of those between them.
 - 3D resolution (1.0): `[Display] RenderScale` takes any percent from `RENDER_SCALE_MIN` (10) to 100, the 3D picture never
   under 320x180 (`config_load`). The menu's row (`scale_row`) is a number: left / right one percent, a tap the usual ones
   (100 ... 20); on a phone the list ends with Exact size, which sets `[Display] RenderResolution` to the percent's size and

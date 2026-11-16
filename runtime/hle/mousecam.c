@@ -91,6 +91,7 @@ float touch_aim_pitch(void);           // (the touch aim's slide up or down sinc
 static volatile uint64_t g_turn_ns;   // the game's last turn (camera_stick)
 static uint32_t g_cam_seen;
 static void mouse_turn(uint32_t cam, uint32_t invert, float dx, float dy, bool fresh);
+static void shake(uint32_t cam);
 #define ZONE       0x1054u       // (u8, of a hunter and of a monster: which zone of the map it is in)
 #define PL_HEADING 0x14a0u
 #define PL_AIM     0x14b8u       // (float: the aim's pitch)
@@ -494,6 +495,7 @@ static void camera_stick(Cpu *c) {
         lock_follow(cam, dt > 0.1f ? 0.1f : dt);
     }
     mouse_turn(cam, invert, dx, dy, !seen || now - seen >= ACTIVE_NS);
+    shake(cam);
     left_yaw = sane(cam) ? LD32(cam + QC_YAW_TO) & 0xffffu : ~0u;
 }
 
@@ -519,6 +521,45 @@ static void mouse_turn(uint32_t cam, uint32_t invert, float dx, float dy, bool f
         ST32(cam + QC_PITCH_TO, (uint32_t)next & 0xffffu);
         ST32(cam + QC_PITCH_NOW, (uint32_t)now_p & 0xffffu);
         if (next != to + ip) rest_pitch = 0;  // (at the limit)
+    }
+}
+
+// [Controls] CameraShake (1.0.1, gu-native #244: "camera shake strength"): while the game rumbles (input_rumble: the motors'
+// strength it asks for at a roar, a heavy blow, a monster landing - what the phone's vibrator and a controller play), the
+// hunt camera shakes, as strongly as the rumble times the setting. Each update its smoothed angles (+0x9e0 / +0x9e4, where
+// it looks) are nudged by a random amount; the angles it heads for (+0x9e8 / +0x9ec) are untouched, so the game's own
+// smoothing pulls it back - the shake dies out with the rumble - and the player's turns, the lock-on and the turn detection
+// (camera_stick) see nothing of it. Only where the hunt camera's handler runs (a hunt, the player free to turn it). 0, the
+// default: nothing is read or written. A rumble's strongest motor reads about 55,000 of 65,535 in the players' logs
+#define SHAKE_DEG 1.2f  // (each update's nudge at 100 and a full rumble, degrees: the camera wanders about 1.5 degrees)
+static volatile uint64_t g_shake_test_until;  // (mousecam_shake_test: plat_now_ns)
+void mousecam_shake_test(int ms) {
+    g_shake_test_until = plat_now_ns() + (uint64_t)(ms > 0 ? ms : 0) * 1000000ull;
+    LOG("[camlog] shake test: a full rumble for %d ms\n", ms);
+}
+static void shake(uint32_t cam) {
+    int k = config_live_camera_shake();
+    if (k <= 0 || !sane(cam)) return;
+    uint32_t v = plat_now_ns() < g_shake_test_until ? 0xffffffffu : input_rumble();
+    if (!v) return;
+    float lo = (float)(v >> 16) / 65535.0f, hi = (float)(v & 0xffffu) / 65535.0f, m = lo > hi ? lo : hi;
+    float amp = m * (float)(k > 100 ? 100 : k) / 100.0f * SHAKE_DEG * (65536.0f / 360.0f);
+    static uint32_t seed = 0x9e3779b9u;  // (xorshift: a nudge in -1..1 each way)
+    float r[2];
+    for (int i = 0; i < 2; i++) {
+        seed ^= seed << 13, seed ^= seed >> 17, seed ^= seed << 5;
+        r[i] = (float)(seed & 0xffffu) / 32767.5f - 1.0f;
+    }
+    int iy = (int)lrintf(r[0] * amp), ip = (int)lrintf(r[1] * amp * .7f);  // (up and down a little less than across)
+    if (iy) ST32(cam + QC_YAW_NOW, (LD32(cam + QC_YAW_NOW) + (uint32_t)iy) & 0xffffu);
+    if (ip) ST32(cam + QC_PITCH_NOW, (uint32_t)clamp_pitch((int16_t)LD32(cam + QC_PITCH_NOW) + ip) & 0xffffu);
+    static uint64_t said;
+    if (ENV("MHGU_CAMLOG") || plat_now_ns() < g_shake_test_until) {
+        uint64_t now = plat_now_ns();
+        if (now - said > 100000000ull)
+            LOG("[camlog] shake: rumble %08x, setting %d, nudge yaw %d pitch %d (now %d / %d, to %d / %d)\n", v, k, iy, ip,
+                (int)(LD32(cam + QC_YAW_NOW) & 0xffff), (int16_t)LD32(cam + QC_PITCH_NOW), (int)(LD32(cam + QC_YAW_TO) & 0xffff),
+                (int16_t)LD32(cam + QC_PITCH_TO)), said = now;
     }
 }
 

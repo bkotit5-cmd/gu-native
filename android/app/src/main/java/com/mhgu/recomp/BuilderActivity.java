@@ -43,7 +43,7 @@ public class BuilderActivity extends Activity {
     private LinearLayout stagesBox;
     private TextView summary, status, detail, rightTitle;
     private ProgressBar bar;
-    private Button go, close, free;
+    private Button go, close, free, again;
     private final Runnable refresh = this::show;
 
     @Override
@@ -181,6 +181,10 @@ public class BuilderActivity extends Activity {
         row.addView(go, size);
         close = Look.button(this, "", false);
         close.setOnClickListener(v -> leave());
+        // (Start over, 1.0.1: a build half done forgotten, from the beginning next time; the tools kept unless chosen)
+        again = Look.button(this, es ? "Empezar de cero" : "Start over", false);
+        again.setOnClickListener(v -> startOver());
+        row.addView(again, new LinearLayout.LayoutParams(size));
         row.addView(close, new LinearLayout.LayoutParams(size));
         row.setPadding(0, 0, 0, Look.dp(this, 10));
         whole.addView(row);
@@ -321,6 +325,7 @@ public class BuilderActivity extends Activity {
             go.setEnabled(ready);
         }
         close.setText(active ? (es ? "Ocultar" : "Hide") : (es ? "Volver" : "Back"));
+        again.setVisibility(BuilderService.halfDone(this) ? View.VISIBLE : View.GONE);
         long used = active ? 0 : BuilderTools.used(this);
         free.setText((es ? "Borrar las herramientas (" : "Delete the tools (") + mb(used) + ")");
         free.setVisibility(used > (1 << 20) ? View.VISIBLE : View.GONE);
@@ -389,6 +394,30 @@ public class BuilderActivity extends Activity {
         Intent run = new Intent(this, BuilderService.class).putExtra(BuilderService.EXTRA_GAME, folder.getAbsolutePath());
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(run);
         else startService(run);
+    }
+
+    /** Start over: what the build has done is deleted, asked first; the tools stay unless the player deletes them too. */
+    private void startOver() {
+        if (BuilderService.job.active()) return;
+        File work = BuilderService.work(this);
+        long size = work.exists() ? BuilderTools.sizeOf(work) : 0;
+        Look.notice(this, es ? "¿EMPEZAR DE CERO?" : "START OVER?", es
+                        ? "Se borra lo que esta creación lleva hecho (" + mb(size) + "), y la próxima empieza desde el principio. Tu "
+                          + "carpeta del juego, sus archivos y el código del juego que ya hayas creado quedan como están. Las "
+                          + "herramientas descargadas también quedan, salvo que elijas borrarlas (una creación posterior las vuelve a "
+                          + "descargar)."
+                        : "What this build has done so far is deleted (" + mb(size) + "), and the next one starts from the beginning. "
+                          + "Your game folder, its files and any game code already made stay as they are. The downloaded tools stay "
+                          + "too, unless you choose to delete them (a later build downloads them again).",
+                new Look.Choice(es ? "Empezar de cero" : "Start over", true, () -> {
+                    BuilderService.startOver(this, false);
+                    show();
+                }),
+                new Look.Choice(es ? "Empezar de cero y borrar las herramientas" : "Start over and delete the tools", false, () -> {
+                    BuilderService.startOver(this, true);
+                    show();
+                }),
+                new Look.Choice(es ? "Cancelar" : "Cancel", false, null));
     }
 
     private void leave() {
