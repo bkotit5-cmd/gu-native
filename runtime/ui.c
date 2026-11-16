@@ -17,6 +17,9 @@
 #include "mods.h"
 #include "perfstats.h"
 #include "rt.h"
+#ifndef __ANDROID__
+#include "pc_builder.h"
+#endif
 #include "savefolder.h"
 #include "touch.h"
 #include "hle/input.h"
@@ -54,7 +57,7 @@ void ui_request_save_folder(void) { request(12); }
 void ui_request_pictures(void) { request(20); }  // (the layout editor's Add pictures)
 static void *requested_activity;  // (a string literal: ui_request_activity; SDL_SetAtomicPointer)
 void ui_request_activity(const char *method) { SDL_SetAtomicPointer(&requested_activity, (void *)method), ui_loop_wake(); }
-void ui_request_builder(void) { request(13); }  // (Android: the on-phone builder, BuilderActivity)
+void ui_request_builder(void) { request(13); }  // (Android: the on-phone builder, BuilderActivity; a desktop: its own, after a restart)
 #ifdef __ANDROID__
 void ui_request_gpu_driver(void) { request(8); }
 static void activity_call(const char *method) {  // (a static void method of GameActivity: as restart_application)
@@ -415,6 +418,7 @@ int ui_run(void) {
         if (action == 9) pc_import_cheats();
         if (action == 10) pc_import_mod();
         if (action == 20) pc_import_pictures();
+        if (action == 13) pcb_request_open(), action = 2;  // (Build the game code: the next start opens the builder)
 #endif
         if (action == 2) {
             if (restart_application()) leave();

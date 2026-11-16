@@ -15,6 +15,8 @@ Options: --android  only the phone's   --pc  only the PC's   --force  make them 
          --work <folder>  a work folder that is kept: a run cut short goes on from where it stopped
          --zig-cc <cc>  the phone's library with Zig's C compiler (`zig cc`) instead of the NDK (the app's on-phone
                         builder, tools/phone_build.py, runs it so)
+         --zig <zig>    the PC's library with Zig (zig.exe: its cc and dlltool) instead of llvm-mingw (MHGU.exe's own
+                        builder, tools/pc_build.py, runs it so)
 """
 import argparse
 import hashlib
@@ -59,6 +61,12 @@ LLVM_MINGW_RELEASE = '20241217'
 # libmain.so made in the work folder (only their names count) and Zig's compiler-rt; it is stripped by its link.
 ZIG_CFLAGS = [f for f in CFLAGS if f not in ('-march=armv8.2-a', '-no-canonical-prefixes')] + [
     '-mcpu=generic+v8_2a', '-nostdlibinc', '-isystem', os.path.join(TOOLS, 'android_libc')]
+# --zig (PC): mhgugame.dll from Zig's clang (LLVM 18; llvm-mingw 20241217's is 19) and lld, for x86_64-windows-gnu:
+# mingw-w64 with the UCRT, as llvm-mingw's UCRT build (Zig builds its own mingw-w64 and compiler-rt once, into its
+# cache). The same flags; Zig names the processor x86_64_v2 (-march=x86-64-v2: the same instructions). PC_ID_FLAGS, and
+# so the id, are llvm-mingw's.
+ZIG_PC_TARGET = ['cc', '-target', 'x86_64-windows-gnu']
+ZIG_PC_CFLAGS = ['-mcpu=x86_64_v2' if f == '-march=x86-64-v2' else f for f in PC_CFLAGS]
 
 
 def say(text):
@@ -289,18 +297,64 @@ def run_translator(cmd, cwd, env, name):
 
 
 def whole_object(path):
-    """An ELF object whose section headers are all inside the file: one a cut run left half written isn't."""
+    """An ELF object whose section headers are all inside the file, or a COFF one (the PC's) whose symbol and string
+    tables are: one a cut run left half written isn't."""
     try:
         size = os.path.getsize(path)
         with open(path, 'rb') as f:
             head = f.read(64)
-        if len(head) < 64 or head[:4] != b'\x7fELF':
-            return False
+            if len(head) < 64:
+                return False
+            if head[:4] != b'\x7fELF':
+                table = coff_symbol_table(head)
+                if not table:
+                    return False
+                end = table[0] + table[1] * table[2]
+                if end + 4 > size:
+                    return False
+                f.seek(end)
+                return end + int.from_bytes(f.read(4), 'little') <= size
         shoff = int.from_bytes(head[40:48], 'little')
         shentsize, shnum = int.from_bytes(head[58:60], 'little'), int.from_bytes(head[60:62], 'little')
         return 0 < shoff and shoff + shentsize * shnum <= size
     except OSError:
         return False
+
+
+def coff_symbol_table(head):
+    """An x86-64 COFF object's header (the regular one, or the big-object one clang writes past 65,279 sections): where
+    its symbol table starts, how many records it has and their size; None for anything else."""
+    u32 = lambda at: int.from_bytes(head[at:at + 4], 'little')  # noqa: E731
+    if head[:4] == b'\x00\x00\xff\xff' and head[6:8] == b'\x64\x86':  # (ANON_OBJECT_HEADER_BIGOBJ)
+        return (u32(48), u32(52), 20) if u32(48) else None
+    if head[:2] == b'\x64\x86':  # (IMAGE_FILE_MACHINE_AMD64)
+        return (u32(8), u32(12), 18) if u32(8) else None
+    return None
+
+
+def coff_defined(path):
+    """The names an x86-64 COFF object defines (all of them, as llvm-nm --defined-only lists them): the PC build with
+    Zig, which has no nm, reads the .refptr pointers here."""
+    with open(path, 'rb') as f:
+        data = f.read()
+    table = coff_symbol_table(data[:64])
+    if not table:
+        fail(f'{path} is not an x86-64 object')
+    at, count, entsize = table
+    strings = at + count * entsize
+    names, i = set(), 0
+    while i < count:
+        rec = data[at + i * entsize:at + (i + 1) * entsize]
+        section = int.from_bytes(rec[12:12 + (4 if entsize == 20 else 2)], 'little', signed=True)
+        if section > 0 or section == -1:  # (in a section of the object, or an absolute value)
+            if rec[:4] == b'\0\0\0\0':
+                start = strings + int.from_bytes(rec[4:8], 'little')
+                name = data[start:data.index(b'\0', start)]
+            else:
+                name = rec[:8].rstrip(b'\0')
+            names.add(name.decode('utf-8', 'replace'))
+        i += 1 + rec[entsize - 1]  # (and its auxiliary records)
+    return names
 
 
 def install(src, dest):
@@ -337,6 +391,48 @@ def link_pc(clang, nm, dlltool, objs, work):
     code, out = run([clang, '-shared', '-s', '-o', lib, '@' + rsp, implib, '-static'])
     if code:
         fail('linking failed:\n' + out[-1500:])
+    return lib
+
+
+def link_pc_zig(zig, target, objs, work):
+    """--zig: links mhgugame.dll as link_pc does, with Zig's lld and dlltool, to the same import list (the runtime's
+    functions, sorted, the variables as DATA). Zig's cc takes no -Wl,--error-limit and lld stops at 20 errors, so the
+    names are found a few links at a time, each one with an import library of those found so far; the .refptr pointers
+    are read from the objects here (coff_defined: Zig has no nm). The file's time stamp is then made 0, as lld's
+    --no-insert-timestamp writes it, so that the same game code gives the same library byte for byte (a run that went on
+    after a cut, or another PC's)."""
+    rsp = os.path.join(work, 'objs.rsp')
+    with open(rsp, 'w', encoding='utf-8') as f:  # (Zig reads response files as UTF-8: a user name with accents)
+        f.write('\n'.join('"' + o.replace('\\', '/') + '"' for o in objs))
+    lib = os.path.join(work, 'mhgugame.dll')
+    data = set()
+    for o in objs:
+        data |= {s[len('.refptr.'):] for s in coff_defined(o) if s.startswith('.refptr.')}
+    deffile, implib = os.path.join(work, 'mhgu_exe.def'), os.path.join(work, 'libmhgu_exe.a')
+    names = set()
+    for _ in range(200):  # (20 names a link; the game code imports about 60)
+        code, out = run([zig] + target + ['-shared', '-s', '-o', lib, '@' + rsp] + ([implib] if names else []) + ['-static'])
+        if code == 0:
+            break
+        found = set(re.findall(r'undefined symbol: (?:__declspec\(dllimport\) )?(\S+)', out)) - names
+        if not found:
+            fail('linking failed:\n' + out[-1500:])
+        names |= found
+        with open(deffile, 'w') as f:
+            f.write(f'LIBRARY "{PC_EXE}"\nEXPORTS\n' + ''.join(f'  {n}{" DATA" if n in data else ""}\n' for n in sorted(names)))
+        code, out = run([zig, 'dlltool', '-m', 'i386:x86-64', '-d', deffile, '-l', implib])
+        if code:
+            fail('linking failed:\n' + out[-1500:])
+    else:
+        fail('linking failed: the runtime\'s names never ran out')
+    with open(lib, 'r+b') as f:  # (IMAGE_FILE_HEADER.TimeDateStamp, after "PE\0\0" and the machine and section count)
+        f.seek(0x3C)
+        pe = int.from_bytes(f.read(4), 'little')
+        f.seek(pe)
+        if f.read(4) != b'PE\0\0':
+            fail(f'{lib} is not a Windows library')
+        f.seek(pe + 8)
+        f.write(b'\0\0\0\0')
     return lib
 
 
@@ -410,6 +506,7 @@ def main(argv=None):
     ap.add_argument('--keep', action='store_true', help='keep the work folder')
     ap.add_argument('--work', help='a work folder of your own, kept: a run cut short goes on from where it stopped')
     ap.add_argument('--zig-cc', help="the Android library with Zig's C compiler (zig cc) instead of the NDK")
+    ap.add_argument('--zig', help='the PC library with Zig (zig.exe: zig cc and zig dlltool) instead of llvm-mingw')
     ap.add_argument('--no-pip', action='store_true', help=argparse.SUPPRESS)  # (the phone: no pip, the own LZ4 reader)
     a = ap.parse_args(argv)
 
@@ -445,7 +542,9 @@ def main(argv=None):
         bin_dir = os.path.join(ndk, 'toolchains', 'llvm', 'prebuilt', host_tag()[1], 'bin')
         tools['android'] = {'clang': os.path.join(bin_dir, 'clang' + exe), 'strip': os.path.join(bin_dir, 'llvm-strip' + exe),
                             'target': [f'--target=aarch64-linux-android{API}'], 'cflags': CFLAGS}
-    if 'pc' in todo:
+    if 'pc' in todo and a.zig:
+        tools['pc'] = {'clang': a.zig, 'target': ZIG_PC_TARGET, 'cflags': ZIG_PC_CFLAGS, 'zig': True}
+    elif 'pc' in todo:
         bin_dir = os.path.join(find_llvm_mingw(a.llvm_mingw), 'bin')
         tools['pc'] = {'clang': os.path.join(bin_dir, 'x86_64-w64-mingw32-clang' + exe), 'nm': os.path.join(bin_dir, 'llvm-nm' + exe),
                        'dlltool': os.path.join(bin_dir, 'llvm-dlltool' + exe), 'target': [], 'cflags': PC_CFLAGS}
@@ -525,8 +624,15 @@ def main(argv=None):
             cmd = [tl['clang']] + tl['target'] + tl['cflags'] + ['-I' + os.path.join(ROOT, 'runtime'), f'-DGAMELIB_ID="{gid}"',
                                                                  '-c', src, '-o', obj]
             code, out = run(cmd)
+            tries = 1
+            while code and k == 'pc' and tl.get('zig') and tries < 3 and 'error' not in out.lower():
+                # (Zig on Windows: a compile that ended with no word of its own, its clang unable to start - seen with the
+                # PC out of memory for a moment, other programs' too - goes again after a pause, at most twice more)
+                time.sleep(10 * tries)
+                code, out = run(cmd)
+                tries += 1
             if code:
-                raise RuntimeError(f'{src}:\n{out[-1500:]}')
+                raise RuntimeError(f'{src} (exit {code}):\n{out[-1500:]}')
             done[0] += 1
             if done[0] % 20 == 0 or done[0] == len(sources):
                 say(f'  {done[0]} of {len(sources)}')
@@ -538,7 +644,9 @@ def main(argv=None):
             except RuntimeError as e:
                 fail(f'the compiler failed on {e}')
         say('  linking...')
-        if k == 'pc':
+        if k == 'pc' and tl.get('zig'):
+            lib = link_pc_zig(tl['clang'], tl['target'], objs, work)
+        elif k == 'pc':
             lib = link_pc(tl['clang'], tl['nm'], tl['dlltool'], objs, work)
         elif tl.get('zig'):
             lib = link_android_zig(tl['clang'], tl['target'], objs, work)

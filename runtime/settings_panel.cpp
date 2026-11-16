@@ -56,7 +56,8 @@ namespace {
 enum class View { Main, Page, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, TouchButtons,
                   ComboEdit, PadList, PadMap, ImportSave, Licenses, Remove, OpenSite, OpenDiscord, Profiles, ProfileSlot,
                   Chat, Friends, ChatOn,  // (the chat's pages and its question: settings_chat.inc)
-                  Verify };  // (Verify game files: runtime/verify.c)
+                  Verify,  // (Verify game files: runtime/verify.c)
+                  BuildCode };  // (a desktop's Build the game code: the game closes into its builder, runtime/pc_builder.c)
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -892,7 +893,7 @@ void draw_guides(ImGuiWindow *window, const GuideLayout &layout, float top) {
 bool confirmation() {
     return s.view == View::CloseChanges || s.view == View::Exit || s.view == View::Restart ||
            s.view == View::Reset || s.view == View::ImportSave || s.view == View::Remove || s.view == View::OpenSite ||
-           s.view == View::OpenDiscord || s.view == View::ChatOn;
+           s.view == View::OpenDiscord || s.view == View::ChatOn || s.view == View::BuildCode;
 }
 // The guides a desktop's view shows at its bottom (0: none): all four on the tabs, Confirm and Back on a dialog, and
 // Navigation too on a page of rows (the licenses' scroll: no Confirm there). None while a key is being chosen, text
@@ -2456,14 +2457,16 @@ void scale_row(std::vector<Row> &r) {
     }
 #endif
 }
-// S46 (group build): the game code made on the phone (android/.../BuilderActivity.java), Android only. Its row, its help
-// and its words (settings_locale.h): MENU.md puts it in System, Game code (system/code, 10).
+// S46 (group build): the game code made on the phone (android/.../BuilderActivity.java); 1.0.1, on a desktop, by MHGU.exe
+// itself (runtime/pc_builder.c, its page in runtime/launcher.cpp: asked first, the game closes into it). Its row, its
+// help and its words (settings_locale.h): MENU.md puts it in System, Game code (system/code, 10).
 void game_code_rows(std::vector<Row>& r) {
 #ifdef __ANDROID__
     action(r, "game.build", tr("Build the game code"), []() { ui_request_builder(); });
     r.back().help = tr("Makes the game code (libmhgugame.so) on this phone, from your own exefs in the game folder. No PC needed. The first time it downloads the tools (about 100 MB). It takes 10 minutes to about 2 hours depending on the phone and goes on in the background; the game starts again to use it.");
 #else
-    (void)r;
+    action(r, "game.build", tr("Build the game code"), []() { push(View::BuildCode, "dialog.cancel"); });
+    r.back().help = tr("Makes the game code (mhgugame.dll) again on this PC, from your own exefs in the game folder: the game closes and opens its builder. The first time it downloads its tools (about 90 MB); it takes about 5 to 30 minutes, depending on the PC. Save in the game first.");
 #endif
 }
 // ...and its credit, among Credits & Licenses' notes (about).
@@ -2474,7 +2477,7 @@ void builder_credit_rows(std::vector<Row>& r) {
     (void)r;
 #endif
 }
-MENU_ENTRY("system/code", 10, game_code_rows);  // (Android: a desktop's game code is made with the PC's tools)
+MENU_ENTRY("system/code", 10, game_code_rows);
 // Clear shader cache (runtime/cache_clear.c, 1.0's S30): a tap leaves the mark the next start deletes the shader cache
 // by, before anything reads it; another tap takes it back. Nothing to Save: the mark is the setting. The size is read
 // again at most every 5 s (the SPIR-V folder holds thousands of files)
@@ -4298,6 +4301,8 @@ std::vector<Row> rows_for_view(bool *open) {
                 if (pc_import_save_confirm()) ui_request_action(true);
                 else pop();
             });
+        if (s.view == View::BuildCode)  // (the next start opens the builder: runtime/ui.c, runtime/pc_builder.c)
+            action(r, "dialog.build", tr("Close and build"), []() { ui_request_builder(); });
 #endif
         if (s.view == View::Reset)
             action(r, "dialog.reset", tr("Reset"), []() { reset_section(); });
@@ -5409,6 +5414,7 @@ std::string view_title() {
                     : s.view == View::Verify     ? "Verify game files"
                     : s.view == View::OpenSite   ? "Open the project's page?"
                     : s.view == View::OpenDiscord ? "Open the community's Discord?"
+                    : s.view == View::BuildCode  ? "Close the game and build the game code?"
                     : s.view == View::Chat       ? cs("Chat", "Chat")
                     : s.view == View::Friends    ? cs("Friends", "Amigos")
                     : s.view == View::ChatOn     ? cs("Turn on the online chat?", "¿Activar el chat en línea?")
@@ -5421,6 +5427,8 @@ std::string view_detail() {
            : s.view == View::OpenDiscord
                ? tr("It opens in your browser or the Discord app. On phones with little memory, Android may close the game, so save in the game first.")
            : s.view == View::ChatOn ? chat_on_detail()
+           : s.view == View::BuildCode
+               ? tr("The game closes and opens its builder, which makes mhgugame.dll again from your own files; Play starts the game when it ends. What isn't saved in the game is lost: save first.")
                : "";
 }
 const char *saved_text() {

@@ -602,8 +602,10 @@ press on the app's icon offers **Share log** too. Don't attach game files.
 
 The same game folder plays on a Windows PC: `MHGU.exe` runs your game natively.
 
-The download has the program only: the game code (`mhgugame.dll` and `mhgugame.id`) is made once from your own copy, in
-[Setup step 2](#step-2-create-the-game-code-1).
+The download has the program only: the game code (`mhgugame.dll` and `mhgugame.id`) is made once from your own copy, by
+the program itself: open it, choose your game folder and press **Build the game code on this PC**
+([Setup step 3](#step-3-create-the-game-code)). The tool from the source code still makes it
+[by hand](#create-the-game-code-by-hand).
 
 ### What it does
 
@@ -703,8 +705,9 @@ processor, graphics card and frame rate helps.
   ones lack it, such as an Intel Core 2 or an Atom from before 2013, an AMD Phenom II or Athlon II, or AMD's A- and
   E-series from 2011, and the game says so when it starts.
 - **8 GB of RAM** recommended. 4 GB should work with nothing else open, with slower loading, but it hasn't been tested.
-- **Free space:** about 13 GB for your game folder, at least 3 GB more while the tool works, and about half a GB for the
-  program and its shaders.
+- **Free space:** about 13 GB for your game folder, about 3 GB more while the game code is made, and about 1 GB for the
+  program, its shaders and the tools that make the game code (they can be deleted afterwards).
+- **An internet connection** the first time the game code is made: its tools take about 90 MB.
 - **Your own copy of the game,** updated to version 1.4.0.
 
 ### Setup
@@ -734,9 +737,71 @@ reads every file (a few minutes) and tells you what is missing, cut short, chang
 
 This project does not explain how to dump a game from your console, and does not provide game files, keys or links to them.
 
-#### Step 2: Create the game code
+#### Step 2: Install it
 
-The program has no game code in it, so you create yours from your own copy. It runs on your PC and sends nothing anywhere.
+There is no installer: the program is a folder.
+
+1. Download `MHGU-PC-<version>.zip` from [Releases](../../releases/latest) and unzip all of it into a folder of your own,
+   such as `C:\Games` (opened from inside the zip, `MHGU.exe` doesn't start). Not into Program Files: the game keeps its
+   settings, caches, log and the tools that make the game code in its own folder, and Windows doesn't let it write there.
+   Keep the name `MHGU.exe`: the game code looks for the program by that name.
+2. Open `MHGU.exe`. Windows may say it doesn't know the program, because it isn't signed: **More info**, **Run anyway**. With
+   Smart App Control on, Windows blocks it instead: see [If something goes wrong](#if-something-goes-wrong-1).
+3. The first time, a screen asks for your game folder: **Choose folder**, and pick your `MHGU` folder. The game checks it and
+   tells you exactly what is missing if something is wrong. It remembers the folder.
+
+If `MHGU.exe` is inside your `MHGU` folder, beside `exefs` and `romfs`, the game finds it without asking.
+
+#### Step 3: Create the game code
+
+The program has no game code in it, so it makes yours from your own copy, once, on your PC. Nothing is sent anywhere.
+
+When your folder has everything but the game code, the screen says that `mhgugame.dll` is missing: press **Build the game
+code on this PC**, then **Build**.
+
+- The first time it downloads its tools, about 90 MB: Python from python.org and Zig, a C compiler, from PyPI, or from
+  ziglang.org, Zig's own site, when PyPI can't be reached. Both are free software, checked against their SHA-256 before
+  they are used, and nothing of the game is ever downloaded.
+- It needs about 3 GB free on the disk where `MHGU.exe` is while it works. When it ends only the tools stay (about 300 MB,
+  in the `builder` folder beside `MHGU.exe`), and **Delete the tools** removes them too.
+- It takes about 5 to 30 minutes, depending on the PC, plus the download the first time (about 6 minutes on the
+  developer's PC, with a 6-core processor). It uses all the processor's cores but one, at low priority, so you can use
+  the PC meanwhile.
+- **Cancel** stops it, and so does closing the window or restarting the PC: what it did is kept, and **Go on** continues
+  from there. **Start over** forgets a build half done and starts from the beginning.
+
+When it says the game code is ready, your folder has two new files, and **Play** starts the game:
+
+```
+MHGU
+├─ exefs
+├─ romfs
+├─ mhgugame.dll
+└─ mhgugame.id
+```
+
+**These files are made from your game: keep them for yourself and don't share them.**
+
+The first start prepares the game's shaders in the background while the logos play; they take about 340 MB in the `cache`
+folder. A notice then says that **F1** opens the settings. To choose another folder later: **F1**, **System**, **Your
+game**, **Game folder**; the game uses it from its next start. To make the game code again: **F1**, **System**, **Game
+code**, **Build the game code** (the game closes and opens the builder).
+
+The zip holds one folder with the program's files and nothing of the game:
+
+- `MHGU.exe`, and the libraries it uses: `SDL3.dll`, `mhguffmpeg.dll` (the game's videos) and `libxess.dll` (XeSS-SR)
+- `gamelib_id.txt`: the id of the game code this version needs. Your folder's `mhgugame.id` must say the same
+- `builder_tools.zip`: the project's own tools that make the game code (the first build unpacks them into `builder`)
+- `pipelines.list`: graphics states the first start prepares
+- `extras`: the optional cheats for faster drinking and eating, which the first start copies, off, into the `cheats` folder
+  beside `MHGU.exe`
+- `licenses`: the legal notice and the licenses, also in **F1**, **Credits & Licenses**, **Licenses**
+
+<a name="step-2-create-the-game-code-1"></a>
+#### Create the game code by hand
+
+The other way, for a PC where the program can't build it (no internet, or a network that blocks both PyPI and
+ziglang.org): the tool from the source code makes the same game code (the same id) with Python of your own.
 
 1. Install [Python](https://www.python.org/downloads/). Tick **Add python.exe to PATH** in the installer.
 2. Get the tool from the same version as your `MHGU-PC` zip: on [Releases](../../releases/latest), under **Assets**,
@@ -755,48 +820,12 @@ The program has no game code in it, so you create yours from your own copy. It r
    drag your game folder into the window it opens and press Enter.
 
 The first time, it downloads llvm-mingw, the compiler for the PC game (about 150 MB). Then it works on its own: about 10
-minutes on a fast PC, and up to an hour on one with 2 cores. When it says **Done**, your folder has two new files:
-
-```
-MHGU
-├─ exefs
-├─ romfs
-├─ mhgugame.dll
-└─ mhgugame.id
-```
-
-**These files are made from your game: keep them for yourself and don't share them.**
+minutes on a fast PC, and up to an hour on one with 2 cores. When it says **Done**, your folder has the same two new files
+(`mhgugame.dll` and `mhgugame.id`), and `MHGU.exe` starts the game with them.
 
 Do you also play on Android? Leave out `--pc`: one run makes the game code for both, and also adds `libmhgugame.so` and
 `libmhgugame.id`. It then downloads Google's Android compiler too (about 1.8 GB). If you made the phone's before, running it
 again keeps those and only adds the PC's.
-
-#### Step 3: Install it
-
-There is no installer: the program is a folder.
-
-1. Download `MHGU-PC-<version>.zip` from [Releases](../../releases/latest) and unzip all of it into a folder of your own,
-   such as `C:\Games` (opened from inside the zip, `MHGU.exe` doesn't start). Not into Program Files: the game keeps its
-   settings, caches and log in its own folder, and Windows doesn't let it write there. Keep the name `MHGU.exe`: the game
-   code looks for the program by that name.
-2. Open `MHGU.exe`. Windows may say it doesn't know the program, because it isn't signed: **More info**, **Run anyway**. With
-   Smart App Control on, Windows blocks it instead: see [If something goes wrong](#if-something-goes-wrong-1).
-3. The first time, a screen asks for your game folder: **Choose folder**, and pick your `MHGU` folder. The game checks it, tells
-   you exactly what is missing if something is wrong, and starts. It remembers the folder.
-
-If `MHGU.exe` is inside your `MHGU` folder, beside `exefs` and `romfs`, the game finds it without asking. The first start
-prepares the game's shaders in the background while the logos play; they take about 340 MB in the `cache` folder. A notice
-then says that **F1** opens the settings. To choose another folder later: **F1**, **System**, **Your game**, **Game folder**; the game
-uses it from its next start.
-
-The zip holds one folder with the program's files and nothing of the game:
-
-- `MHGU.exe`, and the libraries it uses: `SDL3.dll`, `mhguffmpeg.dll` (the game's videos) and `libxess.dll` (XeSS-SR)
-- `gamelib_id.txt`: the id of the game code this version needs. Your folder's `mhgugame.id` must say the same
-- `pipelines.list`: graphics states the first start prepares
-- `extras`: the optional cheats for faster drinking and eating, which the first start copies, off, into the `cheats` folder
-  beside `MHGU.exe`
-- `licenses`: the legal notice and the licenses, also in **F1**, **Credits & Licenses**, **Licenses**
 
 ### Controls
 
@@ -917,6 +946,7 @@ needs the firewall's permission) and a full quest.
 |---|---|
 | Settings, the folder you chose, controller mappings, the HUD's layout | Beside `MHGU.exe`: `mhgurecomp.ini` (and the settings menu's own `forge_imgui.ini`), `game_folder.txt`, `gamepad_mappings.txt`, `touch_layout.txt` |
 | Shader caches, screenshots, the log | Beside `MHGU.exe`: `cache`, `shots`, `log.txt` (the session before: `log_prev.txt`) |
+| The tools that make the game code, and their log | Beside `MHGU.exe`: `builder` (Python and Zig; while it builds, its work folder too), `builder_log.txt` |
 | The included cheats, and which cheats are off | Beside `MHGU.exe`: `cheats` |
 | Saves | `%APPDATA%\MHGURecomp\save`. A save you import waits in `save_import`, beside `MHGU.exe`, until the game restarts, and the save it replaces goes to `save_backups` in `%APPDATA%\MHGURecomp` |
 | Cheats and mods you add | Your game folder's `cheats` and `mods` |
@@ -927,17 +957,18 @@ To open `%APPDATA%`, type it in File Explorer's address bar and press Enter.
 
 1. Unzip the new version and copy its files over the old ones. Your settings, the folder you chose and the HUD's layout stay,
    and your saves stay in any case.
-2. If the new version needs new game code, the game says "This mhgugame.dll is from another version" when it starts. Do step 2
-   again with the new version's tool (**Source code (zip)** on its release) and open the game again.
+2. If the new version needs new game code, the game says "This mhgugame.dll is from another version" when it starts: press
+   **Build the game code on this PC**, then **Build** (the tools are already there). By hand: the new version's tool, as in
+   [Create the game code by hand](#create-the-game-code-by-hand).
 
 ### Uninstall it
 
-- Delete the program's folder, the one with `MHGU.exe`. Its settings, caches, screenshots, log and included cheats go with
-  it.
+- Delete the program's folder, the one with `MHGU.exe`. Its settings, caches, screenshots, log, included cheats and the
+  game code builder's tools (`builder`) go with it.
 - Your saves stay in `%APPDATA%\MHGURecomp`. Delete that folder too only if you want them gone, and keep a copy first.
 - Your game folder is yours: keep it for the phone, or delete it. The cheats and mods you added are in it.
-- The tool keeps the compilers it downloaded in `.mhgu-tool`, in your user folder. Delete it if you won't make the game code
-  again. If the lz4 Python package was missing, the tool installed it (`pip uninstall lz4` removes it); and Python stays, if
+- If you made the game code by hand, the tool keeps the compilers it downloaded in `.mhgu-tool`, in your user folder. Delete
+  it if you won't make the game code again. If the lz4 Python package was missing, the tool installed it (`pip uninstall lz4` removes it); and Python stays, if
   you installed it for this.
 - Nothing else is installed: there was no installer, and the game keeps no settings in the registry. If you allowed MHGU
   through Windows Firewall, that rule stays until you remove it in Windows Security.
@@ -956,8 +987,12 @@ To open `%APPDATA%`, type it in File Explorer's address bar and press Enter.
 | Not sure your game files are right | **F1** → **System** → **Your game** → **Verify game files**. It reads every file, says what is wrong and what to do; the full list goes to `log.txt`. It changes and downloads nothing |
 | "SDL3.dll was not found" | Unzip the whole zip into a folder first: `MHGU.exe` doesn't start from inside the zip |
 | Smart App Control blocked it | It blocks programs that aren't signed, with no **Run anyway**, and `MHGU.exe` isn't signed: it only runs with Smart App Control off (Windows Security, **App & browser control**, **Smart App Control settings**). Think it over first: on many versions of Windows it can't be turned back on without reinstalling Windows |
-| "mhgugame.dll is missing" | The download doesn't include it: do [Setup step 2](#step-2-create-the-game-code-1) (`python build_game.py --pc <your folder>`) and choose that folder |
-| "This mhgugame.dll is from another version" | The game code was made with another version's tool. Make it again with the tool from the same release as your zip (**Source code (zip)** on [Releases](../../releases/latest)) and open the game again |
+| "mhgugame.dll ... is missing from that folder" | The download doesn't include it: press **Build the game code on this PC** on that screen ([Setup step 3](#step-3-create-the-game-code)) |
+| "This mhgugame.dll is from another version" | It was made for another version: press **Build the game code on this PC** on that screen, and it is made again for this one |
+| The builder can't download its tools | Check the internet connection and press **Go on**: the download continues where it stopped. When PyPI (`files.pythonhosted.org`) can't be reached, as some internet providers or filters block it, the builder gets Zig from ziglang.org, Zig's own site, by itself. If both are blocked, it says so: another network, or a DNS such as 1.1.1.1, gets around it, or make the game code [by hand](#create-the-game-code-by-hand) |
+| Your antivirus warns about, blocks or deletes `zig.exe` or `python.exe` in the `builder` folder | They are the official Zig and Python, checked by their SHA-256 before they run; some antivirus programs distrust a compiler that was just downloaded. Allow the `builder` folder beside `MHGU.exe` and press **Go on**, or make the game code [by hand](#create-the-game-code-by-hand) |
+| The builder says there isn't enough space | It needs about 3 GB free on the disk where `MHGU.exe` is while it works. Free some, or move the program's folder to another disk, and press **Go on** |
+| The builder stopped and **Go on** fails again | **Start over** clears what it did and starts from the beginning. If it still fails, attach `builder_log.txt` (beside `MHGU.exe`) to an [issue](../../issues) |
 | "This processor lacks instructions the game code needs" | The PC game needs a processor with SSE4.2: see [What you need](#what-you-need-1) |
 | "This program must be called MHGU.exe" | Rename it back to `MHGU.exe` |
 | "This PC's graphics has no Vulkan driver" | Install the latest driver from your graphics card's maker. The oldest graphics have none: see [What you need](#what-you-need-1) |

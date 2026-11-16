@@ -5,6 +5,10 @@ list) into android/app/src/main/assets/builder/tools.zip, and the check that the
 APK's GAMELIB_ID.
 
     python tools/pack_builder_tools.py GAMELIB_ID
+    python tools/pack_builder_tools.py --pc GAMELIB_ID OUT.zip
+
+--pc (native/build_windows.sh): the same files into OUT.zip, builder_tools.zip beside MHGU.exe, for the PC's own builder
+(runtime/pc_builder.c, tools/pc_build.py), checked against the PC's GAMELIB_ID (mhgugame.dll's flags).
 
 No game data is in there. The files are stored in a fixed order with a fixed date, so the same sources give the same zip.
 """
@@ -28,9 +32,13 @@ def files():
 
 
 def main():
-    want = sys.argv[1]
-    os.makedirs(os.path.join(ASSETS, 'builder'), exist_ok=True)
-    out = os.path.join(ASSETS, 'builder', 'tools.zip')
+    pc = sys.argv[1] == '--pc'
+    want = sys.argv[2] if pc else sys.argv[1]
+    if pc:
+        out = os.path.abspath(sys.argv[3])
+    else:
+        os.makedirs(os.path.join(ASSETS, 'builder'), exist_ok=True)
+        out = os.path.join(ASSETS, 'builder', 'tools.zip')
     with zipfile.ZipFile(out + '.part', 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for name in files():
             info = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
@@ -43,7 +51,7 @@ def main():
             z.extractall(tmp)
         sys.path.insert(0, os.path.join(tmp, 'tools'))
         import build_game
-        got = build_game.gamelib_id(build_game.ID_FLAGS)
+        got = build_game.gamelib_id(build_game.PC_ID_FLAGS if pc else build_game.ID_FLAGS)
         assert os.path.dirname(build_game.__file__) == os.path.join(tmp, 'tools')
     if got != want:
         sys.exit(f'builder tools: their GAMELIB_ID is {got}, the app\'s is {want}')

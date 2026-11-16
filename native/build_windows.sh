@@ -1,6 +1,7 @@
 #!/bin/bash
 # Compila MHGU.exe (runtime) y mhguffmpeg.dll para Windows x64 con llvm-mingw, y arma native/build/win64/MHGU (lo que se
-# entrega: el ejecutable y sus DLL, nunca código del juego; mhgugame.dll lo arma cada jugador con tools/build_game.py).
+# entrega: el ejecutable y sus DLL, nunca código del juego; mhgugame.dll lo arma cada jugador, con el creador del propio
+# MHGU.exe - builder_tools.zip, runtime/pc_builder.c - o a mano con tools/build_game.py).
 # Uso: bash build_windows.sh [Release|RelWithDebInfo]
 #   Dependencias en deps/out/win64 (bash deps/build_deps.sh win64; bash deps/build_ffmpeg.sh win64).
 #   LLVM_MINGW=<carpeta de llvm-mingw, o su bin> si no está en la ruta de abajo. GEN=<carpeta con main/ y sdk/>: también mhgugame.dll
@@ -65,6 +66,9 @@ else
   echo "windows: no libxess.dll in $XS (bash deps/build_deps.sh win64 xess): XeSS-SR not shipped, the game will use FSR 3.1"
 fi
 printf %s "$GAMELIB_ID" > "$DIST/gamelib_id.txt"  # (qué código del juego le sirve: tools/build_game.py)
+# the game code builder's scripts (runtime/pc_builder.c unpacks them: tools/pc_build.py, build_game.py, the translator and
+# the runtime headers the game code is compiled with), checked against this GAMELIB_ID: nothing of the game
+python "$ROOT/tools/pack_builder_tools.py" --pc "$GAMELIB_ID" "$(m "$DIST")/builder_tools.zip" || exit 1
 # los pipelines grabados en las zonas comunes (hashes y estados, nada del juego): el primer arranque los arma de fondo
 cp "$A/pipelines.list" "$DIST/"
 # la lista de los archivos de la 1.4.0 (rutas, tamaños y CRC-32, nada del juego): Verificar archivos del juego (runtime/verify.c)
@@ -120,8 +124,8 @@ MW="$(cygpath -u "$LLVM_MINGW")"
   if [ -f "$DIST/libxess.dll" ]; then
     echo; echo "libxess.dll: Intel's XeSS-SR runtime, unmodified, as Intel released it (XeSS.txt). It needs the Microsoft Visual C++ Redistributable (x64), which is not included."
   fi
-  echo; echo "gamelib_id.txt, pipelines.list, game_files.txt and extras: the project's own files."
-  echo; echo "Nothing of the game is included: each player makes the game code library, mhgugame.dll, from their own copy of the game. The Vulkan loader is the graphics driver's."
+  echo; echo "gamelib_id.txt, pipelines.list, game_files.txt, builder_tools.zip and extras: the project's own files (builder_tools.zip: the tools that make the game code, under the project's license)."
+  echo; echo "Nothing of the game is included: each player makes the game code library, mhgugame.dll, from their own copy of the game. To make it, the program downloads Python and Zig the first time (Builder-tools.txt). The Vulkan loader is the graphics driver's."
   echo; echo "Monster Hunter is a trademark of the Great C. This project is not affiliated with, endorsed by or sponsored by the Great C or the Great N."
   echo; echo "----------------------------------------"
   echo; echo "MHGU para PC: qué hay en esta carpeta y dónde está cada licencia."
@@ -131,10 +135,36 @@ MW="$(cygpath -u "$LLVM_MINGW")"
   if [ -f "$DIST/libxess.dll" ]; then
     echo; echo "libxess.dll: el XeSS-SR de Intel, sin modificar, tal como Intel lo publica (XeSS.txt). Necesita el Microsoft Visual C++ Redistributable (x64), que no viene incluido."
   fi
-  echo; echo "gamelib_id.txt, pipelines.list, game_files.txt y extras: archivos propios del proyecto."
-  echo; echo "No incluye nada del juego: cada jugador arma la librería de código del juego, mhgugame.dll, con su propia copia del juego. El cargador de Vulkan es el del controlador (driver) de la tarjeta gráfica."
+  echo; echo "gamelib_id.txt, pipelines.list, game_files.txt, builder_tools.zip y extras: archivos propios del proyecto (builder_tools.zip: las herramientas que crean el código del juego, con la licencia del proyecto)."
+  echo; echo "No incluye nada del juego: cada jugador arma la librería de código del juego, mhgugame.dll, con su propia copia del juego. Para crearla, el programa descarga Python y Zig la primera vez (Builder-tools.txt). El cargador de Vulkan es el del controlador (driver) de la tarjeta gráfica."
   echo; echo "Monster Hunter es una marca de la Gran C. Este proyecto no está afiliado, respaldado ni patrocinado por la Gran C ni la Gran N."
 } > "$L/Windows.txt"
+# (the game code builder's downloads, runtime/pc_builder.c: where from, their SHA-256 and licenses; Zig's MIT text as in
+# the APK's Builder-tools.txt)
+{ echo "Build the game code on this PC (the game folder screen, or F1, System, Game code): the tools it downloads"
+  echo
+  echo "The first time it runs, the builder downloads these tools from their official sources, checks each one against its SHA-256 and keeps them in the builder folder beside the program's settings. They are not in the program's zip, and none of them is game data. builder_tools.zip, beside MHGU.exe, holds the project's own tools (tools/*.py) and the runtime headers the game code is compiled with, under the project's license (LICENSE.txt)."
+  echo
+  echo "Python 3.14.9, the Windows embeddable package (64-bit)"
+  echo "  From:    https://www.python.org/ftp/python/3.14.9/python-3.14.9-embed-amd64.zip"
+  echo "  SHA-256: 3c01d7cfc666f746a6f064f60fb2156ab0ec464d3d738ab796371a46a9bb24a2"
+  echo "  License: the Python Software Foundation License Version 2 (LICENSE.txt in the package), https://docs.python.org/3/license.html"
+  echo "  Copyright (c) 2001 Python Software Foundation; All Rights Reserved."
+  echo
+  echo "Zig 0.13.0 for 64-bit Windows (the ziglang package on PyPI)"
+  echo "  From:    https://files.pythonhosted.org/packages/e0/0c/66f4710aedf5544e15779ff9c6e770322986e15daf9299b1a4df0be19e09/ziglang-0.13.0-py3-none-win_amd64.whl"
+  echo "  SHA-256: b64b2aa936ebbfeecfbb2611df331a5474edebe1246b98c2f56d6ae4d58b71fc"
+  echo "  Or, when PyPI can't be reached, the same release from Zig's own site (the same files):"
+  echo "  From:    https://ziglang.org/download/0.13.0/zig-windows-x86_64-0.13.0.zip"
+  echo "  SHA-256: d859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158"
+  echo "  Only its program and the parts of its lib folder its C compiler uses for Windows are kept."
+  echo "  License: MIT (below). Zig includes LLVM, Clang and LLD (Apache License 2.0 with LLVM Exceptions, https://llvm.org/LICENSE.txt) and the mingw-w64 runtime (its licenses, in the package's lib/libc/mingw)."
+  echo
+  sed -n '/The MIT License (Expat)/,/THE SOFTWARE\./p' "$A/licenses/Builder-tools.txt" | tr -d '\r'
+  echo
+  echo "Building the game code inside the app was Klark231's idea (https://github.com/klark231/mh4u-builder). The builder in this program is the port's own implementation of it: none of that project's files are in it."
+} > "$L/Builder-tools.txt"
+grep -q "THE SOFTWARE" "$L/Builder-tools.txt" || { echo "windows: Zig's MIT text was not found in $A/licenses/Builder-tools.txt"; exit 1; }
 # (XeSS-SR: the license libxess.dll comes with, its copyright line in it, then the SDK's third-party notices)
 if [ -f "$DIST/libxess.dll" ]; then
   { echo "libxess.dll, beside MHGU.exe, is the XeSS SDK 3.0.2's XeSS-SR runtime, shipped unmodified and loaded only when Upscaler is XeSS-SR, under the Intel Simplified Software License (below). The headers the program is built with are the SDK's, under the MIT License (THIRD_PARTY_NOTICES). The SDK's notices for third-party software follow the license."
@@ -155,7 +185,8 @@ if [ "${PACK:-0}" = 1 ]; then
   fi
   XZ=""; [ -f "$DIST/libxess.dll" ] && XZ=MHGU/libxess.dll  # (XeSS-SR, when this build has it)
   (cd "$OUT" && "$(cygpath -u "$SYSTEMROOT")/System32/tar.exe" -a -c -f "$Z" MHGU/MHGU.exe MHGU/mhguffmpeg.dll MHGU/SDL3.dll \
-     $XZ MHGU/gamelib_id.txt MHGU/pipelines.list MHGU/game_files.txt MHGU/extras MHGU/licenses) || { echo "zip: failed"; exit 1; }
+     $XZ MHGU/gamelib_id.txt MHGU/builder_tools.zip MHGU/pipelines.list MHGU/game_files.txt MHGU/extras MHGU/licenses) \
+     || { echo "zip: failed"; exit 1; }
   (cd "$OUT" && sha256sum "$Z" > "$Z.sha256.txt")
   echo "zip: $OUT/$Z"; echo "SHA-256: $(cut -d' ' -f1 "$OUT/$Z.sha256.txt")"
 fi
