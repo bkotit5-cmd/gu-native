@@ -229,6 +229,7 @@ static void script_parse(void) {
 //   hudtrace               log every HUD quad of the next frame: its layer, place, and where 16:10 / ultrawide moved it;
 //                          and each pass (targets, stand-ins, area), draw (program, viewport, scissor, textures), copy and dispatch
 //   frame                  log the current frame number
+//   fgeval <n> [frames]    n quality samples of frame generation from now, one every that many frames (framegen.c)
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
 //   wheel <notches>        the mouse wheel turned that far (> 0 up; by default the item bar to the left)
@@ -324,6 +325,11 @@ static void control_poll(void) {
                 int v[7] = {0};            // the colour filter as if set in the menu (tests: runtime/colour_filter.h);
                 int n = sscanf(line, "%*s %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]);
                 config_colour_test(n >= 1 ? v : NULL);  // "colour" alone: the saved values again
+                continue;
+            }
+            if (!strcmp(cmd, "fgeval")) {  // fgeval <n> [frames]: n quality samples of frame generation (nvn/vulkan/framegen.c)
+                extern void vk_framegen_eval(int n, int every);
+                vk_framegen_eval(atoi(arg), atoi(arg2));
                 continue;
             }
             if (!strcmp(cmd, "devicelost")) { extern volatile int g_fake_lost; g_fake_lost = 1; continue; }  // (tests: exec.c lost_report)

@@ -196,6 +196,8 @@ typedef struct {
     int hdr_brightness;       // [Colour] HDRBrightness: -100..100, the paper white 203 nits times 2^(x/100)
     int hdr_highlights;       // [Colour] HDRHighlights: -100..100, how far the picture's brightest part goes towards the
                               // screen's peak (0: half of the way)
+    int frame_gen;            // [Graphics] FrameGen: a made-up picture between each two of the game's, at half the display's
+                              // rate or less (nvn/vulkan/framegen.c); off by default (0: nothing in CONFIG_DEFAULT_VALUES)
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -342,6 +344,7 @@ int config_live_pause_background(void); // [Application] PauseInBackground
 int config_live_pause_menu(void);       // [Application] PauseInMenu
 int config_live_shadows(void);          // [Performance] Shadows
 int config_live_bloom(void);            // [Performance] Bloom
+int config_live_frame_gen(void);        // [Graphics] FrameGen (nvn/vulkan/framegen.c)
 int config_live_grass(void);            // [Performance] Grass
 int config_live_effects(void);          // [Performance] Effects
 int config_live_reverb(void);           // [Audio] Reverb

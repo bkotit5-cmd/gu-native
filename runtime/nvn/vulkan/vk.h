@@ -226,6 +226,8 @@ void vk_pacing_device(void);
 void vk_pacing_swapchain(void);
 bool vk_pacing_fifo(void);
 void vk_pacing_present(VkPresentInfoKHR *pi, bool new_frame);
+int vk_pacing_cadence(void);           // (frame generation) the vsyncs a game frame takes, 1 when not timed
+void vk_pacing_follow(int vsyncs);     // (frame generation) the next present that many vsyncs after the made picture's
 #endif
 #ifdef _WIN32
 // The picked device's LUID, which Windows' own GPU figures go by (the performance readout: platform/win_stats.c, any

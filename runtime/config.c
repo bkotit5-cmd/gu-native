@@ -212,6 +212,12 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "SmoothGradients = Off\n"
     "\n"
+    "; Frame generation: a made-up picture between each two of the game's, so 30 FPS show as 60. Only when the FPS\n"
+    "; limit is half the screen's refresh rate or less, and not in the game's menus. Adds a little input delay, fast\n"
+    "; movement can show artifacts, and it costs GPU time. The HUD is never warped\n"
+    "; Default: Off\n"
+    "FrameGen = Off\n"
+    "\n"
     "[Colour]\n"
     "; The colour of the game's picture: the 3D, its HUD and its menus (not the touch controls or this port's menu).\n"
     "; Every one is 0 by default: the picture exactly as the game draws it\n"
@@ -892,6 +898,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
+    ON_OFF("Graphics", "FrameGen", frame_gen, false),
     {"Colour", "Hue", SET_INT, F(colour_hue), 0, -180, 180, NULL, NULL, false, ERR_COLOUR},
     {"Colour", "Temperature", SET_INT, F(colour_temperature), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
     {"Colour", "Tint", SET_INT, F(colour_tint), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
