@@ -670,6 +670,16 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   `LogShareActivity` EXTRA_WHY); every other abort of the game shows the error screen too (before, the app just closed).
   `MHGU_GAME_FILES=<list>` gives the check another list (a test: a size raised in it makes that file "cut"), `MHGU_ROMFS_NOQUICK=1`
   skips it.
+- The romfs is scanned at the game's first `fsp-srv` call (`romfs.c scan`, on the game's main thread: `fsp_srv` >
+  `open_romfs_storage` > `romfs_open` > `build` > `scan`): until it ends, between `[sm] GetService fsp-srv` and the first `[romfs]`
+  line, the game does nothing else. On Windows each entry's size comes from its folder's listing (`plat_list_dir`,
+  FindFirstFileEx; links and other reparse points are still `stat`'ed). Up to 1.0.1 it was a `stat` per file, which opens each of
+  the 35,531: on a hard disk whose cache had let their records go, one disk read each, and the game sat there at 0.4 % CPU from
+  under 2 minutes to over 6, looking hung (PC tests on the shared hard disk, 2026-11-16; 1.0 the same, and not 1.0.1's size check,
+  whose thread starts after that line). In the cache: 2-3 s, listed ~0.1 s. The line says how long the listing took (`its folder
+  listed in N ms`). A folder that can't be listed (denied) is named and left out; mingw's `opendir` let it in empty, silently.
+  Android and Linux still `stat` each file: 1 to 11 s between the two lines on the phones' `/storage/emulated/0` (logcat, 1.0.1),
+  flash with nothing to seek.
 - `Config` gets its defaults by position: `CONFIG_DEFAULT_VALUES` in `config.c`. A new field in `config.h` needs its value there, in its
   place, or every later field moves (two added once turned most touch buttons off).
 - The shadow maps are one 1024x3072 depth atlas (three cascades), the first pass of a hunt's frame: 47 draws, 2.8 ms of a Moto g06's 18.6.
