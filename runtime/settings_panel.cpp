@@ -45,9 +45,9 @@
 #ifndef __ANDROID__
 // (nvn/vulkan/device.c) the Vulkan devices that can run the game and the one in use, for the GPU row
 extern "C" int vk_gpu_list(const char **names, int max, int *in_use);
+#endif
 extern "C" float vk_screen_hdr_nits(void);      // (nvn/vulkan/device.c: the screen's HDR10; -1 none)
 extern "C" const char *vk_hdr_fallback(void);   // (why the picture stays SDR with HDR on; NULL: it doesn't)
-#endif
 extern "C" bool host_input_real_pad(void);  // (runtime/host_input.c)
 extern "C" bool host_input_keyboard_mouse(void);  // (runtime/host_input.c: a phone's keyboard and mouse, S14)
 
@@ -943,6 +943,16 @@ bool equal(const Config &a, const Config &b) {
     SAME(bonus_content);
     SAME(village_in_hub);
     SAME(send_all_rewards);
+    SAME(colour_hue);  // (Graphics & Audio > Colour)
+    SAME(colour_temperature);
+    SAME(colour_tint);
+    SAME(colour_brightness);
+    SAME(colour_contrast);
+    SAME(colour_saturation);
+    SAME(colour_gamma);
+    SAME(hdr);
+    SAME(hdr_brightness);
+    SAME(hdr_highlights);
     SAME(mouse_sensitivity);
     SAME(touch_controls);
     SAME(touch_hud);
