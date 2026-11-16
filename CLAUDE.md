@@ -483,6 +483,29 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   it is that attack; in a corner layout saved before it, it starts in the band's hollow.
   `[Touch] GuardSlide` (off by default): a thumb from Guard keeps R as it slides onto the attacks (`Finger.keep`), and is
   R + Y on the item bar.
+  `[Touch] SlideBoth` (on by default, 1.0.1; "Slide between buttons: both pressed", the MH4U port's the same name and
+  default): a thumb that slides from one of the game's face or shoulder buttons onto another keeps the first pressed with it,
+  as two fingers would (`slide_both`, `slide_keeps`, `slide_to`): Guard onto Evade as onto the attacks (R + B, Discord: "like
+  R to X"), Evade onto an attack, one attack onto the other, the emulator-style layout's A, B, X, Y and shoulders, the
+  combined buttons, a bow's or gun's reload, crouching fire, evade and sheathe; each one slid over stays pressed, and slid
+  back onto the one it landed on (`Finger.home`) it is that one alone again. The weapon out or sheathed, never in the game's
+  menus. Not the run (onto an attack its R goes: a draw attack), the stick, the d-pads, the arrows, nor a bow's or gun's fire
+  and aim (their slides aim). Off: 1.0's slides exactly (Guard and Evade slid onto the attacks become the attack; GuardSlide
+  keeps R).
+- `[Touch] HoldToHide` (on by default, 1.0.1, Discord: the controls off for a cutscene took the menu): a finger that lands
+  where no control is (not a control, the item bar, the Hunter Arts, the stick's reach), the only one down, held still
+  `HOLD_HIDE` (750 ms; a gold ring fills round it from `HOLD_RING`, 250 ms: `hold_ring`) - moved past the drag's slop of 0.025
+  screen heights, or joined by any other finger, it is not (`Finger.hold_ok`) - hides every touch control, the settings
+  button too (`State.user_hidden`); then every finger is the camera's and another long press anywhere shows them again. The
+  HUD keeps the touch controls' arrangement meanwhile (`touch_visible`); the editor or the setting off shows them. Each time
+  they hide "Long-press an empty spot to show the controls" shows for 2.5 s, the first time in a session 5 s with where to
+  turn it off (`hint_until`, `g_hold_hint`). The MH4U port has the same times. A controller's hiding is apart: a long press
+  then changes nothing.
+- `[Touch] CameraSmoothing` (0 by default, 0..100; 1.0.1, gu-native #244): a drag's turn of the camera eased in, a part of
+  what is left each pass by the time passed (e^(-dt / tau), tau 12 to 152 ms; `State.smooth_x`), every count still given.
+  `[Controls] CameraShake` (0 by default, 0..100): while the game rumbles (`input_rumble`), the hunt camera's smoothed angles
+  (+0x9e0 / +0x9e4) get a random nudge each update (1.2 degrees at 100 and a full rumble), the angles it heads for untouched,
+  so the game's own smoothing pulls it back (`hle/mousecam.c shake`); `shaketest <ms>` in the control file fakes a rumble.
 - The item bar's long press (#109): bit 0 of the hunter's word +0x2770 is the bar open (its neighbouring items shown); the
   item bar's handler clears it and sets it while L is held (vfuncs +0x25c / +0x260 / +0x264 test, set and clear its bits).
   `itembar_hold` sets it after the handler, past the same checks, with no L pressed (L would turn the camera).

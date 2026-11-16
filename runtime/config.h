@@ -45,14 +45,17 @@ enum {
 // button of the game's, runtime/touch.cpp C_LOCKON); FloatingStick (the stick comes to where the thumb lands near it). And
 // three of the menus' and a controller's ways: ShowMenuLR (the menu pad's L and R tabs), DpadInMenus (the hunt's D-pad
 // stays in the game's menus, beside the menu pad) and ArtsWithController (a tap on a Hunter Art's panel performs it while
-// a controller hides the touch controls)
+// a controller hides the touch controls). HoldToHide (1.0.1): a long press where no control is hides the touch controls,
+// and another shows them again; SlideBoth (1.0.1): a thumb slid from a button onto another keeps both pressed
+// (runtime/touch.cpp slide_to)
 enum { TB_ATTACKS, TB_DODGE, TB_GUARD, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD, TB_L, TB_ZL, TB_ZR, TB_L3, TB_R3, TB_STICK,
        TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_ZL, TB_MENU_ZR, TB_MENU_PAD,
-       TB_STICK_RUN, TB_GUARD_SLIDE, TB_LOCKON, TB_FLOAT_STICK, TB_MENU_LR, TB_DPAD_MENUS, TB_ARTS_PAD, TB_COUNT };
+       TB_STICK_RUN, TB_GUARD_SLIDE, TB_LOCKON, TB_FLOAT_STICK, TB_MENU_LR, TB_DPAD_MENUS, TB_ARTS_PAD, TB_HOLD_HIDE,
+       TB_SLIDE_BOTH, TB_COUNT };
 // (the item bar's arrows on by default, as in the MH4U port; the Lock-on button too; the floating stick off; the menu
 // pad's L and R and the Hunter Arts' taps with a controller as up to 0.1.9.3, the D-pad in menus off: the menu pad takes
-// its place, as then)
-#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1}
+// its place, as then; the long press that hides the controls on, and a slide between buttons keeping both)
+#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1}
 #define TOUCH_COMBOS 6
 // a controller's buttons a combined button can be on (the less used ones)
 enum { PADB_NONE, PADB_L3, PADB_R3, PADB_MINUS, PADB_GUIDE, PADB_MISC, PADB_PADDLE1, PADB_PADDLE2, PADB_PADDLE3, PADB_PADDLE4,
@@ -175,6 +178,10 @@ typedef struct {
     int xroom_host_port;      // [Multiplayer] RoomHostPort: its UDP port; 0 the rooms' usual 24872
     int send_all_rewards;     // [Quest Rewards] SendAllRewards: choosing Send to the Item Box at a quest's rewards sends
                               // every reward that fits at once (runtime/hle/rewards.c); off, one at a time as the game does
+    int touch_cam_smooth;     // [Touch] CameraSmoothing (1.0.1, gu-native #244): a drag's turn of the camera spread over a
+                              // moment, 0 (off, as before) to 100 (runtime/touch.cpp cam_smooth)
+    int camera_shake;         // [Controls] CameraShake (1.0.1, #244): the hunt camera shakes while the game rumbles, 0 (off)
+                              // to 100 (runtime/hle/mousecam.c shake)
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -310,6 +317,8 @@ int config_live_touch_show(int button);        // TB_*
 uint32_t config_live_touch_combo(int index);   // its buttons (config_combo_mask)
 int config_live_touch_combo_pad(int index);    // PADB_*
 float config_live_touch_camera(void);
+int config_live_touch_cam_smooth(void);  // [Touch] CameraSmoothing (0..100)
+int config_live_camera_shake(void);      // [Controls] CameraShake (0..100)
 float config_live_touch_opacity(void);
 int config_live_touch_vibration(void);  // [Touch] Vibration
 int config_live_phone_rumble(void);     // [Controls] PhoneRumble

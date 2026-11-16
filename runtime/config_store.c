@@ -25,7 +25,7 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_touch, live_touch_hud, live_touch_show[TB_COUNT], live_touch_combo[TOUCH_COMBOS], live_touch_combo_pad[TOUCH_COMBOS], live_touch_cam, live_touch_opacity, live_lock_on = {1}, live_gyro_aim, live_gyro_sens, live_mouse_menus = {1},
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1}, live_pause_menu = {1},
                      live_shadows = {1}, live_bloom = {1}, live_grass = {1}, live_effects = {1}, live_reverb = {1},
-                     live_online_notice, live_send_all_rewards;
+                     live_online_notice, live_send_all_rewards, live_touch_cam_smooth, live_camera_shake;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -69,6 +69,8 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->gyro_sensitivity != saved.gyro_sensitivity) set_float(&live_gyro_sens, c->gyro_sensitivity);
     if (all || c->mouse_menus != saved.mouse_menus) SDL_SetAtomicInt(&live_mouse_menus, c->mouse_menus);
     if (all || c->touch_camera != saved.touch_camera) set_float(&live_touch_cam, c->touch_camera);
+    if (all || c->touch_cam_smooth != saved.touch_cam_smooth) SDL_SetAtomicInt(&live_touch_cam_smooth, c->touch_cam_smooth);
+    if (all || c->camera_shake != saved.camera_shake) SDL_SetAtomicInt(&live_camera_shake, c->camera_shake);
     if (all || c->touch_opacity != saved.touch_opacity) set_float(&live_touch_opacity, c->touch_opacity);
     if (all || c->touch_vibration != saved.touch_vibration) SDL_SetAtomicInt(&live_touch_vibration, c->touch_vibration);
     if (all || c->phone_rumble != saved.phone_rumble) SDL_SetAtomicInt(&live_phone_rumble, c->phone_rumble);
@@ -186,6 +188,8 @@ void config_combo_text(uint32_t mask, char *out, size_t size) {
         if (mask >> i & 1) n += (size_t)snprintf(out + n, size - n, "%s%s", n ? "+" : "", COMBO_NAMES[i]);
 }
 float config_live_touch_camera(void) { return get_float(&live_touch_cam); }
+int config_live_touch_cam_smooth(void) { return SDL_GetAtomicInt(&live_touch_cam_smooth); }
+int config_live_camera_shake(void) { return SDL_GetAtomicInt(&live_camera_shake); }
 float config_live_touch_opacity(void) { return get_float(&live_touch_opacity); }
 int config_live_touch_vibration(void) { return SDL_GetAtomicInt(&live_touch_vibration); }
 int config_live_phone_rumble(void) { return SDL_GetAtomicInt(&live_phone_rumble); }
@@ -262,7 +266,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
 // What config_save writes: a setting of the table (setting) or a Quest<number>, RecentServer<n> or RecentKey<n> entry
 // (setting NULL)
 typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
-// (every setting of g_settings, 133 now, 134 on a desktop, the quests set apart, the servers and keys remembered)
+// (every setting of g_settings, 136 now, 137 on a desktop, the quests set apart, the servers and keys remembered)
 #define ENTRY_MAX (HP_QUESTS_MAX + 192 + 2 * LDN_RECENT)
 // A RecentServer<n> / RecentKey<n> line's key, normalized: what config_save writes again or leaves out
 static bool recent_key(const char *normalized) {

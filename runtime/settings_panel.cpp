@@ -215,7 +215,7 @@ bool touch_screen() {
 bool touch_rows() { return touch_screen() || s.saved.touch_controls == TOUCH_ON; }
 // The touch settings of the TB_ list with a row of their own elsewhere (MENU.md: the floating stick on Touch controls, the
 // Hunter Arts' taps with a controller on Controller), not in Buttons on the screen nor in its count
-bool tb_elsewhere(int i) { return i == TB_FLOAT_STICK || i == TB_ARTS_PAD; }
+bool tb_elsewhere(int i) { return i == TB_FLOAT_STICK || i == TB_ARTS_PAD || i == TB_HOLD_HIDE; }
 struct Row;
 void control_profile_row(std::vector<Row> &r);  // (the Controls page's link to the control profiles: further down)
 void button_images_row(std::vector<Row> &r);    // (...and to the buttons' pictures)
@@ -944,6 +944,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(touch_controls);
     SAME(touch_hud);
     SAME(touch_camera);
+    SAME(touch_cam_smooth);
+    SAME(camera_shake);
     SAME(touch_opacity);
     SAME(aspect_ratio);
     SAME(fov);
@@ -2629,9 +2631,24 @@ void rows_controls_50(std::vector<Row> &r) {
     Config &c = s.draft;
     number(r, "touch.camera", tr("Camera speed"), &c.touch_camera, lo("CameraSpeed"), hi("CameraSpeed"), .05f, ini("CameraSpeed"));
     r.back().value = fmt("%.2fx", c.touch_camera);
+    // (1.0.1, gu-native #244: a drag's turn spread over a moment, runtime/touch.cpp cam_smooth; 0 as before)
+    number(r, "touch.smooth", "Camera smoothing", &c.touch_cam_smooth, 0, 100, 5, ini("CameraSmoothing"));
+    r.back().value = c.touch_cam_smooth ? fmt("%d%%", c.touch_cam_smooth) : std::string(tr("Off"));
+    r.back().help = tr("A drag's turn of the camera spread over a moment: smoother, a little behind your finger. The whole turn always comes. Off: the camera follows your finger at once, as before.");
 }
-void reset_controls_50() { s.draft.touch_camera = config_defaults().touch_camera; }
+void reset_controls_50() {
+    s.draft.touch_camera = config_defaults().touch_camera;
+    s.draft.touch_cam_smooth = config_defaults().touch_cam_smooth;
+}
 MENU_ENTRY("controls", 50, rows_controls_50, reset_controls_50, touch_rows);
+// (1.0.1, #244: the hunt camera shakes while the game rumbles, runtime/hle/mousecam.c; with any controls, so its own entry)
+void rows_controls_55(std::vector<Row> &r) {
+    number(r, "camera.shake", "Camera shake", &s.draft.camera_shake, 0, 100, 5, ini("CameraShake"));
+    r.back().value = s.draft.camera_shake ? fmt("%d%%", s.draft.camera_shake) : std::string(tr("Off"));
+    r.back().help = tr("The camera shakes in a hunt when the game rumbles (a roar, a heavy blow, a monster landing), as strongly as the rumble and this. Off: the camera as the game moves it.");
+}
+void reset_controls_55() { s.draft.camera_shake = config_defaults().camera_shake; }
+MENU_ENTRY("controls", 55, rows_controls_55, reset_controls_55);
 void rows_controls_60(std::vector<Row> &r) {
 #ifdef __ANDROID__
     add_bool(r, "lock.on", "Lock-on", &s.draft.lock_on, ini("LockOn"));  // (the MH4U port's name)
@@ -3763,20 +3780,21 @@ const char *const TB_TITLES[TB_COUNT] = {"Attacks (A / X)", "Evade (B)", "Guard 
                                          "Layout for bows and bowguns", "Fire / shoot", "Reload / melee", "Aim",
                                          "Crouching fire / coating", "Ammo arrows", "Item bar arrows", "ZL in menus", "ZR in menus",
                                          "Menu pad", "Run with the stick", "Keep guarding while sliding", "Lock-on button", "Floating stick",
-                                         "L and R in menus", "D-pad in menus", "Hunter Arts with a controller"};
+                                         "L and R in menus", "D-pad in menus", "Hunter Arts with a controller",
+                                         "Long press hides the controls", "Slide between buttons: both pressed"};
 const char *const TB_KEYS[TB_COUNT] = {"ShowAttacks", "ShowDodge", "ShowGuard", "ShowSheathe", "ShowPlus", "ShowMinus", "ShowDpad",
                                        "ShowL", "ShowZL", "ShowZR", "ShowL3", "ShowR3", "ShowStick", "ShowRanged", "ShowFire",
                                        "ShowSecond", "ShowAim", "ShowRangedSpecial", "ShowAmmo", "ShowItemArrows", "ShowMenuZL",
                                        "ShowMenuZR", "ShowMenuPad", "StickRun", "GuardSlide", "ShowLockOn", "FloatingStick",
-                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController"};
+                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController", "HoldToHide", "SlideBoth"};
 // (their rows' order: each way of a button by it - keeping the guard by Guard, the run and the floating stick by the stick,
 // the D-pad in menus by the D-pad -, the menu pad before the tabs that go with it; the Hunter Arts' taps with a controller
 // last, a controller's way. The floating stick and the Arts' taps have rows of their own elsewhere: tb_elsewhere)
-const int TB_ORDER[TB_COUNT] = {TB_ATTACKS, TB_DODGE, TB_GUARD, TB_GUARD_SLIDE, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD,
+const int TB_ORDER[TB_COUNT] = {TB_ATTACKS, TB_DODGE, TB_GUARD, TB_GUARD_SLIDE, TB_SLIDE_BOTH, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD,
                                 TB_DPAD_MENUS, TB_L, TB_ZL, TB_LOCKON, TB_ZR, TB_L3, TB_R3, TB_STICK, TB_FLOAT_STICK, TB_STICK_RUN,
                                 TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_PAD, TB_MENU_LR,
-                                TB_MENU_ZL, TB_MENU_ZR, TB_ARTS_PAD};
-static_assert(TB_COUNT == 30, "TB_ORDER: a place for each of the touch settings");
+                                TB_MENU_ZL, TB_MENU_ZR, TB_ARTS_PAD, TB_HOLD_HIDE};
+static_assert(TB_COUNT == 32, "TB_ORDER: a place for each of the touch settings");
 int s_combo;  // the combined button being edited
 void touch_button_rows(std::vector<Row> &r) {
     Config &c = s.draft;
@@ -3799,6 +3817,8 @@ void touch_button_rows(std::vector<Row> &r) {
                 r.back().help = tr("The menu pad's L and R tabs above it, which turn the menus' pages (ZL and ZR when the game's options turn pages with them). Off: the menu pad without them.");
             if (i == TB_ARTS_PAD)
                 r.back().help = tr("With a controller connected (the touch controls hidden), a tap on a Hunter Art's panel performs it, with what your Control Type uses for it. Off: the panel takes no taps then.");
+            if (i == TB_SLIDE_BOTH)  // (1.0.1, both platforms; the MH4U port's the same name and default)
+                r.back().help = tr("On: a thumb that slides from one button onto another keeps both pressed, as two fingers would: R onto B as onto X, Evade onto an attack, one attack onto the other, any of A, B, X, Y and the shoulder buttons onto another, the combined buttons too. Slid back onto the button it started on, that one alone again. Never in the game's menus. Off: the slides of 1.0.");
 #ifndef __ANDROID__  // (the default ini says nothing of these two; a phone's: PHONE_HELP)
             if (i == TB_MENU_ZL)
                 r.back().help = tr("With the menu pad, a ZL tab above its left one (L when the game turns pages with ZL and ZR). Some menus use it to change sections or show more information: the item box, the smithy.");
@@ -3927,6 +3947,13 @@ void rows_controls_touch_60(std::vector<Row> &r) {
 }
 void reset_controls_touch_60() { s.draft.touch_show[TB_FLOAT_STICK] = config_defaults().touch_show[TB_FLOAT_STICK]; }
 MENU_ENTRY("controls/touch", 60, rows_controls_touch_60, reset_controls_touch_60);
+// (1.0.1, Discord: a long press where no control is hides the controls, another shows them; runtime/touch.cpp hold_hide)
+void rows_controls_touch_65(std::vector<Row> &r) {
+    add_bool(r, "touch.holdhide", "Long press hides the controls", &s.draft.touch_show[TB_HOLD_HIDE], ini("HoldToHide"));
+    r.back().help = tr("On: hold your finger still for a moment where no control is and the touch controls hide, to watch a cutscene or the scenery; another long press anywhere shows them again. A drag still turns the camera.");
+}
+void reset_controls_touch_65() { s.draft.touch_show[TB_HOLD_HIDE] = config_defaults().touch_show[TB_HOLD_HIDE]; }
+MENU_ENTRY("controls/touch", 65, rows_controls_touch_65, reset_controls_touch_65);
 MENU_ENTRY("controls/touch", 70, button_images_row);
 // The input group's (S08): the Hunter Arts' taps with a controller on Controls > Controller (MENU.md 3.1); the menu pad's
 // L and R and the D-pad in menus stay in Buttons on the screen

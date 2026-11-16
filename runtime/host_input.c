@@ -624,6 +624,7 @@ static void control_poll(void) {
             if (!strcmp(cmd, "finger")) { finger_command(line); continue; }
             if (!strcmp(cmd, "touchedit")) { touch_edit_begin(); continue; }  // (as from the settings menu: once it is closed)
             if (!strcmp(cmd, "fakewindow")) { touch_test_window(atoi(arg)); continue; }  // fakewindow <ms> (runtime/touch.cpp)
+            if (!strcmp(cmd, "shaketest")) { mousecam_shake_test(atoi(arg)); continue; }  // shaketest <ms> (hle/mousecam.c)
             if (!strcmp(cmd, "mousemove")) {  // mousemove <x> <y> <ms>: mouse look at that speed (counts a second)
                 char arg3[16] = "";
                 sscanf(line, "%*s %*s %*s %15s", arg3);

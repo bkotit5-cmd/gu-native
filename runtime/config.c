@@ -68,7 +68,8 @@ _Static_assert(BIND_COMBO6 - BIND_COMBO1 + 1 == TOUCH_COMBOS, "a keybind for eac
 // thank-you not shown yet, then the combined buttons, none, gpu, the menu's hint not seen yet, the mouse in the game's
 // menus, the grass, the lock-on's buttons shown, the notice about playing online not shown yet, the pause in the menu, and
 // no hub server or matchmaking key remembered yet; the gyro's aim off, at its usual sensitivity; the effects drawn. The fields
-// after it are zero by default, with no value here: crossplay off, the rewards sent one at a time, as the game does)
+// after it are zero by default, with no value here: crossplay off, the rewards sent one at a time, as the game does, no
+// smoothing of a drag's turn and no camera shake)
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -311,6 +312,12 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "PhoneRumble = On\n"
     "\n"
+    "; The hunt camera shakes while the game rumbles (a roar, a heavy blow, a monster landing), as strongly as the\n"
+    "; rumble times this. 0: off, the camera as the game moves it\n"
+    "; Between 0 and 100\n"
+    "; Default: 0\n"
+    "CameraShake = 0\n"
+    "\n"
     "; The lock-on, as in the newer games: the camera keeps turning to the monster the game's Target Cam has chosen (or\n"
     "; the nearest), and a bow's or a bowgun's shot from a normal stance goes to it (the player's own aim, crouching fire\n"
     "; and the styles' moves are left alone). The Lock-on button on the screen (the port's own: it presses none of the\n"
@@ -383,6 +390,13 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "GuardSlide = Off\n"
     "\n"
+    "; On: a thumb that slides from one button onto another keeps both pressed, as two fingers would: Guard onto the\n"
+    "; attacks or Evade, Evade onto an attack, one attack onto the other, any of A, B, X, Y and the shoulder buttons onto\n"
+    "; another, the combined buttons too; slid back onto the button it started on, that one alone again. Never in the\n"
+    "; game's menus. Off: the slides of 1.0 (a thumb from Guard or Evade slid onto the attacks becomes that attack)\n"
+    "; Default: On\n"
+    "SlideBoth = On\n"
+    "\n"
     "; The Lock-on button: a tap turns the lock-on on or off (Controls' LockOn), and the target button (ZL) moves it to\n"
     "; another monster. It is the port's own, not one of the game's buttons\n"
     "; Default: On\n"
@@ -392,6 +406,11 @@ static const char DEFAULT_INI[] =
     "; it stays where it is\n"
     "; Default: Off\n"
     "FloatingStick = Off\n"
+    "\n"
+    "; On: a long press (about 0.75 seconds, the finger still) where no control is hides the touch controls, to watch a\n"
+    "; cutscene or the scenery; another long press anywhere shows them again. A drag turns the camera as always\n"
+    "; Default: On\n"
+    "HoldToHide = On\n"
     "\n"
     "; L and the target button (ZL) were turned on once for the lock-on (up to 0.1.9.2 a long press on L turned it on and\n"
     "; off; the target button moves it to another monster). Written by the app; Off, a file of an older version (where\n"
@@ -453,6 +472,12 @@ static const char DEFAULT_INI[] =
     "; Between 0.2 and 5\n"
     "; Default: 1.0\n"
     "CameraSpeed = 1.0\n"
+    "\n"
+    "; A drag's turn of the camera spread over a moment, smoother and a little behind the finger: 0 off (the camera\n"
+    "; follows the finger at once), 100 the smoothest. The whole turn always comes\n"
+    "; Between 0 and 100\n"
+    "; Default: 0\n"
+    "CameraSmoothing = 0\n"
     "\n"
     "; How solid the controls are drawn\n"
     "; Between 0.2 and 1\n"
@@ -868,6 +893,7 @@ const ConfigSetting g_settings[] = {
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Controls", "PhoneRumble", phone_rumble, false),
+    {"Controls", "CameraShake", SET_INT, F(camera_shake), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Controls", "LockOn", lock_on, false),
     ON_OFF("Controls", "GyroAim", gyro_aim, false),
     {"Controls", "GyroSensitivity", SET_FLOAT, F(gyro_sensitivity), 0, 0.2f, 3.0f, NULL, NULL, false, ERR_VIEW},
@@ -907,11 +933,14 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Touch", "ShowMenuLR", touch_show[TB_MENU_LR], false),
     ON_OFF("Touch", "DpadInMenus", touch_show[TB_DPAD_MENUS], false),
     ON_OFF("Touch", "ArtsWithController", touch_show[TB_ARTS_PAD], false),
+    ON_OFF("Touch", "HoldToHide", touch_show[TB_HOLD_HIDE], false),
+    ON_OFF("Touch", "SlideBoth", touch_show[TB_SLIDE_BOTH], false),
 #define COMBO(n) {"Touch", "Combo" #n, SET_TEXT, F(touch_combo[n - 1]), sizeof g_config.touch_combo[0], 0, 0, NULL, NULL, false, ERR_MISC}, \
     {"Touch", "Combo" #n "Pad", SET_CHOICE, F(touch_combo_pad[n - 1]), 0, 0, 0, \
      "None,L3,R3,Minus,Guide,Misc,Paddle1,Paddle2,Paddle3,Paddle4,Touchpad", NULL, false, ERR_MISC}
     COMBO(1), COMBO(2), COMBO(3), COMBO(4), COMBO(5), COMBO(6),
     {"Touch", "CameraSpeed", SET_FLOAT, F(touch_camera), 0, 0.2f, 5.0f, NULL, NULL, false, ERR_VIEW},
+    {"Touch", "CameraSmoothing", SET_INT, F(touch_cam_smooth), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.2f, 1.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Touch", "Vibration", touch_vibration, false),
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
