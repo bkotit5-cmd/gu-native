@@ -58,8 +58,64 @@ static void unread(const char *p) {
     if (g_unread++ < 5) LOG("[romfs] WARNING: can't read %s: %s\n", p, strerror(errno));
 }
 
+static Dir *scan(const char *path, const char *name, int depth);
+
+// (scan) One entry of dir, at host path p (malloc'd: a file keeps it): a folder scanned in turn, a file added, else dropped
+static void scan_entry(Dir *dir, char *p, const char *name, bool is_dir, bool is_file, uint64_t size, int depth) {
+    if (is_dir) {
+        Dir *c = scan(p, name, depth + 1);
+        free(p);
+        if (c) add_dir(dir, c);
+    } else if (is_file) {
+        File *f = calloc(1, sizeof *f);
+        f->name = strdup(name), f->path = p, f->size = size;
+        add_file(dir, f);
+    } else {
+        free(p);
+    }
+}
+
+static char *join(const char *path, const char *name) {
+    size_t n = strlen(path) + strlen(name) + 2;
+    char *p = malloc(n);
+    snprintf(p, n, "%s/%s", path, name);
+    return p;
+}
+
+#ifdef _WIN32
+// (Windows) Each entry's size as its folder lists it (plat_list_dir), no file opened. A stat per file opened all of the
+// game's 35,531, and on a hard disk whose cache had let their records go that was a disk read each: the game sat between
+// "GetService fsp-srv" and the first [romfs] line at 0.4 % CPU, looking hung, from under 2 minutes to over 6 (PC tests of
+// 1.0.1 on a shared hard disk; 1.0's scan was the same). Listed, only the 2,321 folders are read, and main.c's
+// plat_count_files has just listed them. A link or other reparse point is still stat'ed: it counts as what it points at.
+typedef struct { Dir *dir; const char *path; int depth; } ScanAt;
+static void scan_listed(const char *name, int kind, uint64_t size, void *arg) {
+    ScanAt *at = arg;
+    if (name[0] == '.') return;
+    char *p = join(at->path, name);
+    if (kind == PLAT_DIR_LINK) {
+        struct stat st;
+        if (stat(p, &st) != 0) { unread(p), free(p); return; }
+        scan_entry(at->dir, p, name, S_ISDIR(st.st_mode), S_ISREG(st.st_mode), (uint64_t)st.st_size, at->depth);
+    } else {
+        scan_entry(at->dir, p, name, kind == PLAT_DIR_FOLDER, kind == PLAT_DIR_FILE, size, at->depth);
+    }
+}
+#endif
+
 static Dir *scan(const char *path, const char *name, int depth) {
     if (depth > 32) return NULL;
+#ifdef _WIN32
+    Dir *dir = calloc(1, sizeof *dir);
+    dir->name = strdup(name);
+    ScanAt at = {dir, path, depth};
+    if (!plat_list_dir(path, scan_listed, &at)) {
+        if (depth) unread(path);  // (a top folder that isn't there is told where it is opened)
+        free(dir->name), free(dir);
+        return NULL;
+    }
+    return dir;
+#else
     DIR *dd = opendir(path);
     if (!dd) {
         if (depth) unread(path);  // (a top folder that isn't there is told where it is opened)
@@ -70,25 +126,14 @@ static Dir *scan(const char *path, const char *name, int depth) {
     struct dirent *e;
     while ((e = readdir(dd))) {
         if (e->d_name[0] == '.') continue;
-        size_t n = strlen(path) + strlen(e->d_name) + 2;
-        char *p = malloc(n);
-        snprintf(p, n, "%s/%s", path, e->d_name);
+        char *p = join(path, e->d_name);
         struct stat st;
         if (stat(p, &st) != 0) { unread(p), free(p); continue; }
-        if (S_ISDIR(st.st_mode)) {
-            Dir *c = scan(p, e->d_name, depth + 1);
-            free(p);
-            if (c) add_dir(dir, c);
-        } else if (S_ISREG(st.st_mode)) {
-            File *f = calloc(1, sizeof *f);
-            f->name = strdup(e->d_name), f->path = p, f->size = (uint64_t)st.st_size;
-            add_file(dir, f);
-        } else {
-            free(p);
-        }
+        scan_entry(dir, p, e->d_name, S_ISDIR(st.st_mode), S_ISREG(st.st_mode), (uint64_t)st.st_size, depth);
     }
     closedir(dd);
     return dir;
+#endif
 }
 
 // overlay `src` onto `dst`: its files replace or join dst's, its folders merge. Names match in any case (a mod's
@@ -228,7 +273,9 @@ static void mod_bytes(const Dir *d, int *files, uint64_t *bytes, int *tex, uint6
 
 static bool build(RomfsImage *im, const char *base_dir, const char *const *overlays, int noverlays, bool game) {
     int unread0 = g_unread;
+    uint64_t t0 = plat_now_ns();
     Dir *root = scan(base_dir, "", 0);
+    double scan_ms = (plat_now_ns() - t0) / 1e6;
     if (!root) { LOG("[romfs] cannot read %s\n", base_dir); return false; }
     uint64_t own = 0, movies = 0;
     if (game) own_bytes(root, 0, false, &own, &movies);
@@ -310,7 +357,7 @@ static bool build(RomfsImage *im, const char *base_dir, const char *const *overl
     im->files = l.files;  // (flatten order is data order)
     im->nfiles = l.nf;
     free(l.dirs);
-    LOG("[romfs] %d files, %d folders, image %.1f GB\n", l.nf, l.nd, im->size / 1e9);
+    LOG("[romfs] %d files, %d folders, image %.1f GB (its folder listed in %.0f ms)\n", l.nf, l.nd, im->size / 1e9, scan_ms);
     if (!game) return true;
     // (version 1.4.0's is 12.3 GB, 1.4 of them its movies, and none of its files is empty. A copy cut short, with every
     // file there but some of them empty or short, starts and then fails in ways that look like the port's: a black

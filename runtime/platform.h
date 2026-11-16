@@ -92,6 +92,12 @@ void plat_fatal_notice_why(const char *why);
 int plat_thread_create(void *(*fn)(void *), void *arg, size_t stack);
 #ifdef _WIN32
 void plat_thread_below_normal(void);  // the calling thread gives way to the game's (nvn/vulkan/exec.c: shader builds)
+// A folder's entries as Windows lists them, each with its size: fn(name, kind, size, arg) for each but "." and "..". The
+// size comes with the name and no file is opened (romfs.c's scan: a stat per file read each one's record from the disk,
+// and on a hard disk whose cache had let them go the game's 35,531 took minutes). A link or other reparse point comes as
+// PLAT_DIR_LINK with its own size: stat it for what it points at. false: the folder can't be listed (errno set).
+enum { PLAT_DIR_FILE = 1, PLAT_DIR_FOLDER, PLAT_DIR_LINK };
+bool plat_list_dir(const char *dir, void (*fn)(const char *name, int kind, uint64_t size, void *arg), void *arg);
 #endif
 // The calling thread's name as the system's tools show it (top, simpleperf, /proc/<pid>/task/<tid>/comm; up to 15
 // characters): "vsync", "upload-2", "g44-50". Without it every thread the runtime makes is "SDLThread" on Android, the

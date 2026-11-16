@@ -283,6 +283,30 @@ static int count_files(const char *dir, int depth) {
 }
 int plat_count_files(const char *dir) { return count_files(dir, 0); }
 
+bool plat_list_dir(const char *dir, void (*fn)(const char *name, int kind, uint64_t size, void *arg), void *arg) {
+    size_t n = strlen(dir);
+    char *pat = malloc(n + 3);
+    if (!pat) { errno = ENOMEM; return false; }
+    memcpy(pat, dir, n), memcpy(pat + n, "\\*", 3);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileExA(pat, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+    free(pat);
+    if (h == INVALID_HANDLE_VALUE) {  // (romfs.c's log names the reason)
+        DWORD e = GetLastError();
+        if (e == ERROR_FILE_NOT_FOUND) return true;  // (nothing in it: a drive's empty root, which has no "." or "..")
+        errno = e == ERROR_ACCESS_DENIED ? EACCES : e == ERROR_DIRECTORY ? ENOTDIR : e == ERROR_NOT_ENOUGH_MEMORY ? ENOMEM : ENOENT;
+        return false;
+    }
+    do {
+        if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
+        DWORD a = fd.dwFileAttributes;
+        int kind = a & FILE_ATTRIBUTE_REPARSE_POINT ? PLAT_DIR_LINK : a & FILE_ATTRIBUTE_DIRECTORY ? PLAT_DIR_FOLDER : PLAT_DIR_FILE;
+        fn(fd.cFileName, kind, (uint64_t)fd.nFileSizeHigh << 32 | fd.nFileSizeLow, arg);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return true;
+}
+
 bool plat_path_from_utf8(const char *utf8, char *out, size_t size) {
     wchar_t w[MAX_PATH * 2], shrt[MAX_PATH * 2];
     if (!MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, MAX_PATH * 2)) return false;
