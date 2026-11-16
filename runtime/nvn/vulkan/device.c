@@ -1779,7 +1779,7 @@ static void present_made(TexBackend *real, double a) {
     if (vh > wh) vh = wh, vw = wh * a;
     vk_present_draw(vk_cmd(), g, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
     OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
-                        g_vk.sc_extent.width, g_vk.sc_extent.height, sc_turn};
+                        g_vk.sc_extent.width, g_vk.sc_extent.height, sc_turn, overlay_hdr_paper()};  // (as the game's frames)
     overlay_draw(vk_cmd(), &ot);
     char path[300];
     extern char g_burst_name[200];
