@@ -377,6 +377,8 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   was 32.7 dB from the truth against 29.2 for a blend and 26.5 for repeating the frame. Anbernic RG406V (Mali-G57), 960x720,
   30 FPS: 2.6 ms of GPU a made picture (the made picture's own pass 1.2, testing 12 HUD boxes at every pixel had cost 3.8;
   the HUD's mask is now in the 1/4 level's green) plus its present, the game still at 30.0. `gpuprof` names each pass.
+  When the game stays 12 % slower than its limit for 3 s with it (a GPU that can't do both), none is made for 20 s; after
+  the third time, not until the game starts again.
 - `MHGU_PERF_PREROTATE=1` (`device.c` `sc_turn`, read once; on by default, `=0` the old way): the window image drawn turned for the
   panel. Presented upright in landscape (IDENTITY), the picture is turned by the system every frame: an Anbernic RG406V's DPU does
   it as it scans out (`dumpsys SurfaceFlinger`'s composer table: DPU, transform 90), but a Moto g06's MediaTek composer sends the

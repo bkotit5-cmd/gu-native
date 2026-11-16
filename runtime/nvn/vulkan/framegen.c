@@ -347,13 +347,18 @@ static struct {
     uint64_t made_no;
     // the per-minute line
     uint64_t log_t0;
-    uint32_t n_game, n_made, n_shown, n_warm, n_menu, n_settings, n_cadence, n_format;
+    uint32_t n_game, n_made, n_shown, n_warm, n_menu, n_settings, n_cadence, n_format;  // (n_slow: below)
     double gpu_sum, gpu_max;
     uint32_t gpu_n;
     int last_n;
     int state, told_state;    // 0 off / 1 making; the last one logged
     uint64_t told_at;
     int told_lines;
+    // the game's own rate while pictures are made (a phone whose GPU can't do both: none made for a while)
+    uint64_t last_real_ns, pause_until;
+    double avg_ns;            // the time between game frames, smoothed
+    int slow, pauses;
+    uint32_t n_slow;
     // eval (MHGU_FRAMEGEN_EVAL)
     int eval_left, eval_every, eval_no;
     uint64_t eval_at, first_ns;  // (MHGU_FRAMEGEN_EVAL_AT, ns after the first frame; when that was)
@@ -626,11 +631,14 @@ static void minute_line(uint64_t now) {
     if (fg.n_game)
         LOG("[framegen] last %.0f s: %u pictures made between %u of the game's (shown %.1f FPS, the game %.1f); not made: %u "
             "warming up, %u the game's menus, %u the settings menu, %u not at half the refresh rate or less, %u other "
-            "picture format; GPU %.2f ms a made picture (max %.2f, %u measured), %ux%u, %d vsyncs a game frame\n",
+            "picture format, %u paused (the game fell behind its limit); GPU %.2f ms a made picture (max %.2f, %u measured), "
+            "%ux%u, %d vsyncs a game frame\n",
             s, fg.n_made, fg.n_game, (fg.n_game + fg.n_shown) / s, fg.n_game / s, fg.n_warm, fg.n_menu, fg.n_settings,
-            fg.n_cadence, fg.n_format, fg.gpu_n ? fg.gpu_sum / fg.gpu_n : 0.0, fg.gpu_max, fg.gpu_n, fg.w, fg.h, fg.last_n);
+            fg.n_cadence, fg.n_format, fg.n_slow, fg.gpu_n ? fg.gpu_sum / fg.gpu_n : 0.0, fg.gpu_max, fg.gpu_n, fg.w, fg.h,
+            fg.last_n);
     fg.log_t0 = now;
     fg.n_game = fg.n_made = fg.n_shown = fg.n_warm = fg.n_menu = fg.n_settings = fg.n_cadence = fg.n_format = 0;
+    fg.n_slow = 0;
     fg.gpu_sum = fg.gpu_max = 0, fg.gpu_n = 0;
 }
 
@@ -734,6 +742,30 @@ TexBackend *vk_framegen_frame(TexBackend *real, int n, int *follow) {
     if (!eval && n < 2) why = "the FPS limit is not half the screen's refresh rate or less", fg.n_cadence++;
     else if (overlay_menu_open()) why = "the settings menu is open", fg.n_settings++;
     else if (menu) why = menu & 2 ? "the title or the main menu" : "a menu of the game's", fg.n_menu++;
+    else if (!eval && fg.pauses >= 3) why = "the game can't keep its frame rate with it: off until the game starts again", fg.n_slow++;
+    else if (!eval && now < fg.pause_until) why = "the game fell behind its frame rate with it: paused for 20 s", fg.n_slow++;
+    // The game's own rate while pictures are made: when the time between its frames stays 12 % over the limit's for 3 s
+    // (a phone whose GPU can't draw the game and the made pictures both), none is made for 20 s, and after the third
+    // time not again until the game starts again. A load's hitch alone is far from 3 s of it.
+    uint64_t dt = fg.last_real_ns ? now - fg.last_real_ns : 0;
+    fg.last_real_ns = now;
+    float cap = config_live_fps();
+    if (!eval && !why && fg.state == 1 && dt > 0 && dt < 1000000000ull && cap > 0 && cap < FPS_UNLIMITED) {  // (a desktop's)
+        double want = 1e9 / cap;
+        fg.avg_ns = fg.avg_ns > 0 ? fg.avg_ns * 0.95 + dt * 0.05 : (double)dt;
+        fg.slow = fg.avg_ns > want * 1.12 ? fg.slow + 1 : 0;
+        if ((double)fg.slow * want >= 3e9) {
+            fg.pauses++, fg.slow = 0, fg.avg_ns = 0;
+            fg.pause_until = now + 20000000000ull;
+            LOG("[framegen] the game falls behind its %.0f FPS with the made pictures (%.1f ms a frame): %s\n", cap,
+                (double)dt / 1e6, fg.pauses >= 3 ? "none made until the game starts again" : "none made for 20 s");
+            why = fg.pauses >= 3 ? "the game can't keep its frame rate with it: off until the game starts again"
+                                 : "the game fell behind its frame rate with it: paused for 20 s";
+            fg.n_slow++;
+        }
+    } else if (why || fg.state != 1) {
+        fg.slow = 0, fg.avg_ns = 0;
+    }
     VkFormat f = real->format == VK_FORMAT_R8G8B8A8_UNORM || real->format == VK_FORMAT_R8G8B8A8_SRGB ||
                          real->format == VK_FORMAT_B8G8R8A8_UNORM || real->format == VK_FORMAT_B8G8R8A8_SRGB
                      ? VK_FORMAT_R8G8B8A8_UNORM
