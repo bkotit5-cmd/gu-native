@@ -13,8 +13,11 @@ Hecho con Claude Code (Opus 5.5). Muchas de las decisiones fueron propias, porqu
 La versión más nueva está en [Releases](../../releases/latest): el APK para Android y `MHGU-PC-<versión>.zip` para PC.
 Habla con otros jugadores y pide ayuda en el [Discord](https://discord.gg/sk5xEjEMwF) de la comunidad.
 
+**¿La misma partida en tu PC y en tu teléfono?** Mira [Jugar en la PC y en el teléfono con la misma partida (Google Drive)](#jugar-en-la-pc-y-en-el-teléfono-con-la-misma-partida-google-drive).
+
 ## Contenido
 
+- [Jugar en la PC y en el teléfono con la misma partida (Google Drive)](#jugar-en-la-pc-y-en-el-teléfono-con-la-misma-partida-google-drive)
 - [Android](#android): [Qué ofrece](#qué-ofrece), [¿Qué tan bien corre?](#qué-tan-bien-corre),
   [Qué necesitas](#qué-necesitas), [Instalación](#instalación), [Partidas](#partidas), [Trucos y mods](#trucos-y-mods),
   [Multijugador](#multijugador), [Dónde se guarda cada cosa](#dónde-se-guarda-cada-cosa),
@@ -27,6 +30,24 @@ Habla con otros jugadores y pide ayuda en el [Discord](https://discord.gg/sk5xEj
   [Desinstalar](#desinstalar-1), [Si algo falla](#si-algo-falla-1)
 - [Legal](#legal), [Créditos](#créditos), [Descargas oficiales](#descargas-oficiales), [Licencia](#licencia),
   [Para desarrolladores](#para-desarrolladores)
+
+## Jugar en la PC y en el teléfono con la misma partida (Google Drive)
+
+Una sola partida para tu teléfono, tu tablet y tu PC, con Google Drive en el medio. La app no tiene una nube propia ni
+sincroniza sola: en el teléfono lo hace una app de sincronización gratuita, y en la PC la partida se lleva y se trae a mano.
+
+- **Entre teléfonos y tablets, sola:** en el juego, **Carpeta de partidas** pone tu partida en una carpeta del teléfono, y
+  una app de sincronización (**FolderSync** o **Autosync for Google Drive**) mantiene esa carpeta igual a una de tu Google
+  Drive. Paso a paso: [Tener tu partida en la nube](#tener-tu-partida-en-la-nube-google-drive-y-similares).
+- **Con el juego de PC, a mano:** el juego de PC todavía no tiene **Carpeta de partidas**. Instala **Google Drive para
+  computadoras** en la PC: tu Drive aparece en el Explorador de archivos, así que la carpeta sincronizada del teléfono está ahí.
+  - **Del teléfono a la PC:** guarda en el teléfono y deja que termine la app de sincronización. En el juego de PC, **F1**,
+    **Sistema**, **Tu partida**, **Importar partida**, y elige el archivo `system` de la carpeta `MHGU save` de tu Drive.
+  - **De la PC al teléfono:** en el juego de PC, **F1**, **Sistema**, **Tu partida**, **Exportar partida**, y elige la carpeta
+    de Drive que sincroniza el teléfono. En el teléfono, cuando la app de sincronización la haya bajado: engranaje,
+    **Sistema**, **Tu partida**, **Importar partida**, y elige el archivo `system` de la carpeta nueva `MHGU_save_...`.
+- Juega en un dispositivo a la vez y guarda antes de cambiar. Importar reemplaza la partida del dispositivo al que llega; la
+  que reemplaza queda en `save_backups`. Más: [Pasar una partida entre Android y PC](#pasar-una-partida-entre-android-y-pc).
 
 ## Android
 

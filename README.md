@@ -13,8 +13,11 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 The newest version is on [Releases](../../releases/latest): the APK for Android and `MHGU-PC-<version>.zip` for PC.
 Talk with other players and ask for help in the community's [Discord](https://discord.gg/sk5xEjEMwF).
 
+**The same save on your PC and your phone?** See [Play on PC and phone with the same save (Google Drive)](#play-on-pc-and-phone-with-the-same-save-google-drive).
+
 ## Contents
 
+- [Play on PC and phone with the same save (Google Drive)](#play-on-pc-and-phone-with-the-same-save-google-drive)
 - [Android](#android): [What it does](#what-it-does), [How well does it run?](#how-well-does-it-run),
   [What you need](#what-you-need), [Setup](#setup), [Saves](#saves), [Cheats and mods](#cheats-and-mods),
   [Multiplayer](#multiplayer), [Where things are kept](#where-things-are-kept), [Update](#update-to-a-new-version),
@@ -27,6 +30,24 @@ Talk with other players and ask for help in the community's [Discord](https://di
   [If something goes wrong](#if-something-goes-wrong-1)
 - [Legal](#legal), [Credits](#credits), [Official downloads](#official-downloads), [License](#license),
   [For developers](#for-developers)
+
+## Play on PC and phone with the same save (Google Drive)
+
+One save for your phone, your tablet and your PC, with Google Drive in between. The app has no cloud of its own and
+doesn't sync by itself: a free sync app does it on the phone, and on the PC you take the save in and out by hand.
+
+- **Between phones and tablets, by itself:** in the game, **Save folder** puts your save in a folder of the phone, and a
+  sync app (**FolderSync** or **Autosync for Google Drive**) keeps that folder the same as one in your Google Drive. Step
+  by step: [Keep your save in the cloud](#keep-your-save-in-the-cloud-google-drive-and-the-like).
+- **With the PC game, by hand:** the PC game has no **Save folder** yet. Install **Google Drive for desktop** on the PC: your
+  Drive shows up in File Explorer, so the phone's synced folder is right there.
+  - **Phone to PC:** save on the phone and let the sync app finish. In the PC game, **F1**, **System**, **Your game**,
+    **Import save**, and choose the `system` file in your Drive's `MHGU save` folder.
+  - **PC to phone:** in the PC game, **F1**, **System**, **Your game**, **Export save**, and choose the Drive folder the phone
+    syncs. On the phone, once the sync app has brought it down: gear, **System**, **Your game**, **Import save**, and choose
+    the `system` file in the new `MHGU_save_...` folder.
+- Play on one device at a time, and save before you switch. Importing replaces the save on the device it goes to; the one
+  it replaces is kept in `save_backups`. More: [Move a save between Android and PC](#move-a-save-between-android-and-pc).
 
 ## Android
 
