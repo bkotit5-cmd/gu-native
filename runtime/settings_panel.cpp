@@ -46,7 +46,7 @@
 // (nvn/vulkan/device.c) the Vulkan devices that can run the game and the one in use, for the GPU row
 extern "C" int vk_gpu_list(const char **names, int max, int *in_use);
 #endif
-extern "C" float vk_screen_hdr_nits(void);      // (nvn/vulkan/device.c: the screen's HDR10; -1 none)
+extern "C" bool vk_surface_hdr10(void);         // (nvn/vulkan/device.c: the window's surface offers HDR10)
 extern "C" const char *vk_hdr_fallback(void);   // (why the picture stays SDR with HDR on; NULL: it doesn't)
 extern "C" bool host_input_real_pad(void);  // (runtime/host_input.c)
 extern "C" bool host_input_keyboard_mouse(void);  // (runtime/host_input.c: a phone's keyboard and mouse, S14)
@@ -3154,11 +3154,13 @@ void rows_graphics_colour_10(std::vector<Row> &r) {
 }
 void reset_graphics_colour_10() { colour_draft_reset(); }
 MENU_ENTRY("graphics/colour", 10, rows_graphics_colour_10, reset_graphics_colour_10);
-// The HDR output: shown where the screen has HDR10 (Android says so: vk_screen_hdr_nits), or where it is on already; a
-// desktop's monitor may have it whatever can be told before the start (Windows' HDR switch), so there it always shows
+// The HDR output: on a phone, shown only where the window's surface offers HDR10 (vk_surface_hdr10: what Android says of
+// the screen is not enough; an Anbernic RG406V says HDR10 and its surface has none), On or not: an On saved where it can't
+// be stays SDR, harmless, and says so once in the log. A desktop's monitor may have it whatever can be told before the
+// start (Windows' HDR switch), so there it always shows
 bool shown_graphics_colour_50() {
 #ifdef __ANDROID__
-    return s.draft.hdr || g_config.hdr || vk_screen_hdr_nits() >= 0;
+    return vk_surface_hdr10();
 #else
     return true;
 #endif

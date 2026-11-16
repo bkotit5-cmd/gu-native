@@ -90,7 +90,12 @@ static uint32_t instance_api;  // the Vulkan version asked of the instance
 // (nothing changes for anyone else), and the window image made HDR10 (A2B10G10R10 or A2R10G10B10 with ST 2084) when the
 // surface offers it; where it doesn't, or the swapchain can't be made so, it is made as always (SDR) and the log says
 // why. sc_hdr: the swapchain in use is HDR10 (exec.c vk_present_draw encodes the picture for it, overlay.cpp the overlay).
+// (1.0.1) On Android the extension is also asked, with the output off, where the screen says it has HDR10: Android's
+// loader lists a surface's HDR colour spaces only to an instance that has it, and the menu's HDR row shows only where
+// the surface offers HDR10 (surface_hdr10, from the first swapchain's formats). An Anbernic RG406V's screen says HDR10
+// (500 nits) and its surface offers none: the row showed, and On stayed SDR.
 static bool hdr_ext, sc_hdr;
+static int surface_hdr10 = -1;  // the window's surface offers an HDR10 format: 1 yes, 0 no, -1 not looked yet
 static const char *hdr_why;  // (the menu: why the picture stays SDR with HDR on; NULL: it is HDR, or HDR is off)
 static float hdr_peak = -2;  // the screen's peak for HDR10 in nits (0 unknown, -1 none, -2 not asked yet)
 // MHGU_HDR_TEST=1 (tests, a screen without HDR): the HDR10 encoding drawn into the SDR window image all the same (the
@@ -98,6 +103,7 @@ static float hdr_peak = -2;  // the screen's peak for HDR10 in nits (0 unknown, 
 static bool hdr_test;
 bool vk_window_hdr(void) { return sc_hdr || hdr_test; }
 const char *vk_hdr_fallback(void) { return g_config.hdr ? hdr_why : NULL; }
+bool vk_surface_hdr10(void) { return surface_hdr10 > 0; }  // (the menu's HDR row on Android: settings_panel.cpp)
 // The overlay in an HDR10 window image: its white at the paper white of the start (overlay.cpp compiles its shader for
 // it; 0: SDR)
 static float overlay_hdr_paper(void) {
@@ -188,7 +194,14 @@ static void create_instance(void) {
         if (!strcmp(ip[i].extensionName, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)) surface_caps2 = true;
     free(ip);
     if (surface_caps2) ext[n_ext++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
-    if (g_config.hdr) {  // (HDR output on: the colour spaces it needs, if the loader has them)
+#ifdef __ANDROID__
+    // (1.0.1: the output off, where the screen says it has HDR10: only to learn whether the surface offers HDR10, for the
+    // menu's row; the swapchain is made as always)
+    const bool hdr_probe = !g_config.hdr && vk_screen_hdr_nits() >= 0;
+#else
+    const bool hdr_probe = false;
+#endif
+    if (g_config.hdr || hdr_probe) {  // (HDR output on: the colour spaces it needs, if the loader has them)
         vkEnumerateInstanceExtensionProperties(NULL, &ni, NULL);
         ip = calloc(ni ? ni : 1, sizeof *ip);
         vkEnumerateInstanceExtensionProperties(NULL, &ni, ip);
@@ -196,8 +209,12 @@ static void create_instance(void) {
             if (!strcmp(ip[i].extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME)) hdr_ext = true;
         free(ip);
         if (hdr_ext) ext[n_ext++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
-        else hdr_why = "The graphics driver has no HDR colour spaces.";
-        LOG("[vk] HDR output on: %s\n", hdr_ext ? "VK_EXT_swapchain_colorspace asked for" : "the loader has no VK_EXT_swapchain_colorspace, SDR");
+        else if (g_config.hdr) hdr_why = "The graphics driver has no HDR colour spaces.";
+        if (g_config.hdr)
+            LOG("[vk] HDR output on: %s\n", hdr_ext ? "VK_EXT_swapchain_colorspace asked for" : "the loader has no VK_EXT_swapchain_colorspace, SDR");
+        else
+            LOG("[vk] HDR output off, the screen says HDR10: %s\n", hdr_ext ? "VK_EXT_swapchain_colorspace asked for, to see whether the surface offers HDR10"
+                                                                           : "the loader has no VK_EXT_swapchain_colorspace (no HDR row in the menu)");
     }
     // MHGU_VK11=1: work as Vulkan 1.1 on a newer driver (tests what a 1.1 driver gets)
     instance_api = getenv("MHGU_VK11") ? VK_API_VERSION_1_1
@@ -1334,21 +1351,31 @@ static void create_swapchain(void) {
     vkGetPhysicalDeviceSurfaceFormatsKHR(g_vk.phys, g_vk.surface, &nf, fmts);
     // scanout shows the bytes the game wrote: a UNORM swapchain (sRGB game images are read through UNORM views)
     VkSurfaceFormatKHR sf = fmts[0];
+    for (uint32_t i = 0; i < nf; i++)  // (the first sRGB one: the first of all, unless the colour spaces' extension adds others)
+        if (fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) { sf = fmts[i]; break; }
     for (uint32_t i = 0; i < nf; i++)
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) { sf = fmts[i]; break; }
     // HDR output ([Colour] HDR): an HDR10 format if the surface offers one; else the one above, and why in the log (once)
     VkSurfaceFormatKHR sdr = sf;
     bool want_hdr = false;
-    if (hdr_ext && !hdr_failed) {
-        for (uint32_t i = 0; i < nf && !want_hdr; i++)
-            if (fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT &&
-                (fmts[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || fmts[i].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32))
-                sf = fmts[i], want_hdr = true;
+    int hdr10 = -1;  // (the surface's HDR10 format: an instance without the extension sees none)
+    for (uint32_t i = 0; i < nf && hdr_ext && hdr10 < 0; i++)
+        if (fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT &&
+            (fmts[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || fmts[i].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32))
+            hdr10 = (int)i;
+    char list[400] = "";  // (the surface's formats, for the log)
+    for (uint32_t i = 0; i < nf && hdr10 < 0; i++)
+        snprintf(list + strlen(list), sizeof list - strlen(list), "%s%d/%d", i ? ", " : "", fmts[i].format, fmts[i].colorSpace);
+    if (surface_hdr10 < 0) {  // (the menu's HDR row, from the first swapchain's surface)
+        surface_hdr10 = hdr10 >= 0;
+        if (hdr_ext && !g_config.hdr)
+            LOG("[vk] HDR output off: the surface %s%s%s%s\n", hdr10 >= 0 ? "offers HDR10 (the menu shows the HDR row)" : "offers no HDR10 format",
+                hdr10 >= 0 ? "" : " (format/colour space: ", list, hdr10 >= 0 ? "" : "; no HDR row in the menu)");
+    }
+    if (g_config.hdr && hdr_ext && !hdr_failed) {  // (1.0.1: the extension may be there with the output off, for the row)
+        if (hdr10 >= 0) sf = fmts[hdr10], want_hdr = true;
         static int nlog;
         if (!want_hdr && !nlog++) {
-            char list[400] = "";
-            for (uint32_t i = 0; i < nf; i++)
-                snprintf(list + strlen(list), sizeof list - strlen(list), "%s%d/%d", i ? ", " : "", fmts[i].format, fmts[i].colorSpace);
             LOG("[vk] HDR output on, but the surface offers no HDR10 format (format/colour space: %s): SDR\n", list);
             hdr_why = "This screen or its driver offers no HDR10 picture.";
         }
