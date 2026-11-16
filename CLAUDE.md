@@ -393,7 +393,10 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   A town's world map (X) and its "Choose a destination" list are on layer 100 too (x 291..985, y 192..522), with no window of
   layer 97 beside them: in a town (`g_town_ns`, its update within 500 ms) layer 100 above y 600 and left of x 1000 keeps the
   middle as well, its prompts at the bottom right the edge. Up to 0.1.9.3 the map and the list sat right of the middle with
-  Edges / 21:9 (128 of the canvas's units at 1600:720, hudtrace on the RG406V: GU#219).
+  Edges / 21:9 (128 of the canvas's units at 1600:720, hudtrace on the RG406V: GU#219). With one of layer 100's stretched panels
+  in this frame or the two before (`ui_panel_frame`: the multiplayer menu, the Create Hub form, the hub list, x 782..1254) the
+  whole of it keeps the middle, its pieces right of x 1000 too (Bottom, as the rest of it): until 1.0.1 those went Right and
+  the window came apart with Edges / 21:9 (hudtrace on the PC at 2520x1080: x 1018 and 1254 "RT", 784 "CB").
 - Layer 110 holds the loading screen's strips (y 168, 433, 570, the 168 ones first in the pass) and, in the field, a gun's
   quick-aim reticle (one piece at about 650, 433), the lock-on markers and effects: those keep the middle at any HUD anchor, as
   the 3D picture they are on does. Up to 0.1.9.3 the reticle went right by place with Edges / 21:9, and in frames where its y
@@ -978,6 +981,19 @@ Android killing the game shows in `adb logcat` as `lowmemorykiller: Kill 'com.mh
   the art's button (726) on its row (hudtrace on the RG406V, Adept with one art): pieces left of x 700 go with the arts only on
   a row an art was drawn on (`arts_row_has`); up to 0.1.9.3 nothing took them and they stayed by the item bar. Layer 103 left
   of x 950 is taken for the arts too (the item bar's pieces start at x 1005 even with L held: hudtrace on a Moto g06).
+  The rows a finger taps (`arts_rows`, touch.cpp) are told by each art's name piece at x 746 on its row's y (its button at 726,
+  15 lower): rows at 681, 731, 781 with one art, 581, 631, 681 with three (hudtrace on the PC, Striker). Every piece of the part
+  goes with the nearest row, and two rows meet halfway between their buttons. Until 1.0.1 they were grouped by gaps of 22 in y, and a
+  ready art's glow (x 842, 17 above its row) closed the gap to the row above: with three arts a tap on the second performed the
+  first, the frame round both (GU#231).
+- The players' pictures on the buttons (Layout.image, touch.cpp `pic_texture`) are ImGui textures, each a descriptor of the
+  overlay's pool (`OVERLAY_TEXTURES`, 256; 16 until 1.0.1, when the 17th picture's allocation failed, ImGui's backend wrote
+  through the set it did not get and Mali drivers faulted: GU#237). A picture not drawn for 10 s (2 s when the 64 slots are
+  full) is handed to `overlay_retire_texture`, destroyed a second later and read again when shown; the overlay makes no texture
+  past the pool and leaves out the draws of one with no descriptor (`snap_textureless`). The backend's `AddTexture` returns no
+  set when the allocation fails (a two-line change in `third_party/cimgui/imgui/backends/imgui_impl_vulkan.cpp`). Since 1.0.1
+  the stick (its base; `image_knob` its knob), the d-pads and the sprint lock's circle take pictures too, and a control's
+  picture may go without the round frame behind it, whole and uncut (`bare <key>`, the window's Frame button).
 - Phone tests of the touch controls without the player's save: `MHGU_SAVE_DIR` to a copy and `MHGU_CONFIG` to a copy of the ini
   (`Controls = On`). On the Moto g06 adb can't read the app's save files (the app's uid, rw-rw----): copy a save from another phone's backup.
   A folder the game made in an `MHGU_SAVE_DIR` (a new game's save_0) is the app's and adb can't remove it.
