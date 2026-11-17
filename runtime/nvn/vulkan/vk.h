@@ -172,6 +172,12 @@ TexBackend *vk_tex_ms(TexBackend *b, uint32_t samples);  // b's multisampled com
 TexBackend *vk_tex_ms_readable(TexBackend *m);  // a sampled copy for its resolve
 void vk_ms_resolve(TexBackend *b);  // (exec.c) b up to date with its multisampled companion before b is read
 VkSampler vk_sampler(NvnSamplerDesc *d);
+VkSampler vk_sampler_ps1(NvnSamplerDesc *d, int level);  // (pixelated textures: PS1 filter, Brick: textures.c)
+// (the PS1 filter's 15-bit colour: exec.c) the picture b in place, 5 bits a channel with a 4x4 ordered dither
+void vk_ps1_dither(TexBackend *b);
+// The PS1 filter ([Graphics] PS1Filter) is on, with one of these parts (ps1.c; MHGU_PS1_PARTS=<mask> for tests)
+enum { PS1_TEXTURES = 1, PS1_COLOUR = 2, PS1_SCANLINES = 4, PS1_WOBBLE = 8, PS1_AFFINE = 16, PS1_ALL = 31 };
+bool vk_ps1_on(int parts);
 VkSampler vk_default_sampler(bool linear);
 void vk_image_init_layout(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect);
 // Destruction once every submission that may use the object has completed.

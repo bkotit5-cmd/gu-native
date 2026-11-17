@@ -542,7 +542,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
             if (levels >= 4 && layers == 1 && depth == 1 && samples == 1 && type == VK_IMAGE_TYPE_2D && t->target != 8 &&
                 t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 && (low_memory_textures() || g_config.low_end))
                 b->mip_skip = (g_config.low_end || very_low_memory_textures()) && levels >= 5 && (tw >= 512 || th >= 512) ? 2
-                            : g_config.low_end == LOW_END_TOASTER && levels >= 5 ? 2  // (Toaster: the 256s too)
+                            : g_config.low_end >= LOW_END_TOASTER && levels >= 5 ? 2  // (Toaster, Brick: the 256s too)
                                                                                  : 1;
             static int nlog;
             if (nlog++ < 4) LOG("[vk] BC format %d not supported by the GPU: decoded on the CPU\n", mf.vf);
@@ -1636,8 +1636,8 @@ static VkCompareOp compare_op(uint32_t f) {
     }
 }
 
-VkSampler vk_sampler(NvnSamplerDesc *d) {
-    if (d->backend) return (VkSampler)d->backend;
+// The sampler the game asked for (vk_sampler, and the pixelated ones from it); cb: where a custom border colour goes
+static void sampler_info(const NvnSamplerDesc *d, VkSamplerCreateInfo *out, VkSamplerCustomBorderColorCreateInfoEXT *cb) {
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     si.magFilter = d->mag_filter == 1 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
     uint32_t mf = d->min_filter;
@@ -1671,21 +1671,21 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
 #ifdef __ANDROID__
     bool no_aniso = g_config.low_end != 0, nearest_mips = g_config.low_end != 0;
 #else
-    bool no_aniso = g_config.low_end == LOW_END_TOASTER, nearest_mips = false;
+    bool no_aniso = g_config.low_end >= LOW_END_TOASTER, nearest_mips = false;
 #endif
     if (d->max_aniso > 1 && !no_aniso) { si.anisotropyEnable = VK_TRUE; si.maxAnisotropy = fminf(d->max_aniso, 16); }
     if (nearest_mips && mf > 1) si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     if (d->compare_mode) { si.compareEnable = VK_TRUE; si.compareOp = compare_op(d->compare_func); }
-    VkSamplerCustomBorderColorCreateInfoEXT cb = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};
+    *cb = (VkSamplerCustomBorderColorCreateInfoEXT){.sType = VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};
     if (border) {  // the standard colours; others need VK_EXT_custom_border_color (else the nearest standard one)
         const float *c = d->border;
         if (c[0] == 0 && c[1] == 0 && c[2] == 0 && c[3] == 0) si.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
         else if (c[0] == 0 && c[1] == 0 && c[2] == 0 && c[3] == 1) si.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
         else if (c[0] == 1 && c[1] == 1 && c[2] == 1 && c[3] == 1) si.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
         else if (g_vk.custom_border) {
-            memcpy(cb.customBorderColor.float32, c, 16);
+            memcpy(cb->customBorderColor.float32, c, 16);
             si.borderColor = VK_BORDER_COLOR_FLOAT_CUSTOM_EXT;
-            si.pNext = &cb;
+            si.pNext = cb;
         } else {
             float l = (c[0] + c[1] + c[2]) / 3;
             si.borderColor = c[3] < 0.5f ? VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
@@ -1701,12 +1701,81 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
             }
         }
     }
+    *out = si;
+}
+
+VkSampler vk_sampler(NvnSamplerDesc *d) {
+    if (d->backend) return (VkSampler)d->backend;
+    VkSamplerCreateInfo si;
+    VkSamplerCustomBorderColorCreateInfoEXT cb;
+    sampler_info(d, &si, &cb);
     VkSampler s;
     VK_CHECK(vkCreateSampler(g_vk.dev, &si, NULL, &s));
     if (getenv("MHGU_SAMPLER_LOG"))
-        LOG("[sampler] min %u mag %u wrap %u,%u,%u lod %g..%g bias %g aniso %g compare %u\n", mf, d->mag_filter, d->wrap[0],
-            d->wrap[1], d->wrap[2], d->lod_min, d->lod_max, d->lod_bias, d->max_aniso, d->compare_mode);
+        LOG("[sampler] min %u mag %u wrap %u,%u,%u lod %g..%g bias %g aniso %g compare %u\n", d->min_filter, d->mag_filter,
+            d->wrap[0], d->wrap[1], d->wrap[2], d->lod_min, d->lod_max, d->lod_bias, d->max_aniso, d->compare_mode);
     d->backend = (void *)s;
+    return s;
+}
+
+// Pixelated textures (1.0.1.1: [Graphics] PS1Filter, [Performance] LowEnd Brick; exec.c texture_info picks it for the 3D
+// world's draws only): the sampler d as the consoles of the late 90s drew textures, each texel a big sharp square: its
+// nearest texel when magnified, minified and between mip levels, no anisotropic filtering, and never from a mip level
+// larger than `level` of the image (texture_info: the game's level PS1_TEX_LEVEL, less what a phone's memory already
+// left out, mip_skip), so even the ground right in front of the camera is in big blocks, as in the owner's reference
+// (the suggestion's screenshot, our MHGU with a fixed small mip level). Everything else (wrapping, the LOD range above
+// it and its bias, the border, the comparison) stays the game's.
+static VkSampler ps1_make(const NvnSamplerDesc *d, int level) {
+    VkSamplerCreateInfo si;
+    VkSamplerCustomBorderColorCreateInfoEXT cb;
+    sampler_info(d, &si, &cb);
+    if (si.pNext) return VK_NULL_HANDLE;  // (a custom border colour: a GPU allows only so many of those samplers)
+    si.magFilter = si.minFilter = VK_FILTER_NEAREST;
+    si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    si.anisotropyEnable = VK_FALSE;
+    si.maxAnisotropy = 1;
+    if (si.minLod < (float)level) si.minLod = (float)level;
+    if (si.maxLod < si.minLod) si.maxLod = si.minLod;
+    VkSampler s;
+    if (vkCreateSampler(g_vk.dev, &si, NULL, &s) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (getenv("MHGU_SAMPLER_LOG"))
+        LOG("[ps1] sampler: level %d, min %u mag %u lod %g..%g bias %g\n", level, d->min_filter, d->mag_filter,
+            (double)si.minLod, (double)si.maxLod, (double)si.mipLodBias);
+    return s;
+}
+// Made once for each sampler state and level (tab), shared by the game's samplers with that state; found again by the
+// game's sampler (its VkSampler) and the level in a hash table (find), as each draw binds its textures. The render
+// thread only, as vk_sampler: no lock. Never more than PS1_SAMPLERS: past them the game's own sampler (smooth).
+#define PS1_SAMPLERS 1024  // (each sampler state the game uses, times the levels seen: some hundreds at the most)
+#define PS1_FIND 4096      // (the game's samplers and levels seen, at most half of it: a power of two)
+VkSampler vk_sampler_ps1(NvnSamplerDesc *d, int level) {
+    static struct { NvnSamplerDesc key; int level; VkSampler s; } tab[PS1_SAMPLERS];
+    static struct { VkSampler base, s; int level; } find[PS1_FIND];
+    static int n, nfind;
+    static bool full_said;
+    level = level < 0 ? 0 : level > 15 ? 15 : level;
+    VkSampler base = vk_sampler(d);
+    uint64_t h = ((uint64_t)(uintptr_t)base ^ (uint64_t)level * 0x9E3779B97F4A7C15ull) * 0xC2B2AE3D27D4EB4Full;
+    uint32_t at = (uint32_t)(h >> 40) & (PS1_FIND - 1);
+    while (find[at].base) {
+        if (find[at].base == base && find[at].level == level) return find[at].s;
+        at = (at + 1) & (PS1_FIND - 1);
+    }
+    VkSampler s = VK_NULL_HANDLE;
+    NvnSamplerDesc key = *d;
+    key.backend = NULL;
+    for (int i = 0; i < n && !s; i++)  // (another of the game's samplers with the same state: its pixelated one)
+        if (tab[i].level == level && !memcmp(&tab[i].key, &key, offsetof(NvnSamplerDesc, backend))) s = tab[i].s;
+    if (!s && n == PS1_SAMPLERS) {
+        if (!full_said) full_said = true, LOG("[ps1] %d pixelated samplers made, no more: the others stay smooth\n", n);
+        return base;
+    }
+    if (!s) {
+        s = ps1_make(d, level);
+        if (!s) s = base;  // (one that can't be: the game's own, found so again)
+        tab[n].key = key, tab[n].level = level, tab[n++].s = s;
+    }
+    if (nfind < PS1_FIND / 2) find[at].base = base, find[at].level = level, find[at].s = s, nfind++;
     return s;
 }
 

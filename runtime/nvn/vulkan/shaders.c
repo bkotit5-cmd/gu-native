@@ -312,7 +312,9 @@ static const char *builtin_src(const char *name, int *stage) {
     // present.frag with the colour filter ([Colour], runtime/colour_filter.h; exec.c vk_present_draw), and present.hdr with
     // it and the HDR output's encoding (HDR10: BT.2020, SMPTE ST 2084). Push constants after the vertex stage's 32 bytes:
     // the filter's three rows (rgb weights, offset), g.x its gamma exponent; h (HDR): x the paper white in 10000s of nits,
-    // y where the SDR white goes (in paper whites), z the knee above which the picture's light is spread up to y
+    // y where the SDR white goes (in paper whites), z the knee above which the picture's light is spread up to y; s (the PS1
+    // filter's scanlines, [Graphics] PS1Filter; x 0: none): y the picture's rows, every other one w darker, z the field
+    // (by turns a quarter of w more or less: the flicker)
     if (!strcmp(name, "present.color") || !strcmp(name, "present.hdr")) {
         *stage = STAGE_FRAGMENT;
         if (name[8] == 'c')
@@ -320,16 +322,18 @@ static const char *builtin_src(const char *name, int *stage) {
                    "layout(set = 0, binding = 0) uniform sampler2D t;\n"
                    "layout(location = 0) in vec2 uv;\n"
                    "layout(location = 0) out vec4 o;\n"
-                   "layout(push_constant) uniform P { layout(offset = 32) vec4 r0; vec4 r1; vec4 r2; vec4 g; } pc;\n"
+                   "layout(push_constant) uniform P { layout(offset = 32) vec4 r0; vec4 r1; vec4 r2; vec4 g; vec4 h; vec4 s; } pc;\n"
                    "void main() {\n"
                    "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
-                   "  o = vec4(clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0), 1.0);\n"
+                   "  vec3 s = clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0);\n"
+                   "  if (pc.s.x > 0.5) s *= 1.0 - mod(floor(uv.y * pc.s.y), 2.0) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
+                   "  o = vec4(s, 1.0);\n"
                    "}\n";
         return "#version 450\n"
                "layout(set = 0, binding = 0) uniform sampler2D t;\n"
                "layout(location = 0) in vec2 uv;\n"
                "layout(location = 0) out vec4 o;\n"
-               "layout(push_constant) uniform P { layout(offset = 32) vec4 r0; vec4 r1; vec4 r2; vec4 g; vec4 h; } pc;\n"
+               "layout(push_constant) uniform P { layout(offset = 32) vec4 r0; vec4 r1; vec4 r2; vec4 g; vec4 h; vec4 s; } pc;\n"
                "vec3 pq(vec3 l) {\n"
                "  vec3 p = pow(max(l, vec3(0.0)), vec3(0.1593017578125));\n"
                "  return pow((0.8359375 + 18.8515625 * p) / (1.0 + 18.6875 * p), vec3(78.84375));\n"
@@ -337,6 +341,7 @@ static const char *builtin_src(const char *name, int *stage) {
                "void main() {\n"
                "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
                "  vec3 s = clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0);\n"
+               "  if (pc.s.x > 0.5) s *= 1.0 - mod(floor(uv.y * pc.s.y), 2.0) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
                "  vec3 l = pow(s, vec3(2.2));\n"  // (the light, in paper whites: an SDR screen's gamma)
                "  float m = max(l.r, max(l.g, l.b));\n"
                "  if (m > pc.h.z) { float x = (m - pc.h.z) / (1.0 - pc.h.z); l *= (m + (pc.h.y - 1.0) * x * x) / m; }\n"
@@ -391,6 +396,24 @@ static const char *builtin_src(const char *name, int *stage) {
                  "layout(location = %d) out vec4 o;\n"
                  "void main() { o = texelFetch(t, ivec2(gl_FragCoord.xy), 0); }\n", atoi(name + 10));
         return buf;
+    }
+    // ps1.frag (the PS1 filter's 15-bit colour, exec.c vk_ps1_dither): the picture copied back, each channel to 5 bits (32
+    // levels) with a 4x4 ordered dither: the Bayer matrix's threshold, (m + 0.5) / 16, added before rounding down, fixed
+    // to the pixel. Black and white stay as they are, the average colour too; what is above 1 (none in the game's
+    // picture) keeps its steps
+    if (!strcmp(name, "ps1.frag")) {
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D t;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "const float bayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,\n"
+               "                                  3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);\n"
+               "void main() {\n"
+               "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
+               "  vec4 c = texelFetch(t, p, 0);\n"
+               "  float d = (bayer[(p.y & 3) * 4 + (p.x & 3)] + 0.5) / 16.0;\n"
+               "  o = vec4(floor(max(c.rgb, vec3(0.0)) * 31.0 + d) / 31.0, c.a);\n"
+               "}\n";
     }
     if (!strcmp(name, "clear.frag.none")) {
         *stage = STAGE_FRAGMENT;

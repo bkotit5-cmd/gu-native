@@ -953,6 +953,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(number_size);
     SAME(number_colour);
     SAME(monster_bars);
+    SAME(ps1_filter);
     SAME(colour_hue);  // (Graphics & Audio > Colour)
     SAME(colour_temperature);
     SAME(colour_tint);
@@ -2849,28 +2850,31 @@ MENU_ENTRY("controls/keys", 10, rows_controls_keys_10, reset_controls_keys_10, s
 void rows_graphics_10(std::vector<Row> &r) {
     Config &c = s.draft;
     add_choice(
-        r, "lowend", "Low-end mode", c.low_end < 0 || c.low_end > 2 ? 0 : c.low_end, {tr("Off"), tr("On"), tr("Toaster")},
+        r, "lowend", "Low-end mode", c.low_end < 0 || c.low_end > LOW_END_BRICK ? 0 : c.low_end,
+        {tr("Off"), tr("On"), tr("Toaster"), tr("Brick")},
         [](int v) {  // (it brings the resolution, the frame rate and the switches along; all can then be changed)
             Config &d = s.draft;
             int was = d.low_end;
             d.low_end = v;
 #ifdef __ANDROID__
+            // (Brick, 1.0.1.1: all of Toaster's and a smaller 3D picture; back from it to Toaster or On, its size goes)
             if (v) {
-                int scale = v == LOW_END_TOASTER ? TOASTER_SCALE : LOW_END_SCALE;
-                if (was == LOW_END_TOASTER && d.render_scale == TOASTER_SCALE) d.render_scale = scale;  // (back to On)
+                int scale = v == LOW_END_BRICK ? BRICK_SCALE : v == LOW_END_TOASTER ? TOASTER_SCALE : LOW_END_SCALE;
+                int had = was == LOW_END_BRICK ? BRICK_SCALE : TOASTER_SCALE;
+                if (was >= LOW_END_TOASTER && d.render_scale == had) d.render_scale = scale;  // (back to On or Toaster)
                 d.render_scale = std::min(d.render_scale, scale);
                 d.fps = std::min(d.fps, LOW_END_FPS);
                 d.shadows = 0;
                 d.bloom = 0;
-                if (v == LOW_END_TOASTER) d.reverb = 0, d.grass = 0;
-                else if (was == LOW_END_TOASTER) d.reverb = 1, d.grass = 1;
+                if (v >= LOW_END_TOASTER) d.reverb = 0, d.grass = 0;
+                else if (was >= LOW_END_TOASTER) d.reverb = 1, d.grass = 1;
             } else {
                 if (d.render_scale <= LOW_END_SCALE) d.render_scale = 100;
                 if (d.fps == LOW_END_FPS) d.fps = 60;
                 d.shadows = 1;
                 d.bloom = 1;
                 d.reverb = 1;
-                if (was == LOW_END_TOASTER) d.grass = 1;  // (only Toaster turns the grass off: On leaves it as set)
+                if (was >= LOW_END_TOASTER) d.grass = 1;  // (only Toaster and Brick turn the grass off: On leaves it as set)
             }
 #else  // (a desktop: the 3D picture about 720 lines tall, 540 with Toaster, whatever the screen (config_lowend_scale), and
        // Bloom off; Low-end keeps the frame rate and the shadows, Toaster sets 30 FPS and no shadows; the reverb stays.
@@ -2878,39 +2882,41 @@ void rows_graphics_10(std::vector<Row> &r) {
             if (v == was)
                 return;
             int on = config_lowend_scale(&d, 1), toaster = config_lowend_scale(&d, LOW_END_TOASTER);
+            int brick = config_lowend_scale(&d, LOW_END_BRICK);  // (1.0.1.1: Toaster's and a smaller 3D picture)
+            int had = was == LOW_END_BRICK ? brick : was == LOW_END_TOASTER ? toaster : on;
             // (an older PC build's switch was a phone's: RenderScale 40, Toaster 25, 30 FPS and no shadows, Toaster no
             // reverb either. A file it wrote keeps those, and leaving the mode takes them back too; 40 under Toaster is
             // On's, which Toaster's min kept. Under On, 40 is that only with its 30 FPS or no shadows still there: this
             // On sets neither, and 40% picked by hand stays)
-            bool old = was == LOW_END_TOASTER ? (d.render_scale == TOASTER_SCALE || d.render_scale == LOW_END_SCALE)
+            bool old = was >= LOW_END_TOASTER ? (d.render_scale == TOASTER_SCALE || d.render_scale == LOW_END_SCALE)
                                               : (was && d.render_scale == LOW_END_SCALE && (d.fps == LOW_END_FPS || !d.shadows));
             if (v) {
-                int scale = v == LOW_END_TOASTER ? toaster : on;
-                if (was == LOW_END_TOASTER && (d.render_scale == toaster || old)) d.render_scale = scale;  // (back to On)
+                int scale = v == LOW_END_BRICK ? brick : v == LOW_END_TOASTER ? toaster : on;
+                if (was >= LOW_END_TOASTER && (d.render_scale == had || old)) d.render_scale = scale;  // (back to On or Toaster)
                 d.render_scale = std::min(d.render_scale, scale);
                 d.bloom = 0;
-                if (v == LOW_END_TOASTER) {
+                if (v >= LOW_END_TOASTER) {
                     d.fps = std::min(d.fps, LOW_END_FPS);
                     d.shadows = 0;
                 }
             } else {
-                if (old || d.render_scale == (was == LOW_END_TOASTER ? toaster : on)) d.render_scale = 100;
+                if (old || d.render_scale == had) d.render_scale = 100;
                 d.bloom = 1;
             }
-            if (was == LOW_END_TOASTER || (old && !v)) {
+            if ((was >= LOW_END_TOASTER && v < LOW_END_TOASTER) || (old && !v)) {
                 if (d.fps == LOW_END_FPS) d.fps = 60;
                 d.shadows = 1;
-                if (old && was == LOW_END_TOASTER) d.reverb = 1;
+                if (old && was >= LOW_END_TOASTER) d.reverb = 1;
             }
 #endif
         },
         ini("LowEnd"));
 #ifdef __ANDROID__
-    r.back().help = tr("For weak phones: turns off bloom, depth of field and shadows, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change all of them. Toaster: everything for speed and the battery before looks: 25%, 30 FPS, no reverb or grass, and a lighter HUD and textures still.");
+    r.back().help = tr("For weak phones: turns off bloom, depth of field and shadows, uses lighter textures and keeps the HUD sharp over a smaller 3D picture. It also sets the 3D resolution and the frame rate, and you can change all of them. Toaster: everything for speed and the battery before looks: 25%, 30 FPS, no reverb or grass, and a lighter HUD and textures still. Brick, for very weak phones: all of Toaster's, 15%, and the textures of the 3D world in big sharp squares (less to read from memory), which looks like a game of the late 90s.");
 #else  // (a PC's GPU takes the game's textures as they are: none smaller, nvn/vulkan/textures.c; config.c turns MSAA and FSR off,
        // and with Toaster FXAA. The switch sets RenderScale for the Resolution the draft has, once: config.c ignores
        // RenderScale with a RenderResolution of its own)
-    r.back().help = tr("For a weak GPU, such as integrated graphics: it sets the 3D resolution to about 720 lines for the screen resolution you have now (66% at 1080p, 50% at 1440p, 33% at 4K; with Render resolution on Auto), keeps the HUD and the text sharp, and turns off bloom, depth of field, MSAA and FSR. The frame rate, shadows, FXAA, texture filtering and reverb stay as they are. Toaster, for the weakest: about 540 lines, 30 FPS, no shadows or FXAA, and cheaper texture filtering. You can change the 3D resolution, the frame rate, shadows and bloom afterwards.");
+    r.back().help = tr("For a weak GPU, such as integrated graphics: it sets the 3D resolution to about 720 lines for the screen resolution you have now (66% at 1080p, 50% at 1440p, 33% at 4K; with Render resolution on Auto), keeps the HUD and the text sharp, and turns off bloom, depth of field, MSAA and FSR. The frame rate, shadows, FXAA, texture filtering and reverb stay as they are. Toaster, for the weakest: about 540 lines, 30 FPS, no shadows or FXAA, and cheaper texture filtering. Brick, for the very weakest: all of Toaster's, about 360 lines, and the textures of the 3D world in big sharp squares (less to read from memory), which looks like a game of the late 90s. You can change the 3D resolution, the frame rate, shadows and bloom afterwards.");
 #endif
 }
 void reset_graphics_10() { s.draft.low_end = config_defaults().low_end; }
@@ -3015,6 +3021,28 @@ void rows_graphics_35(std::vector<Row> &r) {
 }
 void reset_graphics_35() { s.draft.upscale_sharp = config_defaults().upscale_sharp; }
 MENU_ENTRY("graphics", 35, rows_graphics_35, reset_graphics_35);
+// The PS1 filter (1.0.1.1, the owner's, from a suggestion on Discord; MH4U for Android has the same row): the look of the
+// 3D games of the late 90s, style only - no setting changes with it, and Brick (Low-end mode) is the one for speed. Live
+// from the next frame after Save (nvn/vulkan/exec.c texture_info and vk_ps1_dither, ps1.c, fsr.c hud_start, the window
+// pass's scanlines: vk_present_draw)
+void rows_graphics_37(std::vector<Row> &r) {
+    add_bool(r, "ps1", "PS1 filter", &s.draft.ps1_filter, ini("PS1Filter"));
+    r.back().help = en_es(
+        "The look of the 3D games of the late 90s: the textures of the 3D world in big sharp squares, the 3D picture in "
+        "15-bit colour with a fine pattern of dots, wobbly polygons and textures that bend as on the consoles of then, "
+        "and faint scanlines that flicker a little as on an old TV. Only the look changes: the resolution, the frame "
+        "rate and the other settings stay as you have them (Brick, in Low-end mode, is the one for speed). The HUD stays "
+        "readable, and the touch controls and this menu never change. The first time, the 3D shaders are built again for "
+        "it (a few seconds).",
+        "El aspecto de los juegos 3D de fines de los 90: las texturas del mundo 3D en cuadrados grandes y nítidos, la imagen "
+        "3D con colores de 15 bits y un patrón fino de puntitos, polígonos que tiemblan y texturas que se doblan como en las "
+        "consolas de esa época, y líneas de barrido suaves que parpadean un poco como en un televisor viejo. Solo cambia el "
+        "aspecto: la resolución, los FPS y los demás ajustes quedan como los tengas (Ladrillo, en el modo gama baja, es el "
+        "que da velocidad). El HUD se sigue leyendo bien, y los controles táctiles y este menú nunca cambian. La primera "
+        "vez, los shaders 3D se vuelven a armar para el filtro (unos segundos).");
+}
+void reset_graphics_37() { s.draft.ps1_filter = config_defaults().ps1_filter; }
+MENU_ENTRY("graphics", 37, rows_graphics_37, reset_graphics_37);
 void rows_graphics_40(std::vector<Row> &r) { add_bool(r, "shadows", "Shadows", &s.draft.shadows, ini("Shadows")); }
 void reset_graphics_40() { s.draft.shadows = config_defaults().shadows; }
 MENU_ENTRY("graphics", 40, rows_graphics_40, reset_graphics_40);
@@ -3048,7 +3076,7 @@ void low_end_off(std::vector<Row> &r, bool fxaa = false) {
     (void)fxaa;
     if (!c.low_end) return;
 #else
-    if (!c.low_end || (fxaa && c.low_end != LOW_END_TOASTER)) return;
+    if (!c.low_end || (fxaa && c.low_end < LOW_END_TOASTER)) return;
 #endif
     r.back().enabled = false;
     r.back().value = tr("Off (low-end)");
@@ -4509,8 +4537,8 @@ const PhoneHelp PHONE_HELP[] = {
      "El resplandor alrededor de las luces y el desenfoque de lo lejano. Apagado: más rápido en un teléfono débil. El modo gama baja lo apaga."},
     {"Reverb", "The echo of caves and rooms. Off: the sound is dry, and a weak phone's processor does less.",
      "El eco de cuevas y salas. Apagada: el sonido queda seco y el procesador de un teléfono débil trabaja menos."},
-    {"LowEnd", "For a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD stays sharp over a smaller 3D picture. Toaster: everything for speed and the battery before looks.",
-     "Para un teléfono débil: sin resplandor ni profundidad de campo, texturas más livianas y más chicas, y el HUD sigue nítido sobre una imagen 3D más chica. Tostadora: todo para la velocidad y la batería antes que el aspecto."},
+    {"LowEnd", "For a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD stays sharp over a smaller 3D picture. Toaster: everything for speed and the battery before looks. Brick, for very weak phones: Toaster's and textures in big sharp squares, a retro look.",
+     "Para un teléfono débil: sin resplandor ni profundidad de campo, texturas más livianas y más chicas, y el HUD sigue nítido sobre una imagen 3D más chica. Tostadora: todo para la velocidad y la batería antes que el aspecto. Ladrillo, para teléfonos muy débiles: lo de Tostadora y texturas en cuadrados grandes y nítidos, un aspecto retro."},
     {"Shadows", "The shadows of hunters, monsters and scenery. Off: a little faster on a weak phone.",
      "Las sombras de cazadores, monstruos y escenario. Apagadas: un poco más rápido en un teléfono débil."},
     {"Grass", "The grass fields of the maps, as the tall grass of the Marshland's area 8. Off: faster where there is a lot of it on a weak phone. The plants that are part of a map's ground stay.",

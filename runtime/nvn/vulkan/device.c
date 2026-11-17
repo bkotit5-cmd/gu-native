@@ -1828,6 +1828,7 @@ void backend_present(NvnTexture *t) {
     extern void vk_color_fill_flush(TexBackend *b);
     vk_color_fill_flush(NULL);  // (MHGU_PERF_HUDSTART_FUSE, MHGU_PERF_FXAA_COPYDRAW: a picture still to be drawn, now)
     if (g_fsr_on) t = vk_fsr_present(t);  // FSR: its output-size picture with the HUD (fsr.c)
+    else vk_ps1_present(t);               // (the PS1 filter's 15-bit colour without FSR: ps1.c)
     g_last_picture = t;
     TexBackend *b = vk_tex(t, true);
     b->presented = true;
