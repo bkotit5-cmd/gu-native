@@ -42,8 +42,12 @@
 // +y up in clip space. Found by matching the monsters' places with a screenshot.
 //
 // Monster health bars ([Hunting Aids] MonsterHealthBars): each large monster taking part, alive, with its health and the
-// most, and whether it is in the hunter's zone of the map (a bar fainter when not, as MH4U's). No name: MH4U's bars have
-// none (the owner wants them the same).
+// most, whether it is in the hunter's zone of the map (a bar fainter when not, as MH4U's), and its name (the owner: "so
+// they are easy to tell apart when there are several"; MH4U's bars have it the same way): the game's own text in the
+// game's language (sGameControl *0x1a8ca48 +0xa5: 0 jpn, 1 eng, 2 fre, 3 spa, 4 ger, 5 ita, 6 kor, 7 chT, 8 chS: the
+// language index main 0xd359a8 turns into the folders' names), from GUI\06_msg\monsterName_<lang>.gmd by the game's
+// tables (presence.c's: the monster id, small << 12 | variant << 8 | em number, to the name's index): none for the
+// languages the overlay's font can't draw (Japanese, Korean, Chinese).
 //   MHGU_HUNT_LOG=1   (debug) a line per number (the damage, from where, the hit's place or the body's) and per mark
 //   MHGU_HUNT_COST=1  (debug) every 10 s: the average and the longest time of this step a frame
 #include <math.h>
@@ -54,13 +58,18 @@
 #include "../config.h"
 #include "../hle.h"
 #include "../hunt_aids.h"
+#include "../romfs.h"
 
 #define G_SENEMY      0x1a51fe0u  // sEnemy *: +0x1c the ten monsters
 #define G_SCAMERA     0x2326504u  // sCamera * (sFestaCamera)
-#define G_GAMECONTROL 0x1a8ca48u  // sGameControl *: +0x4c the town (0xff in a quest), +0x30 our player slot
+#define G_GAMECONTROL 0x1a8ca48u  // sGameControl *: +0x4c the town (0xff in a quest), +0x30 our player slot, +0xa5
+                                  // the game's language
 #define G_SPLAYER     0x1a85b58u  // sPlayer *: +0x1c the four players
 #define G_SQUEST      0x1a8ad90u  // sQuest *: +0xa4 the quest being played
 #define G_SELECTOR    0x1a8ae38u  // sQuestSelector *: +0xd750 the quest's join count
+#define MON_PAIRS     0x1797ea4u  // (monster id, index) x 137, then the index's UI number: monsterName's string
+#define MON_UI        0x182e7f8u
+#define MON_PAIR_COUNT 137
 #define CAM_VIEW      0xe0u
 #define CAM_PROJ      0x120u
 #define EN_INFO       0x1428u
@@ -87,6 +96,8 @@ static struct {
     int hp;            // its health then
     float hit[3];      // its +0x4f0 when it last made a number
     bool marked;       // its mark's timer is ours
+    const char *name;  // its name (monster_name), for the game's language name_lang (-1: not looked up yet)
+    int name_lang;
 } g_slot[SLOTS];
 static struct { float p[3]; int value; uint32_t id; uint64_t born; } g_num[HUNT_NUMBERS];
 static int g_nnum;
@@ -94,6 +105,53 @@ static uint32_t g_next_id = 1;
 static HuntView g_view;  // this frame's (huntaids_view)
 static bool g_view_any, g_touched;  // (g_touched: something of a quest is remembered, or a timer is ours)
 static int g_log = -1;
+
+// ---- the names
+typedef struct { char *data; char **str; int n; } Gmd;
+static bool gmd_load(Gmd *g, const char *rpath) {  // (presence.c's reader: the GMD's strings in order)
+    memset(g, 0, sizeof *g);
+    const char *path = romfs_host_path(rpath);
+    FILE *f = path ? fopen(path, "rb") : NULL;
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *d = size > 0x30 && size < (8 << 20) ? malloc((size_t)size + 1) : NULL;
+    bool ok = d && fread(d, 1, (size_t)size, f) == (size_t)size && !memcmp(d, "GMD", 4);
+    fclose(f);
+    uint32_t n, bytes;
+    if (ok) memcpy(&n, d + 0x18, 4), memcpy(&bytes, d + 0x20, 4);
+    if (!ok || bytes > (uint32_t)size || n > 0x10000) { free(d); return false; }
+    d[size] = 0;
+    g->data = d;
+    g->str = calloc(n ? n : 1, sizeof *g->str);
+    for (char *p = d + size - bytes; g->str && g->n < (int)n && p < d + size; p += strlen(p) + 1) g->str[g->n++] = p;
+    return true;
+}
+
+static const char *monster_name(uint32_t en) {
+    static Gmd names;
+    static int lang = -1;
+    static const char *const folder[] = {NULL, "eng", "fre", "spa", "ger", "ita"};  // (Latin letters: the font has them)
+    uint32_t gc = LD32(G_GAMECONTROL);
+    int now = sane(gc) ? LD8(gc + 0xa5) : 1;
+    if (now != lang) {
+        lang = now;
+        free(names.data), free(names.str), memset(&names, 0, sizeof names);
+        if (now >= 1 && now <= 5) {
+            char path[96];
+            snprintf(path, sizeof path, "nativeNX/%s/GUI/06_msg/monsterName_%s.gmd", folder[now], folder[now]);
+            if (!gmd_load(&names, path)) LOG("[hunt] no monster names: %s\n", path);
+        }
+    }
+    uint32_t id = LD8(en + EN_EM) | (uint32_t)LD8(en + EN_EM + 1) << 8 | (uint32_t)LD8(en + EN_SMALL) << 12;
+    for (uint32_t i = 0; i < MON_PAIR_COUNT; i++)
+        if (LD32(MON_PAIRS + 8 * i) == id) {
+            uint32_t index = LD32(MON_PAIRS + 8 * i + 4), ui = index < MON_PAIR_COUNT ? LD32(MON_UI + 4 * index) : ~0u;
+            return ui < (uint32_t)names.n ? names.str[ui] : NULL;
+        }
+    return NULL;
+}
 
 // ---- the quest and the monsters
 static bool in_quest(void) {
@@ -208,6 +266,8 @@ static void step(uint64_t now) {
     if (g_log < 0) g_log = getenv("MHGU_HUNT_LOG") && atoi(getenv("MHGU_HUNT_LOG")) > 0;
     bool alone = map && hunted_alone();
     int zone = numbers || bars ? hunter_zone() : -1;
+    uint32_t gc = LD32(G_GAMECONTROL);
+    int lang = sane(gc) ? LD8(gc + 0xa5) : 1;  // (the game's language: the names looked up again when it changes)
     uint32_t sen = LD32(G_SENEMY);
     HuntView *v = &g_view;
     v->nnum = v->nbar = 0;
@@ -219,6 +279,7 @@ static void step(uint64_t now) {
         }
         if (g_slot[k].en != en) {  // (another monster in this slot: nothing of the one before)
             g_slot[k].en = en, g_slot[k].hp = (int32_t)LD32(info + ST_HP), g_slot[k].marked = false;
+            g_slot[k].name = NULL, g_slot[k].name_lang = -1;
             memcpy(g_slot[k].hit, G2H(info + ST_HIT), sizeof g_slot[k].hit);
         }
         mark(k, en, info, alone);
@@ -239,6 +300,8 @@ static void step(uint64_t now) {
         if (bars && v->nbar < HUNT_BARS && most > 0 && !down(en, info)) {
             HuntBar *b = &v->bar[v->nbar++];
             b->hp = hp, b->max = most, b->here = zone >= 0 && LD8(en + EN_ZONE) == zone;
+            if (g_slot[k].name_lang != lang) g_slot[k].name = monster_name(en), g_slot[k].name_lang = lang;
+            snprintf(b->name, sizeof b->name, "%s", g_slot[k].name ? g_slot[k].name : "");
         }
     }
     while (g_nnum && now >= g_num[0].born + HUNT_NUMBER_NS) memmove(g_num, g_num + 1, sizeof g_num[0] * (size_t)--g_nnum);
