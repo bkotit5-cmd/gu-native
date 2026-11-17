@@ -283,15 +283,22 @@ def run(cmd, cwd=None, env=None):
 
 
 def run_translator(cmd, cwd, env, name):
-    """gen.py, with its progress said as it goes ("main: 1234 of 98765 functions"), now and then: on a phone the
-    translation takes minutes."""
+    """gen.py (through gen_progress.py), with what it is doing said as it goes, now and then: on a phone the translation
+    takes minutes. "main: reading", "main: analysed 1234 of 66260" (most of its time), then "main: 1234 of 98765
+    functions" while it writes the C (tools/phone_build.py makes the app's progress of them)."""
     p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace')
     out, last = [], 0
     for line in p.stdout:
         out.append(line)
+        if line.strip() == f'{name}: reading':
+            say(f'  {name}: reading')
         m = re.search(r'progress (\d+)/(\d+)', line)
-        if m and (time.time() - last > 5 or m.group(1) == m.group(2)):
+        if m and (time.time() - last > 3 or m.group(1) == m.group(2)):
             say(f'  {name}: {m.group(1)} of {m.group(2)} functions')
+            last = time.time()
+        m = re.match(r'\w+: analysed (\d+)/(\d+)', line)
+        if m and time.time() - last > 3:
+            say(f'  {name}: analysed {m.group(1)} of {m.group(2)}')
             last = time.time()
     return p.wait(), ''.join(out[-200:])
 
@@ -582,7 +589,7 @@ def main(argv=None):
                     continue
         except OSError:
             pass
-        cmd = [sys.executable, 'gen.py', name, src, base, os.path.join(gen, name)] + extra
+        cmd = [sys.executable, 'gen_progress.py', name, src, base, os.path.join(gen, name)] + extra
         code, out = run_translator(cmd, TOOLS, gen_env, name)
         if code:
             fail('the translation failed:\n' + out[-2000:])

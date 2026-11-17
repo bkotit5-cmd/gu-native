@@ -135,6 +135,17 @@ def forget_translation(work):
             pass
 
 
+# The translation's progress (@@progress recompile), from what build_game.py says of each part (sdk, then main) as gen.py
+# goes through it (gen_progress.py): its reading, its analysis ("main: analysed N of M") and its writing of the C ("main:
+# N of M functions"). The analysis is most of the time and used to say nothing, so the screen sat at "Translate the
+# game's code (10 %)" for minutes (reported as stuck at 10 %). Each part and each of its steps counts for the share of
+# the time it takes (on a PC: sdk 10 s, main 43 s; reading 3 %, analysis 80 %, writing 17 % of either), and the progress
+# is said in functions, as before (the app's screen and MHGU.exe's builder show "N / M functions"): the share done of the
+# functions of both parts, 1.4.0's own until a part says how many it has.
+PARTS = {'sdk': (28089, 0.2), 'main': (72695, 0.8)}  # (functions, share of the translation's time)
+STEPS = {'reading': 0.03, 'analysis': 0.80, 'writing': 0.17}  # (share of a part's time)
+
+
 class Stages(io.TextIOBase):
     """build_game.py's output, passed on as it is, with the app's @@ lines for the stages it goes through."""
 
@@ -143,7 +154,8 @@ class Stages(io.TextIOBase):
         self.stage = 'extract'
         self.pending = ''
         self.error = ''
-        self.parts = {}  # (the translator's parts, sdk and main: their functions add up)
+        self.parts = {}  # (the translator's parts, sdk and main: how far each is, 0 to 1, and its functions)
+        self.said = None
         self.files = 0
         self.in_error = False
         self.on_stage = None
@@ -169,6 +181,17 @@ class Stages(io.TextIOBase):
             if self.on_stage:
                 self.on_stage(stage)
 
+    def translated(self, part, done, functions=None):
+        """A part of the translation is this far (0 to 1, never back): @@progress recompile for both parts (PARTS)."""
+        was = self.parts.get(part, (0, PARTS.get(part, (0, 0))[0]))
+        self.parts[part] = (max(was[0], min(1, done)), functions or was[1])
+        total = sum(self.parts.get(p, (0, n))[1] for p, (n, _) in PARTS.items())
+        part_of = sum(s * self.parts.get(p, (0, 0))[0] for p, (_, s) in PARTS.items())
+        now = (min(total, round(part_of * total)), total)
+        if now != self.said:
+            self.said = now
+            emit(f'@@progress recompile {now[0]} {now[1]}')
+
     def line(self, text):
         if text.startswith('ERROR: '):
             self.error = text[7:]
@@ -184,15 +207,15 @@ class Stages(io.TextIOBase):
             self.set('compile')
         elif text == 'linking...':
             self.set('link')
-        m = re.fullmatch(r'(\w+): (\d+) of (\d+) functions', text)
-        if m:
-            self.parts[m.group(1)] = (int(m.group(2)), int(m.group(3)))
-            done = sum(d for d, _ in self.parts.values())
-            # (main, the larger part, comes after sdk: until it says its size, about 70,000 functions)
-            total = sum(t for _, t in self.parts.values()) + (0 if 'main' in self.parts else 70000)
-            emit(f'@@progress recompile {done} {total}')
+        if m := re.fullmatch(r'(\w+): reading', text):
+            self.translated(m.group(1), 0)
+        elif m := re.fullmatch(r'(\w+): analysed (\d+) of (\d+)', text):
+            self.translated(m.group(1), STEPS['reading'] + STEPS['analysis'] * min(1, int(m.group(2)) / max(1, int(m.group(3)))))
+        elif m := re.fullmatch(r'(\w+): (\d+) of (\d+) functions', text):
+            self.translated(m.group(1), 1 - STEPS['writing'] + STEPS['writing'] * int(m.group(2)) / max(1, int(m.group(3))),
+                            int(m.group(3)))
         elif m := re.fullmatch(r'(\w+): already translated', text):
-            self.parts[m.group(1)] = (1, 1)
+            self.translated(m.group(1), 1)
         m = re.fullmatch(r'(\d+) of (\d+)', text)
         if m and self.stage == 'compile':
             emit(f'@@progress compile {m.group(1)} {m.group(2)}')
