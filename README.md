@@ -13,6 +13,8 @@ Made with Claude Code (Opus 5.5). Many of the decisions were my own, because AI 
 The newest version is on [Releases](../../releases/latest): the APK for Android and `MHGU-PC-<version>.zip` for PC.
 Talk with other players and ask for help in the community's [Discord](https://discord.gg/sk5xEjEMwF).
 
+**On iOS?** The iOS port is made by Moka Illustra ([mokaillustra](https://github.com/mokaillustra)), the project's official iOS developer, in a fork of this project: [mhgu-recomp-ios-fork](https://github.com/mokaillustra/mhgu-recomp-ios-fork). Everything about iOS is handled there.
+
 **The same save on your PC and your phone?** See [Play on PC and phone with the same save (Google Drive)](#play-on-pc-and-phone-with-the-same-save-google-drive).
 
 ## Contents
@@ -1024,6 +1026,8 @@ Based on the open-source MHGURecomp project (MIT license) and the libraries list
 The chat, the room keys (the matchmaking key's generator) and the control profiles follow the designs of tabarong (Discord; GitHub: [oliveaglien](https://github.com/oliveaglien)).
 
 Ideas from the community: Alfonso, sending all the rewards to the box at once.
+
+The iOS port: Moka Illustra ([mokaillustra](https://github.com/mokaillustra)), [mhgu-recomp-ios-fork](https://github.com/mokaillustra/mhgu-recomp-ios-fork), with KHORNE's authorization.
 
 From the same author: [MH4U for Android](https://github.com/khorne-hub/4u-native), Monster Hunter 4 Ultimate recompiled for
 Android the same way.
