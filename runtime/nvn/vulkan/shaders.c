@@ -314,7 +314,7 @@ static const char *builtin_src(const char *name, int *stage) {
     // the filter's three rows (rgb weights, offset), g.x its gamma exponent; h (HDR): x the paper white in 10000s of nits,
     // y where the SDR white goes (in paper whites), z the knee above which the picture's light is spread up to y; s (the PS1
     // filter's scanlines, [Graphics] PS1Filter; x 0: none): y the picture's lines, darker by up to w between them, z the field
-    // (by turns a quarter of w more or less: the flicker)
+    // (1: a quarter of w less, on every other picture: the flicker, as MH4U for Android's)
     if (!strcmp(name, "present.color") || !strcmp(name, "present.hdr")) {
         *stage = STAGE_FRAGMENT;
         if (name[8] == 'c')
@@ -326,7 +326,7 @@ static const char *builtin_src(const char *name, int *stage) {
                    "void main() {\n"
                    "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
                    "  vec3 s = clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0);\n"
-                   "  if (pc.s.x > 0.5) s *= 1.0 - (0.5 - 0.5 * cos(6.2831853 * uv.y * pc.s.y)) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
+                   "  if (pc.s.x > 0.5) s *= 1.0 - (0.5 - 0.5 * cos(6.2831853 * uv.y * pc.s.y)) * pc.s.w * (1.0 - 0.25 * pc.s.z);\n"
                    "  o = vec4(s, 1.0);\n"
                    "}\n";
         return "#version 450\n"
@@ -341,7 +341,7 @@ static const char *builtin_src(const char *name, int *stage) {
                "void main() {\n"
                "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
                "  vec3 s = clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0);\n"
-               "  if (pc.s.x > 0.5) s *= 1.0 - (0.5 - 0.5 * cos(6.2831853 * uv.y * pc.s.y)) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
+               "  if (pc.s.x > 0.5) s *= 1.0 - (0.5 - 0.5 * cos(6.2831853 * uv.y * pc.s.y)) * pc.s.w * (1.0 - 0.25 * pc.s.z);\n"
                "  vec3 l = pow(s, vec3(2.2));\n"  // (the light, in paper whites: an SDR screen's gamma)
                "  float m = max(l.r, max(l.g, l.b));\n"
                "  if (m > pc.h.z) { float x = (m - pc.h.z) / (1.0 - pc.h.z); l *= (m + (pc.h.y - 1.0) * x * x) / m; }\n"
