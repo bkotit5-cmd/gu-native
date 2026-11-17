@@ -5347,7 +5347,15 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
     }
     if (h && st.spool && tsc < (uint32_t)st.spool->count) {
         NvnSamplerDesc *sd = &((NvnSamplerDesc *)st.spool->entries)[tsc];
-        if (tb && view && !tb->gpu_owned && sd->min_filter > 1 && !sd->compare_mode)  // (pixelated: see ps1_level)
+        // (a map's baked shading - the fragment stage's third texture, BC1 sampled without anisotropic filtering: the
+        // village's 256x256 and 128x256 - stays the game's: at level 5 one of its texels was a flat dark trapezoid metres
+        // wide under the fence (PC). Quests 101, 203 and 305 look the same with or without this. MHGU_PS1_BAKED=0: it is
+        // pixelated as the others, for tests)
+        static int baked = -1;
+        if (baked < 0) baked = !getenv("MHGU_PS1_BAKED") || atoi(getenv("MHGU_PS1_BAKED")) != 0;
+        bool shading = baked && tb && stage == 1 && i == 2 && sd->max_aniso <= 1 &&
+                       (tb->format == VK_FORMAT_BC1_RGBA_UNORM_BLOCK || tb->format == VK_FORMAT_BC1_RGB_UNORM_BLOCK);
+        if (tb && view && !tb->gpu_owned && sd->min_filter > 1 && !sd->compare_mode && !shading)  // (pixelated: see ps1_level)
             smp = vk_sampler_ps1(sd, (ps1_cutout ? ps1_level - PS1_CUTOUT_LEVELS : ps1_level) - tb->mip_skip);
         else
             smp = vk_sampler(sd);
