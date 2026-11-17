@@ -947,6 +947,11 @@ bool equal(const Config &a, const Config &b) {
     SAME(village_in_hub);
     SAME(send_all_rewards);
     SAME(gather_all);
+    SAME(monsters_on_map);  // (Graphics & Audio > Screen and HUD: the hunting aids)
+    SAME(damage_numbers);
+    SAME(number_size);
+    SAME(number_colour);
+    SAME(monster_bars);
     SAME(colour_hue);  // (Graphics & Audio > Colour)
     SAME(colour_temperature);
     SAME(colour_tint);
@@ -3349,6 +3354,73 @@ void rows_graphics_screen_90(std::vector<Row> &r) {
 }
 void reset_graphics_screen_90() { s.draft.fill_screen = config_defaults().fill_screen; }
 MENU_ENTRY("graphics/screen", 90, rows_graphics_screen_90, reset_graphics_screen_90);
+// The hunting aids (1.0.1, the owner's: "everything off by default, so whoever wants it turns it on"; MH4U for Android has
+// the first two with the same names and texts): runtime/hunt_aids.h, hle/huntaids.c, hunt_overlay.cpp
+void hunt_aids_rows(std::vector<Row> &r) {
+    header(r, "hunt.header", en_es("Hunting aids", "Ayudas de caza"));
+    add_bool(r, "hunt.map", en_es("Monsters always on the map", "Monstruos siempre en el mapa"), &s.draft.monsters_on_map,
+             ini("MonstersOnMap"));
+    r.back().help = en_es(
+        "In a quest, the large monsters show on the game's map (whole or zoomed in) from the start, as if they were "
+        "painted, with no paintball and no skill. In quests you hunt alone; in a quest with other hunters the map is as "
+        "the game has it. Off: as the game does it.",
+        "En una misión, los monstruos grandes aparecen en el mapa del juego (entero o ampliado) desde el principio, como "
+        "si estuvieran pintados, sin bola de pintura ni habilidades. En las misiones que cazas solo; en una misión con "
+        "otros cazadores el mapa queda como lo tiene el juego. Apagado: como lo hace el juego.");
+    add_bool(r, "hunt.numbers", en_es("Damage numbers", "Números de daño"), &s.draft.damage_numbers, ini("DamageNumbers"));
+    r.back().help = en_es(
+        "Each hit on a large monster shows its damage as a number over the monster, which rises and fades in about a "
+        "second. Any damage counts: yours, your Palicos', bombs, poison and the other hunters' in your party. The numbers "
+        "are drawn over the game's picture; the game is not changed. Off: no numbers, as the game does it.",
+        "Cada golpe a un monstruo grande muestra su daño como un número sobre el monstruo, que sube y se desvanece en un "
+        "segundo, más o menos. Cuenta todo el daño: el tuyo, el de tus Felynes, bombas, veneno y el de los otros "
+        "cazadores de tu grupo. Los números se dibujan sobre la imagen del juego; el juego no cambia. Apagado: sin "
+        "números, como lo hace el juego.");
+    // (the size as the file keeps it: 0 Medium, the default, 1 Small, 2 Large; the menu lists them small to large)
+    static const int SIZE_OF_CHOICE[] = {1, 0, 2};
+    const int size = s.draft.number_size == 1 ? 0 : s.draft.number_size == 2 ? 2 : 1;
+    add_choice(r, "hunt.numbers.size", en_es("Damage number size", "Tamaño de los números de daño"), size,
+               {en_es("Small", "Chico"), en_es("Medium", "Mediano"), en_es("Large", "Grande")},
+               [](int v) { s.draft.number_size = SIZE_OF_CHOICE[std::clamp(v, 0, 2)]; }, ini("DamageNumberSize"));
+    r.back().help = en_es("How big the damage numbers are on the screen.",
+                          "Qué tan grandes se ven los números de daño en la pantalla.");
+    add_choice(r, "hunt.numbers.colour", en_es("Damage number colour", "Color de los números de daño"),
+               s.draft.number_colour,
+               {en_es("White", "Blanco"), en_es("Yellow", "Amarillo"), en_es("Red", "Rojo"), en_es("Light blue", "Celeste"),
+                en_es("Green", "Verde")},
+               [](int v) { s.draft.number_colour = v; }, ini("DamageNumberColour"));
+    r.back().help = en_es("The damage numbers' colour, always with a dark outline so they read on any ground.",
+                          "El color de los números de daño, siempre con un borde oscuro para que se lean sobre cualquier "
+                          "fondo.");
+    add_bool(r, "hunt.bars", en_es("Monster health bars", "Barra de vida de los monstruos"), &s.draft.monster_bars,
+             ini("MonsterHealthBars"));
+#ifdef __ANDROID__  // (where the bars are moved and sized: a phone has the touch layout editor alone)
+#define HUNT_BARS_EDITOR_EN "Customize controls and HUD"
+#define HUNT_BARS_EDITOR_ES "Personalizar controles y HUD"
+#else
+#define HUNT_BARS_EDITOR_EN "Move the HUD"
+#define HUNT_BARS_EDITOR_ES "Mover el HUD"
+#endif
+    r.back().help = en_es(
+        "In a quest, a bar at the top of the screen for each large monster, with its name and its health: what it has "
+        "left and its most. It works with other hunters too: it only reads the game. Move and size the bars with "
+        HUNT_BARS_EDITOR_EN " (Reset puts them back at the top). Off: no bars, as the game does it.",
+        "En una misión, una barra arriba en la pantalla por cada monstruo grande, con su nombre y su vida: lo que le "
+        "queda y el máximo. Funciona también con otros cazadores: solo lee el juego. Las barras se mueven y se cambian "
+        "de tamaño con " HUNT_BARS_EDITOR_ES " (Restablecer las devuelve arriba). Apagado: sin barras, como lo hace "
+        "el juego.");
+#undef HUNT_BARS_EDITOR_EN
+#undef HUNT_BARS_EDITOR_ES
+}
+void reset_hunt_aids() {
+    Config f = config_defaults(), &c = s.draft;
+    c.monsters_on_map = f.monsters_on_map;
+    c.damage_numbers = f.damage_numbers;
+    c.number_size = f.number_size;
+    c.number_colour = f.number_colour;
+    c.monster_bars = f.monster_bars;
+}
+MENU_ENTRY("graphics/screen", 95, hunt_aids_rows, reset_hunt_aids);
 // Graphics & Audio > Advanced
 #ifdef __ANDROID__
 void rows_graphics_advanced_20(std::vector<Row> &r) {  // (an Adreno on a Vulkan 1.1 driver: device.c msaa_floor)

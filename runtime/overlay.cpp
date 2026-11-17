@@ -35,6 +35,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "touch.h"
 #include "forge.h"
 #include "hitchlog.h"
+#include "hunt_aids.h"
 #include "logwriter.h"
 #include "menu_confirm.h"
 #include "overlay.h"
@@ -860,6 +861,7 @@ void overlay_frame(void *cpu) {
     // (once a frame on the game's update thread: with [Application] PauseInBackground the game stops here while the app
     // is in the background, its clock held: runtime/hle/vi.c)
     vi_pause_game();
+    huntaids_frame();  // (the hunting aids' step, after the game's update: runtime/hle/huntaids.c)
     frame_once(cpu);
 #ifdef __ANDROID__
     // (the settings menu open, playing alone: the game waits here, as on the console's HOME menu - gu-native #94. The menu
@@ -924,8 +926,9 @@ static void frame_once(void *cpu) {
     bool touch = touch_drawn();  // (hidden, the settings button still shows)
     bool stats = perfstats_visible();  // ([Performance] ShowStats: runtime/perfstats.cpp)
     if (stats) perfstats_tick();  // (every frame, built or its copy drawn again: the longest gap is between the game's frames)
+    bool hunt = huntaids_any();  // (the hunting aids' numbers or bars: runtime/hunt_overlay.cpp)
     bool fading = settings_panel_fading();  // (the settings menu closed a moment ago: fading out, taking no input)
-    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !credits && !fading) {  // (nothing to draw)
+    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !hunt && !credits && !fading) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear(), g_snap_seq++;
         apply_input(io);  // (keep the queue short)
@@ -947,7 +950,7 @@ static void frame_once(void *cpu) {
                  !g_settings_open && !g_forge_open && !settings_panel_confirming();
     bool same = g_perf_overlay_reuse && alone && g_reuse_last && g_snap.Valid && w == g_reuse_w && h == g_reuse_h &&
                 now - g_reuse_built_ns < 1000000000ull && (!stats || (g_perf_stats_reuse && perfstats_same((float)w, (float)h))) &&
-                touch_draw_unchanged((float)w, (float)h);
+                hunt_overlay_unchanged((float)w, (float)h) && touch_draw_unchanged((float)w, (float)h);
     if (g_perf_overlay_reuse && now - g_reuse_log_ns >= 60000000000ull) {
         if (g_reuse_log_ns)
             LOG("[perf] overlay: %llu frames built, %llu %s (a minute)\n", (unsigned long long)g_reuse_n[0],
@@ -1079,6 +1082,7 @@ static void frame_once(void *cpu) {
     if (plate && !g_modal_open && !g_settings_open) draw_plate(plate_title, plate_text, plate_alpha, scale);
     if (chat && !g_modal_open) draw_chat(line, now, scale);
     if (stats) perfstats_draw((float)w, (float)h);  // (under the touch controls, on the same background list)
+    hunt_overlay_draw((float)w, (float)h);  // (the hunting aids' numbers and bars: after the plate, under the controls)
     if (touch) touch_draw((float)w, (float)h);  // (the touch controls: runtime/touch.cpp)
     if (chat_over) chat_port_draw((float)w, (float)h);  // (over them: the chat button, the last lines)
     ImGui::Render();

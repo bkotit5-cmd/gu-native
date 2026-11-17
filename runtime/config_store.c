@@ -3,6 +3,7 @@
 #include "config.h"
 #include "diag.h"
 #include "colour_filter.h"
+#include "hunt_aids.h"
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <errno.h>
@@ -28,7 +29,8 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_touch_vibration = {1}, live_phone_rumble = {1}, live_show_stats, live_pause_bg = {1}, live_pause_menu = {1},
                      live_shadows = {1}, live_bloom = {1}, live_grass = {1}, live_effects = {1}, live_reverb = {1},
                      live_online_notice, live_send_all_rewards, live_gather_all, live_touch_cam_smooth, live_camera_shake, live_frame_gen,
-                     live_upscale_sharp;
+                     live_upscale_sharp, live_monsters_on_map, live_damage_numbers, live_number_size, live_number_colour,
+                     live_monster_bars;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -137,6 +139,11 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->online_notice != saved.online_notice) SDL_SetAtomicInt(&live_online_notice, c->online_notice);
     if (all || c->send_all_rewards != saved.send_all_rewards) SDL_SetAtomicInt(&live_send_all_rewards, c->send_all_rewards);
     if (all || c->gather_all != saved.gather_all) SDL_SetAtomicInt(&live_gather_all, c->gather_all);
+    if (all || c->monsters_on_map != saved.monsters_on_map) SDL_SetAtomicInt(&live_monsters_on_map, c->monsters_on_map);
+    if (all || c->damage_numbers != saved.damage_numbers) SDL_SetAtomicInt(&live_damage_numbers, c->damage_numbers);
+    if (all || c->number_size != saved.number_size) SDL_SetAtomicInt(&live_number_size, c->number_size);
+    if (all || c->number_colour != saved.number_colour) SDL_SetAtomicInt(&live_number_colour, c->number_colour);
+    if (all || c->monster_bars != saved.monster_bars) SDL_SetAtomicInt(&live_monster_bars, c->monster_bars);
     for (int i = 0; i < BINDS; i++)
         for (int k = 0; k < BIND_KEYS; k++)
             if (all || c->binds[i][k] != saved.binds[i][k]) SDL_SetAtomicInt(&live_binds[i][k], c->binds[i][k]);
@@ -260,6 +267,18 @@ int config_live_effects(void) { return SDL_GetAtomicInt(&live_effects); }
 int config_live_reverb(void) { return SDL_GetAtomicInt(&live_reverb); }
 int config_live_send_all_rewards(void) { return SDL_GetAtomicInt(&live_send_all_rewards); }
 int config_live_gather_all(void) { return SDL_GetAtomicInt(&live_gather_all); }
+// [Hunting Aids] (runtime/hunt_aids.h: runtime/hle/huntaids.c and runtime/hunt_overlay.cpp read them each frame)
+int config_live_monsters_on_map(void) { return SDL_GetAtomicInt(&live_monsters_on_map); }
+int config_live_damage_numbers(void) { return SDL_GetAtomicInt(&live_damage_numbers); }
+int config_live_number_size(void) { return SDL_GetAtomicInt(&live_number_size); }
+int config_live_number_colour(void) { return SDL_GetAtomicInt(&live_number_colour); }
+int config_live_monster_bars(void) { return SDL_GetAtomicInt(&live_monster_bars); }
+void config_huntaids_test(int map, int numbers, int bars, int size, int colour) {
+    SDL_SetAtomicInt(&live_monsters_on_map, map), SDL_SetAtomicInt(&live_damage_numbers, numbers);
+    SDL_SetAtomicInt(&live_monster_bars, bars);
+    if (size >= 0) SDL_SetAtomicInt(&live_number_size, size);
+    if (colour >= 0) SDL_SetAtomicInt(&live_number_colour, colour);
+}
 int config_live_online_notice(void) { return SDL_GetAtomicInt(&live_online_notice); }
 // (config.c: a test run's MHGU_SHADOWS, MHGU_BLOOM, MHGU_GRASS, MHGU_FPS_LIMIT, after the file: live, not saved)
 void config_live_test(const Config *c) {

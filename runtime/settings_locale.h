@@ -1173,6 +1173,13 @@ static inline const char *settings_text(int language, const char *english) {
         {"Plus  +", "Más  +"},
         {"The FPS counter: drag it to move it  -  Reset puts it back at the top",
          "El contador de FPS: arrástralo para moverlo  -  Restablecer lo devuelve arriba"},
+        {"Monster health bars", "Barra de vida de los monstruos"},
+        {"The monster health bars: drag to move them  -  pinch or use - / + for their size  -  Reset puts them back",
+         "Las barras de vida de los monstruos: arrástralas para moverlas  -  pellizca o usa - / + para su tamaño  -  "
+         "Restablecer las devuelve a su lugar"},
+        {"The monster health bars: drag to move them  -  the wheel or - / + for their size  -  Reset puts them back",
+         "Las barras de vida de los monstruos: arrástralas para moverlas  -  la rueda o - / + para su tamaño  -  "
+         "Restablecer las devuelve a su lugar"},
         {"Profile %d", "Perfil %d"},
         {"Control profile", "Perfil de controles"},
         {"Ten slots, each a whole layout of the touch controls and the HUD: the port's own or an emulator-style one. Use one, save the one you play with in another, or edit it. A design by tabarong.",
