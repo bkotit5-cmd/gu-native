@@ -89,11 +89,14 @@ What a log carries (1.0.1, "ask for more than we think we need": one log should 
   hunter it writes nothing: the mark's own network path is the monster's +0x7429 event byte, but a whole status block
   being sent could not be ruled out); Damage numbers compares each large monster's health (+0x370, most +0x374) with
   the last frame's and places the drop at the hit the monster reacts to (+0x4f0) or its pelvis, projected with
-  sCamera's view (+0xe0) and projection (+0x120); Monster health bars read the same with the name from
-  `monsterName_<lang>.gmd` in the game's language (sGameControl +0xa5). `runtime/hunt_overlay.cpp` draws numbers and
-  bars on the overlay's background list (under the touch controls, over every presented picture: frame generation and
-  the upscalers never see them). The bars are moved and sized in both HUD editors like the FPS counter (`monster_bars`
-  in touch_layout.txt; a stand-in bar while an editor is open). `MHGU_HUNT_LOG=1` a line per number and mark,
+  sCamera's view (+0xe0) and projection (+0x120); Monster health bars read the same and the monster's zone (+0x1054).
+  `runtime/hunt_overlay.cpp` draws numbers and bars on the overlay's background list (under the touch controls, over
+  every presented picture: frame generation and the upscalers never see them). The bars are MH4U for Android's, the same
+  in every measure and colour (its app_native/hunt_bars.cpp: plates 46 % of the picture's height long and 3 % tall, the
+  FPS counter's plate, the health in its green / gold / red, "health / max" in ink, fainter in another zone, no name;
+  the owner wants them identical), at the top left of the target camera after the hunter's bars (under them when there
+  is no room), and are moved and sized in both HUD editors like the FPS counter (`monster_bars` in touch_layout.txt; a
+  stand-in bar while an editor is open). `MHGU_HUNT_LOG=1` a line per number and mark,
   `MHGU_HUNT_COST=1` the step's time; the control file's `huntaids <map> <numbers> <bars> [size] [colour]` sets them.
 - `native/`: CMake and `build_native.sh`. `deps/`: scripts for SDL3, shaderc and FFmpeg.
 
