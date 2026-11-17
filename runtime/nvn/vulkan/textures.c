@@ -1719,27 +1719,23 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
 }
 
 // Pixelated textures (1.0.1.1: [Graphics] PS1Filter, [Performance] LowEnd Brick; exec.c texture_info picks it for the 3D
-// world's draws only): the sampler d as the consoles of the late 90s drew textures, each texel a sharp square - its
-// nearest texel when minified and between mip levels, no anisotropic filtering - and, to make the squares bigger and the
-// texels read fewer, `level` more of LOD bias: each a mip level half as wide and tall. A bias, not a smallest level: a
-// texture already seen magnified keeps its own texels; with a smallest level of 4 the village's baked shading on the
-// ground became a single dark block metres wide (PC). Magnified, the game's own filter: with the bias only what is
-// magnified still is - the ground's low-resolution masks and shading, whose nearest texels were sharp polygons metres
-// wide across the quest camp's ground (PC), and a surface right in front of the camera. A phone's smaller images
-// (mip_skip) take the same: the LOD is measured on the image itself. Everything else (wrapping, the LOD range, the
-// border, the comparison) stays the game's.
+// world's draws only): the sampler d as the consoles of the late 90s drew textures, each texel a big sharp square: its
+// nearest texel when magnified, minified and between mip levels, no anisotropic filtering, and never from a mip level
+// larger than `level` of the image (texture_info: the game's level PS1_TEX_LEVEL, less what a phone's memory already
+// left out, mip_skip), so even the ground right in front of the camera is in big blocks, as in the owner's reference
+// (the suggestion's screenshot, our MHGU with a fixed small mip level). Everything else (wrapping, the LOD range above
+// it and its bias, the border, the comparison) stays the game's.
 static VkSampler ps1_make(const NvnSamplerDesc *d, int level) {
     VkSamplerCreateInfo si;
     VkSamplerCustomBorderColorCreateInfoEXT cb;
     sampler_info(d, &si, &cb);
     if (si.pNext) return VK_NULL_HANDLE;  // (a custom border colour: a GPU allows only so many of those samplers)
-    si.minFilter = VK_FILTER_NEAREST;
+    si.magFilter = si.minFilter = VK_FILTER_NEAREST;
     si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     si.anisotropyEnable = VK_FALSE;
     si.maxAnisotropy = 1;
-    float most = g_vk.props.limits.maxSamplerLodBias;  // (Vulkan: |bias| at most the GPU's limit, 2 at the least)
-    si.mipLodBias += (float)level;
-    if (si.mipLodBias > most) si.mipLodBias = most;
+    if (si.minLod < (float)level) si.minLod = (float)level;
+    if (si.maxLod < si.minLod) si.maxLod = si.minLod;
     VkSampler s;
     if (vkCreateSampler(g_vk.dev, &si, NULL, &s) != VK_SUCCESS) return VK_NULL_HANDLE;
     if (getenv("MHGU_SAMPLER_LOG"))

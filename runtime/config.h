@@ -260,18 +260,18 @@ void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
 #define TOASTER_SCALE 25    // what the menu's Toaster sets: RenderScale (and LOW_END_FPS)
 #define TOASTER_HUD_LINES 540  // Toaster (and Brick): the HUD's picture at most this tall (config.c, fsr.c's output)
 // LowEnd = Brick (1.0.1.1, the owner's): below Toaster, for the weakest phones: all of Toaster's (each `>= LOW_END_TOASTER`)
-// and a smaller 3D picture, and the 3D world's textures by their nearest texels BRICK_TEX_BIAS mip levels smaller (less
-// to read from memory: nvn/vulkan/exec.c texture_info), which looks like a game of the late 90s
+// and a smaller 3D picture, and the 3D world's textures by their nearest texels from mip level PS1_TEX_LEVEL at the
+// largest (less to read from memory: nvn/vulkan/exec.c texture_info), which looks like a game of the late 90s
 #define LOW_END_BRICK 3
 #define BRICK_SCALE 15      // what the menu's Brick sets: RenderScale (and LOW_END_FPS); config.c keeps 320x180 at least
-#define BRICK_TEX_BIAS 3
 // (a desktop) how tall the menu's Low-end mode, Toaster and Brick make the 3D picture, whatever the screen:
 // config_lowend_scale
 #define LOW_END_LINES 720
 #define TOASTER_LINES 540
 #define BRICK_LINES 360
-// [Graphics] PS1Filter's textures: their nearest texels this many mip levels smaller (Brick's when both)
-#define PS1_TEX_BIAS 2
+// [Graphics] PS1Filter's and Brick's textures: their nearest texels, from the game's mip level PS1_TEX_LEVEL at the largest
+// (the owner's reference: the suggestion's screenshot)
+#define PS1_TEX_LEVEL 5
 enum { UPDATES_OFF, UPDATES_ON };  // (an older file's Ask and Auto: On; Never: Off)
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides

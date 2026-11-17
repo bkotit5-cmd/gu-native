@@ -5287,15 +5287,15 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 }
 
 static int32_t fsr_cap_base;  // (FSR capture draw: its FSR_CAP_BASE_BINDING value, stage_set)
-// Pixelated textures (1.0.1.1: [Graphics] PS1Filter PS1_TEX_BIAS, [Performance] LowEnd Brick BRICK_TEX_BIAS): the LOD
-// bias for the draw being set up (draw(), around its stage_set calls), 0 none. Only a draw of the 3D world's has one:
-// tested against a depth target, which the HUD's and the menus' 2D never are (cbuf_info places the HUD's pieces by that
-// too); its mipmapped textures that the game made (not a render target: the picture, depth, shadows, reflections) are
-// sampled through textures.c vk_sampler_ps1. A draw with cut-outs (an alpha test, alpha to coverage or a discard in its
-// shader: grass, leaves, hair) gets the nearest texels without the bias (ps1_cutout): a smaller level's alpha is an
-// average, and the cut-outs fill in or vanish. Not a shadow map's draws (a depth-only pass whose depth target is not the
-// 3D picture's): the shadows stay the game's. The scene's own depth-only draws (a depth pre-pass) do get it, as the
-// colour draws they match
+// Pixelated textures (1.0.1.1: [Graphics] PS1Filter and [Performance] LowEnd Brick, PS1_TEX_LEVEL): the game's smallest
+// mip level for the draw being set up (draw(), around its stage_set calls), 0 none. Only a draw of the 3D world's has
+// one: tested against a depth target, which the HUD's and the menus' 2D never are (cbuf_info places the HUD's pieces by
+// that too); its mipmapped textures that the game made (not a render target: the picture, depth, shadows, reflections)
+// are sampled through textures.c vk_sampler_ps1. A draw with cut-outs (an alpha test, alpha to coverage or a discard in
+// its shader: grass, leaves, hair) gets PS1_CUTOUT_LEVELS fewer (ps1_cutout): a small level's alpha is an average, and
+// the cut-outs fill in or vanish. Not a shadow map's draws (a depth-only pass whose depth target is not the 3D
+// picture's): the shadows stay the game's. The scene's own depth-only draws (a depth pre-pass) do get it, as the colour
+// draws they match
 static int ps1_level;
 // A draw of the 3D world's: tested against a depth target, and not a shadow map's (a depth-only pass whose depth target is
 // not the 3D picture's)
@@ -5306,9 +5306,11 @@ static bool ps1_world(void) {
         if (st.rt.color[i]) return true;
     return false;
 }
+#define PS1_CUTOUT_LEVELS 2
 static int ps1_bias(void) {
-    int f = vk_ps1_on(PS1_TEXTURES) ? PS1_TEX_BIAS : 0, b = g_config.low_end == LOW_END_BRICK ? BRICK_TEX_BIAS : 0;
-    return f > b ? f : b;
+    static int level = -1;  // (MHGU_PS1_LEVEL=<n>: another level, for tests)
+    if (level < 0) level = getenv("MHGU_PS1_LEVEL") ? atoi(getenv("MHGU_PS1_LEVEL")) : PS1_TEX_LEVEL;
+    return vk_ps1_on(PS1_TEXTURES) || g_config.low_end == LOW_END_BRICK ? level : 0;
 }
 static bool ps1_cutout;
 
@@ -5342,7 +5344,7 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
     if (h && st.spool && tsc < (uint32_t)st.spool->count) {
         NvnSamplerDesc *sd = &((NvnSamplerDesc *)st.spool->entries)[tsc];
         if (tb && view && !tb->gpu_owned && sd->min_filter > 1 && !sd->compare_mode)  // (pixelated: see ps1_level)
-            smp = vk_sampler_ps1(sd, ps1_cutout ? 0 : ps1_level);
+            smp = vk_sampler_ps1(sd, (ps1_cutout ? ps1_level - PS1_CUTOUT_LEVELS : ps1_level) - tb->mip_skip);
         else
             smp = vk_sampler(sd);
     }
