@@ -3028,15 +3028,16 @@ MENU_ENTRY("graphics", 35, rows_graphics_35, reset_graphics_35);
 void rows_graphics_37(std::vector<Row> &r) {
     add_bool(r, "ps1", "PS1 filter", &s.draft.ps1_filter, ini("PS1Filter"));
     r.back().help = en_es(
-        "The look of the 3D games of the late 90s: the textures of the 3D world in big sharp squares, the 3D picture in "
-        "15-bit colour with a fine pattern of dots, wobbly polygons and textures that bend as on the consoles of then, "
-        "and faint scanlines that flicker a little as on an old TV. Only the look changes: the resolution, the frame "
+        "The look of the 3D games of the late 90s: the textures of the 3D world in big sharp squares, the 3D picture at "
+        "about 240 lines with the stronger colours of a TV of then, in 15-bit colour with a pattern of dots, wobbly "
+        "polygons and textures that bend as on the consoles of then, and scanlines that flicker a little as on an old TV. Only the look changes: the resolution, the frame "
         "rate and the other settings stay as you have them (Brick, in Low-end mode, is the one for speed). The HUD stays "
         "readable, and the touch controls and this menu never change. The first time, the 3D shaders are built again for "
         "it (a few seconds).",
         "El aspecto de los juegos 3D de fines de los 90: las texturas del mundo 3D en cuadrados grandes y nítidos, la imagen "
-        "3D con colores de 15 bits y un patrón fino de puntitos, polígonos que tiemblan y texturas que se doblan como en las "
-        "consolas de esa época, y líneas de barrido suaves que parpadean un poco como en un televisor viejo. Solo cambia el "
+        "3D en unas 240 líneas con los colores más fuertes de un televisor de esa época, en colores de 15 bits con un patrón "
+        "de puntitos, polígonos que tiemblan y texturas que se doblan como en las consolas de entonces, y líneas de barrido "
+        "que parpadean un poco como en un televisor viejo. Solo cambia el "
         "aspecto: la resolución, los FPS y los demás ajustes quedan como los tengas (Ladrillo, en el modo gama baja, es el "
         "que da velocidad). El HUD se sigue leyendo bien, y los controles táctiles y este menú nunca cambian. La primera "
         "vez, los shaders 3D se vuelven a armar para el filtro (unos segundos).");
