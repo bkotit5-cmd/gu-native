@@ -666,6 +666,13 @@ static const char DEFAULT_INI[] =
     "; Default: 2.0\n"
     "HubHP = 2.0\n"
     "\n"
+    "[Comforts]\n"
+    "; After a drink or a meal (a potion, a steak...), pushing the stick or pressing A, B, X or Y ends the flex at once,\n"
+    "; as in the newer games, and does what it does when standing: walk, roll, draw, use an item. What was drunk or eaten\n"
+    "; still works; standing still, the flex plays whole. Off: the whole flex, as the game does\n"
+    "; Default: Off\n"
+    "FlexCancel = Off\n"
+    "\n"
     "[Quest Rewards]\n"
     "; At the end of a quest, choosing Send to the Item Box in the Quest Rewards menu sends every reward at once, through\n"
     "; the game's own steps for each one (what doesn't fit in the box stays in the list, to take or sell). Off: one at a\n"
@@ -1069,6 +1076,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
     ON_OFF("Bonus Content", "BonusContent", bonus_content, true),
+    ON_OFF("Comforts", "FlexCancel", flex_cancel, false),  // (runtime/hle/flexcancel.c reads it as it acts)
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     ON_OFF("Audio", "Reverb", reverb, false),

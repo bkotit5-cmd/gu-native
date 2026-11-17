@@ -74,6 +74,12 @@ What a log carries (1.0.1, "ask for more than we think we need": one log should 
   (`runtime/services/bonus.c` fills a save that has none at the next start); MH4U's copies its quest files into the extra
   data. `ShortcutActivity` (Menu Options, Shortcut with your image) pins a home-screen shortcut with the player's picture.
   New screens are opened by name from the menu (`ui_request_activity("showX")`: a static method of GameActivity).
+- `runtime/hle/flexcancel.c`: Gameplay > Comforts, Move to skip the flex (`[Comforts] FlexCancel`, off; 1.0.1, as MH4U for
+  Android's): in the flex after a drink or a meal (0001:087, the update 0x4d5f40 with kind 0), the stick pushed or A, B,
+  X or Y pressed (not with L held) ends the flex as it ends by itself (0x4b6e94, the rest mode's neutral action, then the
+  neutral's first update, 0x482da8: standing's commands answer only after it) just before the hunter's commands are read
+  (0x4e9d54), so the same press walks, rolls, draws or uses an item in that update. The item is given in the flex's first
+  update, before that. `[flex]` in the log for each flex ended; its header comment has the game's path.
 - `runtime/hle/rewards.c`: Gameplay, Send all rewards to the box (`[Quest Rewards] SendAllRewards`, off; Alfonso's idea): the
   Quest Rewards menu's Send to the Item Box runs the game's own per-item step for every reward at once. Test only on a
   test save; the log's `[rewards]` line says what was sent and what stayed.
