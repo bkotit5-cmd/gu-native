@@ -17,9 +17,11 @@ page): every lifted instruction keeps its C as a string, and most of them are th
 kept once (sys.intern: the same strings, the same C); and Python's collector of reference cycles is off, as gen.py makes
 none worth collecting (the same peak with it off, measured) and a collection walks every object the analysis keeps,
 the swapped-out ones too. Measured on a PC with main: 2.1 GB -> 1.8 GB, 50 s -> 43 s, the same C (md5 of every file).
+And once gen.py has written its last file, the process ends at once (os._exit) instead of freeing every object first.
 """
 import gc
 import os
+import re
 import sys
 import time
 
@@ -69,7 +71,18 @@ def main():
             ins.cond = sys.intern(ins.cond)
         return ins
 
+    def print_then_end(*a, **k):
+        print(*a, **k)
+        if a and re.fullmatch(rf'{re.escape(name)}: wrote \d+ chunks, \d+s total', str(a[0])):
+            # (gen.main()'s last line: every file is written and closed) the process ends here, as the kernel takes back
+            # its memory in one go; returning would free the analysis's millions of objects one by one, reading back
+            # all of them a phone had swapped out (a Moto g06: 20 s and 800,000 page faults, at the end of main)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
+
     module.__init__, module.boundaries, module.scan, module.lift = init_said, boundaries_counted, scan_counted, lift_interned
+    gen.print = print_then_end  # (gen.py's own print: its module's name before the built-in one)
     gc.disable()
     sys.argv = [os.path.join(TOOLS, 'gen.py')] + sys.argv[1:]
     gen.main()
