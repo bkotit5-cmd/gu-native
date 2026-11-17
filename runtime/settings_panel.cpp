@@ -944,6 +944,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(ldn_port);
     SAME(sync_small_monsters);
     SAME(bonus_content);
+    SAME(flex_cancel);  // (Gameplay > Comforts)
     SAME(village_in_hub);
     SAME(send_all_rewards);
     SAME(gather_all);
@@ -2583,6 +2584,21 @@ MENU_ENTRY("gameplay", 70, rewards_rows, reset_rewards);
 MENU_ENTRY("mods/dlc", 10, extra_import_row);
 MENU_ENTRY("system", 75, shortcut_row);
 #endif
+// 1.0.1: the flex after a drink or a meal ends as soon as the hunter moves, rolls or does something else, as in the newer
+// games (runtime/hle/flexcancel.c; MH4U for Android has the same option and name, on the same page: MENU.md 3.3).
+// Off: the whole flex, as the game does it.
+void flex_row(std::vector<Row> &r) {
+    add_bool(r, "comforts.flex", en_es("Move to skip the flex", "Moverse corta la pose"), &s.draft.flex_cancel,
+             ini("FlexCancel"));
+    r.back().help = en_es("After a potion, a drink or a steak, moving, rolling or any other action ends the flex at once, "
+                          "as in the newer games. What you drank or ate still works; standing still, the flex plays "
+                          "whole. Off: the whole flex, as the game does it.",
+                          "Después de una poción, una bebida o un filete, moverte, rodar o cualquier otra acción corta la "
+                          "pose enseguida, como en los juegos más nuevos. Lo que tomaste o comiste sigue haciendo efecto; "
+                          "si te quedas quieto, la pose se ve entera. Apagado: la pose entera, como lo hace el juego.");
+}
+void reset_flex() { s.draft.flex_cancel = config_defaults().flex_cancel; }
+MENU_ENTRY("gameplay/comforts", 20, flex_row, reset_flex);
 // ---------------------------------------------------------------- the pages and their entries (MENU.md)
 // Each option of the menu, as an entry on its page; the pages one level down, each with its row's place on the page
 // above. Other options join with a MENU_ENTRY of their own (MENU.md: the places kept for 1.0's)

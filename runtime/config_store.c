@@ -17,6 +17,7 @@
 #else
 #include <unistd.h>
 #endif
+#include "hle/flexcancel.h"
 
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_no_msaa, runtime_no_fxaa;
@@ -36,6 +37,8 @@ static void set_float(SDL_AtomicInt *slot, float value) {
 static float get_float(SDL_AtomicInt *slot) {
     int bits = SDL_GetAtomicInt(slot); float value; memcpy(&value, &bits, sizeof value); return value;
 }
+static SDL_AtomicInt live_flex_cancel;  // [Comforts] FlexCancel (runtime/hle/flexcancel.h)
+int config_live_flex_cancel(void) { return SDL_GetAtomicInt(&live_flex_cancel); }
 static SDL_AtomicInt live_gen;  // (each publish: config_live_generation)
 // [Colour] as the window image's pass reads it each frame (config_live_colour): the saved values, or the settings menu's
 // draft while it is open (config_colour_preview)
@@ -132,6 +135,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->frame_gen != saved.frame_gen) SDL_SetAtomicInt(&live_frame_gen, c->frame_gen);
     if (all || c->upscale_sharp != saved.upscale_sharp) SDL_SetAtomicInt(&live_upscale_sharp, c->upscale_sharp);
     if (all || c->grass != saved.grass) SDL_SetAtomicInt(&live_grass, c->grass);
+    if (all || c->flex_cancel != saved.flex_cancel) SDL_SetAtomicInt(&live_flex_cancel, c->flex_cancel);
     if (all || c->effects != saved.effects) SDL_SetAtomicInt(&live_effects, c->effects);
     if (all || c->reverb != saved.reverb) SDL_SetAtomicInt(&live_reverb, c->reverb);
     if (all || c->online_notice != saved.online_notice) SDL_SetAtomicInt(&live_online_notice, c->online_notice);

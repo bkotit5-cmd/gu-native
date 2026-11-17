@@ -9,6 +9,7 @@
 #include "gamefolder.h"
 #include "gamelib.h"
 #include "hle.h"
+#include "hle/flexcancel.h"
 #include "hle/itembar.h"
 #include "hle/mousemenu.h"
 #include "hle/mousecam.h"
@@ -78,6 +79,7 @@ static void boot(const char *root) {
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)
     gather_init();   // ([Gathering] GatherAll: runtime/hle/gather.c)
+    flexcancel_init();  // ([Comforts] FlexCancel: moving or another action ends the flex: runtime/hle/flexcancel.c)
     rewards_init();  // ([Quest Rewards] SendAllRewards: every reward to the item box at once: runtime/hle/rewards.c)
     mashrate_init();  // (mashing out of a stun at high frame rates: runtime/hle/mashrate.c)
     grass_init();  // ([Performance] Grass: the game's grass unit left out while Off: runtime/hle/grass.c)
