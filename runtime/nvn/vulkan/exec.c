@@ -6830,7 +6830,13 @@ static void draw(CmdRec *r, bool indexed) {
     const bool ps1v = vk_ps1_on(PS1_WOBBLE | PS1_AFFINE) && ps1_world();  // (the PS1 filter's wobble: compile_program)
     if (ps1v) vkey.glsl = fkey.glsl = PS1_GLSL;
     Prog *pr = get_program(st.program, &vkey, &fkey);
-    if (ps1v && pr && atomic_load(&pr->state) != 1) {  // (not built yet: the plain program, if it is, meanwhile)
+    // (a variant not built yet: the plain programs meanwhile, for every draw of this frame and the next - a scene's depth
+    // pre-pass and its colour draws must snap their vertices alike, or the colour fails its equal depth test: black holes
+    // across the quest's camp while the variants were building, PC)
+    static uint64_t ps1_missing;  // (the frame one was missing in, + 1)
+    int ps1s = ps1v && pr ? atomic_load(&pr->state) : 1;  // (2: failed - that draw alone takes the plain one)
+    if (ps1v && (!pr || (ps1s != 1 && ps1s != 2))) ps1_missing = g_present_count + 1;
+    if (ps1v && ((ps1_missing && g_present_count + 1 - ps1_missing <= 1) || ps1s == 2)) {
         ShaderKey pv = vkey, pf = fkey;
         pv.glsl = pf.glsl = 1;
         Prog *plain = get_program(st.program, &pv, &pf);
