@@ -3560,16 +3560,20 @@ static void save_glsl(const char *src, uint64_t addr, const char *suffix) {
 // gets its program with ShaderKey.glsl = PS1_GLSL: the translator reads it as true, so the same GLSL comes out, but the
 // keys differ, so the variant has program-cache entries and pipelines of its own while SHADER_ID and every cache of the
 // plain programs stay as they were. compile_program edits its sources here:
-//  - the vertex shader's main is renamed and called from a new one, which then puts the vertex on a grid of PS1_GRID
-//    over the picture, as the console's rasteriser had no subpixels: polygons wobble as they move;
+//  - the vertex shader's main is renamed and called from a new one, which then puts the vertex on a grid of 240 cells
+//    across each axis of the picture (PS1_GRID: the console's 240 lines, and its whole-pixel vertices: polygons wobble
+//    as they move), as MH4U for Android's filter does (mh4n vertex_shader.cpp, VertexShaderConfig::ps1). A finer grid
+//    across (426 cells, square ones) wobbled too little to see on a phone (the owner, Galaxy S25);
 //  - the varyings the fragment shader samples textures with as they come in (a register loaded from one and used in a
 //    texture call before it changes: ps1_texcoords) are interpolated without perspective in both stages, so textures
-//    bend across big polygons, as the console drew them. Only where the translator reads varyings as they are
-//    (maxwell_ipa_fold, the usual); without it (a Mali on Vulkan 1.1: translate.c) the wobble alone.
+//    bend across big polygons, as the console drew them. Not every varying, as MH4U's w = 1 does: the lighting's and the
+//    shadows' (normals, positions, shadow-map coordinates) bent too blackened the camp's item box and the hunter in
+//    blocks (PC). Only where the translator reads varyings as they are (maxwell_ipa_fold, the usual); without it (a
+//    Mali on Vulkan 1.1: translate.c) the wobble alone.
 // The first time the filter is on, these programs are translated and built on the workers: the plain ones draw
 // meanwhile (draw()).
 #define PS1_GLSL 2
-#define PS1_GRID "vec2(213.0, 120.0)"  // (half the grid's pixels: 426 x 240 over the picture, the console's 240 lines)
+#define PS1_GRID "vec2(120.0, 120.0)"  // (half the cells across each axis: the clip space's -1..1)
 
 static char *str_swap(char *s, const char *old, const char *with) {  // (the first `old` in s becomes `with`; s freed)
     char *at = s ? strstr(s, old) : NULL;
@@ -6842,6 +6846,18 @@ static void draw(CmdRec *r, bool indexed) {
         Prog *plain = get_program(st.program, &pv, &pf);
         if (plain && atomic_load(&plain->state) == 1) pr = plain, vkey = pv, fkey = pf;
     }
+    if (ps1v) {  // (how much of the 3D world wobbles: every 600 frames, in the log)
+        static uint64_t n_ps1, n_plain, since;
+        if (vkey.glsl == PS1_GLSL) n_ps1++;
+        else n_plain++;
+        if (!since) since = g_present_count;
+        if (g_present_count - since >= 600) {
+            LOG("[ps1] the last %llu frames: %llu draws of the 3D world with the filter's programs, %llu with the plain "
+                "ones (a variant not built yet)\n", (unsigned long long)(g_present_count - since), (unsigned long long)n_ps1,
+                (unsigned long long)n_plain);
+            n_ps1 = n_plain = 0, since = g_present_count;
+        }
+    }
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0, pr->loaded)) {
         if (pr->loaded) pipe_ahead(pr, (uint32_t)r->x[0], vkey.flip_y, fkey.alpha_func);
@@ -7428,8 +7444,8 @@ static VkDescriptorSetLayout present_set_layout;
 // present_pipeline(0), as before.
 static VkPipelineLayout present_fx_layout;
 #define PRESENT_FX_BYTES 96  // (three rows, the gamma, the HDR's numbers, the scanlines': six vec4)
-#define PS1_SCAN 0.18f       // (the PS1 filter's scanlines: this much darker between lines, a quarter of it more or less
-                             // by turns)
+#define PS1_SCAN 0.18f       // (the PS1 filter's scanlines: this much darker between lines, a quarter of it less on every
+                             // other picture: 18 % and 13.5 %, as MH4U for Android's)
 
 // kind 0: the picture as it is (present.frag); 1: with the colour filter (present.color); 2: filter and HDR10 encoding
 // (present.hdr)
