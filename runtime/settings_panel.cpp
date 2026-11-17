@@ -3402,12 +3402,12 @@ void hunt_aids_rows(std::vector<Row> &r) {
 #define HUNT_BARS_EDITOR_ES "Mover el HUD"
 #endif
     r.back().help = en_es(
-        "In a quest, a thin bar at the top of the screen for each large monster, with its health: what it has left "
-        "and its most (fainter while it is in another area). It works with other hunters too: it only reads the game. "
+        "In a quest, a thin bar at the top of the screen for each large monster, with its name and its health: what it "
+        "has left and its most (fainter while it is in another area). It works with other hunters too: it only reads the game. "
         "Move and size the bars with "
         HUNT_BARS_EDITOR_EN " (Reset puts them back at the top). Off: no bars, as the game does it.",
-        "En una misión, una barra fina arriba en la pantalla por cada monstruo grande, con su vida: lo que le queda y "
-        "el máximo (más tenue mientras está en otra zona). Funciona también con otros cazadores: solo lee el juego. Las "
+        "En una misión, una barra fina arriba en la pantalla por cada monstruo grande, con su nombre y su vida: lo que "
+        "le queda y el máximo (más tenue mientras está en otra zona). Funciona también con otros cazadores: solo lee el juego. Las "
         "barras se mueven y se cambian "
         "de tamaño con " HUNT_BARS_EDITOR_ES " (Restablecer las devuelve arriba). Apagado: sin barras, como lo hace "
         "el juego.");

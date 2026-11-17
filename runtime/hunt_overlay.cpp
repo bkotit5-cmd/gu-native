@@ -35,8 +35,9 @@ constexpr float JITTER = .006f;  // numbers at one place: up to 4 steps of this 
 // to the 4U's"), of the game's picture's height where MH4U's are of its top screen's: a plate 46% long and 3% tall, one
 // under the other, a third of a plate apart; the plate the FPS counter's (wine, a black edge, red and moss rules at the
 // top and bottom), a groove in it the health fills in the FPS counter's green (over half), gold (over a quarter) or red,
-// the numbers ("1234 / 2546") in ink at its right end; a monster in another zone of the map fainter. No name: MH4U's has
-// none
+// the numbers ("1234 / 2546") in ink at its right end; a monster in another zone of the map fainter. The monster's name
+// (the owner's, both ports alike) at its left end in the numbers' ink and size, the groove between them, the name
+// shortened with an ellipsis when it would take more than kName of the room left of the numbers
 constexpr float kLength = .46f;
 constexpr float kShortest = .32f;  // shorter than this beside the hunter's bars, they go under them
 constexpr float kHeight = .03f;
@@ -45,6 +46,7 @@ constexpr float kGap = .3f;        // between two plates, of a plate's height
 constexpr float kAway = .55f;      // a monster in another zone of the map
 constexpr float kText = .64f;      // the numbers, of a plate's height
 constexpr float kNumbers = 4.4f;   // the room they take at the plate's right end, of a plate's height
+constexpr float kName = .45f;      // the most of the room left of the numbers a name takes (the groove keeps the rest)
 constexpr ImU32 kWine = IM_COL32(50, 25, 24, 255), kRule = IM_COL32(176, 34, 30, 255), kMoss = IM_COL32(80, 142, 54, 255),
                 kDeep = IM_COL32(28, 20, 15, 255), kInk = IM_COL32(244, 232, 200, 255),
                 kGood = IM_COL32(132, 204, 96, 255), kGold = IM_COL32(222, 186, 96, 255),
@@ -52,6 +54,33 @@ constexpr ImU32 kWine = IM_COL32(50, 25, 24, 255), kRule = IM_COL32(176, 34, 30,
 
 ImU32 alpha_of(ImU32 c, float a) {
     return (c & 0x00ffffffu) | ((ImU32)std::clamp(((c >> 24) & 0xff) * a, 0.f, 255.f) << 24);
+}
+
+// A name in at most `most` pixels at `size`: whole, or cut at a character (UTF-8) with an ellipsis ("..." where the font
+// has no U+2026); its width (0: no name, or not even one letter fits)
+float fit_name(ImFont *font, float size, const char *in, float most, char *out, size_t cap) {
+    out[0] = 0;
+    if (!in || !*in || most <= 0) return 0;
+    float w = font->CalcTextSizeA(size, 1e9f, 0, in).x;
+    if (w <= most) {
+        std::snprintf(out, cap, "%s", in);
+        return w;
+    }
+    const char *dots = font->IsGlyphInFont(0x2026) ? "\xE2\x80\xA6" : "...";
+    for (size_t n = std::strlen(in); n > 0;) {
+        do n--; while (n > 0 && (in[n] & 0xC0) == 0x80);  // (back a whole character)
+        size_t k = n;
+        while (k > 0 && in[k - 1] == ' ') k--;  // (no space before the ellipsis)
+        if (!k) break;
+        char t[64];
+        std::snprintf(t, sizeof t, "%.*s%s", (int)std::min(k, sizeof t - 8), in, dots);
+        w = font->CalcTextSizeA(size, 1e9f, 0, t).x;
+        if (w <= most) {
+            std::snprintf(out, cap, "%s", t);
+            return w;
+        }
+    }
+    return 0;
 }
 
 // The game's picture in the window (touch.cpp's picture(): as wide as it fits in its own shape, centred)
@@ -174,9 +203,18 @@ void bars(ImDrawList *dl, const HuntView &v, const Pic &p, float w, float h, uin
         dl->AddRectFilled(ImVec2(p0.x, p0.y + l), ImVec2(p1.x, p0.y + l * 1.7f), alpha_of(kMoss, a));
         dl->AddRectFilled(ImVec2(p0.x, p1.y - l * 1.7f), ImVec2(p1.x, p1.y - l), alpha_of(kMoss, a));
         dl->AddRectFilled(ImVec2(p0.x, p1.y - l), p1, alpha_of(kRule, a));
-        // the groove and the health in it
-        const float tw = std::max(4.f, bw - numbers - 2 * pad);
-        const ImVec2 t0(x + pad, y + std::floor((bh - groove) * .5f)), t1(t0.x + tw, t0.y + groove);
+        // the name at the left (shortened to its room), then the groove and the health in it
+        const float room = std::max(4.f, bw - numbers - 2 * pad);
+        char name[64];
+        const float nw = fit_name(font, text, b.name, kName * room, name, sizeof name);
+        const float tw = std::max(4.f, room - (nw > 0 ? nw + pad : 0.f));
+        const ImVec2 t0(x + pad + (nw > 0 ? nw + pad : 0.f), y + std::floor((bh - groove) * .5f)), t1(t0.x + tw, t0.y + groove);
+        if (nw > 0) {
+            const ImVec2 ns = font->CalcTextSizeA(text, 1e9f, 0, name);
+            const ImVec2 at(x + pad, y + bh * .5f - ns.y * .5f);
+            dl->AddText(font, text, ImVec2(at.x + text * .05f, at.y + text * .06f), alpha_of(IM_COL32(0, 0, 0, 200), a), name);
+            dl->AddText(font, text, at, alpha_of(kInk, a), name);
+        }
         dl->AddRectFilled(ImVec2(t0.x - l, t0.y - l), ImVec2(t1.x + l, t1.y + l), alpha_of(IM_COL32(0, 0, 0, 255), a * .8f));
         dl->AddRectFilled(t0, t1, alpha_of(kDeep, a));
         if (fill > 0) {
@@ -202,7 +240,10 @@ bool what(HuntView *v, bool *editing) {
     *editing = config_live_monster_bars() && touch_editor_open();
     if (!*editing) return any;
     if (!any) v->nnum = 0, v->nbar = 0;
-    if (!v->nbar) v->bar[0].hp = 1900, v->bar[0].max = 2546, v->bar[0].here = true, v->nbar = 1;
+    if (!v->nbar) {
+        v->bar[0].hp = 1900, v->bar[0].max = 2546, v->bar[0].here = true, v->nbar = 1;
+        std::snprintf(v->bar[0].name, sizeof v->bar[0].name, "%s", config_language() == 1 ? "Monstruo" : "Monster");
+    }
     return true;
 }
 
@@ -219,7 +260,9 @@ uint64_t key_of(bool any, bool editing, const HuntView &v, float w, float h) {
     float place[3];
     touch_bars_place(&place[0], &place[1], &place[2]);
     mix(&w, sizeof w), mix(&h, sizeof h), mix(place, sizeof place), mix(&v.nbar, sizeof v.nbar);
-    for (int i = 0; i < v.nbar; i++) mix(&v.bar[i].hp, sizeof(int)), mix(&v.bar[i].max, sizeof(int)), mix(&v.bar[i].here, 1);
+    for (int i = 0; i < v.nbar; i++)
+        mix(&v.bar[i].hp, sizeof(int)), mix(&v.bar[i].max, sizeof(int)), mix(&v.bar[i].here, 1),
+            mix(v.bar[i].name, std::strlen(v.bar[i].name));
     return k == 0 || k == ~0ull ? 1 : k;
 }
 
