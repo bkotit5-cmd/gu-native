@@ -203,6 +203,14 @@ typedef struct {
     int upscale_sharp;        // [Display] UpscaleFilter (1.0.1, gu-native #247): a 3D picture smaller than the screen scaled
                               // up by its nearest pixels (Sharp, 1) instead of linearly (Smooth, 0: the default, as before);
                               // FSR off only (nvn/vulkan/fsr.c scale_to_stand, exec.c vk_present_draw)
+    // The hunting aids (1.0.1, the owner's; runtime/hunt_aids.h, hle/huntaids.c, hunt_overlay.cpp; Graphics & Audio >
+    // Screen and HUD), each off by default (0: nothing in CONFIG_DEFAULT_VALUES)
+    int monsters_on_map;      // [Hunting Aids] MonstersOnMap: the large monsters on the game's maps from a quest's start, as
+                              // if marked (in quests hunted alone)
+    int damage_numbers;       // [Hunting Aids] DamageNumbers: each hit's damage as a number over the monster
+    int number_size;          // [Hunting Aids] DamageNumberSize: 0 Medium (the default), 1 Small, 2 Large
+    int number_colour;        // [Hunting Aids] DamageNumberColour: 0 White, 1 Yellow, 2 Red, 3 Light blue, 4 Green
+    int monster_bars;         // [Hunting Aids] MonsterHealthBars: a health bar a large monster at the top in a quest
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {

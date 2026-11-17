@@ -680,6 +680,27 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "GatherAll = Off\n"
     "\n"
+    "[Hunting Aids]\n"
+    "; In a quest you hunt alone, the large monsters show on the game's maps from the start, as if they were marked\n"
+    "; Default: Off\n"
+    "MonstersOnMap = Off\n"
+    "\n"
+    "; Each hit on a large monster shows its damage as a number over the monster, which rises and fades in a second\n"
+    "; Default: Off\n"
+    "DamageNumbers = Off\n"
+    "\n"
+    "; How big the damage numbers are: Small, Medium or Large (4, 7.5 or 10 % of the screen's height)\n"
+    "; Default: Medium\n"
+    "DamageNumberSize = Medium\n"
+    "\n"
+    "; The damage numbers' colour, always with a dark outline: White, Yellow, Red, LightBlue or Green\n"
+    "; Default: White\n"
+    "DamageNumberColour = White\n"
+    "\n"
+    "; In a quest, a bar at the top of the screen for each large monster, with its name and its health\n"
+    "; Default: Off\n"
+    "MonsterHealthBars = Off\n"
+    "\n"
     "[Discord]\n"
     "; Show what you're doing in the game on your Discord profile (Discord must be running on this computer):\n"
     "; where you are, the quest's monsters and how many hunters are with you\n"
@@ -887,6 +908,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 #define KEYS(key, bind) {"Keybinds", key, SET_KEYS, F(binds[bind]), 0, 0, 0, NULL, NULL, false, ERR_KEYS}
 static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8};
+static const int number_size_values[] = {1, 0, 2};  // (Small, Medium, Large: Medium 0, the default of a field left 0)
 const ConfigSetting g_settings[] = {
     {"Display", "Mode", SET_CHOICE, F(display_mode), 0, 0, 0,
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
@@ -1037,6 +1059,13 @@ const ConfigSetting g_settings[] = {
     {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_VILLAGE},
     ON_OFF("Quest Rewards", "SendAllRewards", send_all_rewards, false),  // (runtime/hle/rewards.c reads it as it acts)
     ON_OFF("Gathering", "GatherAll", gather_all, false),  // (runtime/hle/gather.c reads it as it acts)
+    ON_OFF("Hunting Aids", "MonstersOnMap", monsters_on_map, false),  // (runtime/hle/huntaids.c, each frame)
+    ON_OFF("Hunting Aids", "DamageNumbers", damage_numbers, false),
+    {"Hunting Aids", "DamageNumberSize", SET_CHOICE, F(number_size), 0, 0, 0, "Small,Medium,Large", number_size_values,
+     false, ERR_MISC},
+    {"Hunting Aids", "DamageNumberColour", SET_CHOICE, F(number_colour), 0, 0, 0,
+     "White,Yellow,Red,LightBlue|light blue|blue,Green", NULL, false, ERR_MISC},
+    ON_OFF("Hunting Aids", "MonsterHealthBars", monster_bars, false),
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
     ON_OFF("Bonus Content", "BonusContent", bonus_content, true),

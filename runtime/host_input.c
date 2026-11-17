@@ -38,6 +38,7 @@
 #include "menu_confirm.h"
 #include "forge.h"
 #include "haptics.h"
+#include "hunt_aids.h"
 #include "hle/chat.h"
 #include "hle/input.h"
 #include "hle/itembar.h"
@@ -326,6 +327,12 @@ static void control_poll(void) {
                 int v[7] = {0};            // the colour filter as if set in the menu (tests: runtime/colour_filter.h);
                 int n = sscanf(line, "%*s %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]);
                 config_colour_test(n >= 1 ? v : NULL);  // "colour" alone: the saved values again
+                continue;
+            }
+            if (!strcmp(cmd, "huntaids")) {  // huntaids <map> <numbers> <bars> [size] [colour]: the hunting aids as if
+                int v[5] = {0, 0, 0, -1, -1};  // saved in the menu (tests: runtime/hunt_aids.h; size 0 Medium, 1 Small,
+                sscanf(line, "%*s %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4]);  // 2 Large; colour 0..4)
+                config_huntaids_test(v[0], v[1], v[2], v[3], v[4]);
                 continue;
             }
             if (!strcmp(cmd, "upscale")) {  // upscale 0|1: [Display] UpscaleFilter Smooth / Sharp from the next frame, as
