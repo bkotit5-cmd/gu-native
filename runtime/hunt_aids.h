@@ -4,7 +4,8 @@
 //     if marked (the game draws its own icons);
 //   - Damage numbers: each hit on a large monster shows its damage as a number over the monster, which rises and fades
 //     in a second; their size and colour;
-//   - Monster health bars: a bar a large monster at the top of the screen in a quest, with its health and its name.
+//   - Monster health bars: a bar a large monster at the top of the screen in a quest, with its health (MH4U for
+//     Android's look), moved and sized in the HUD editors.
 // The game's side (runtime/hle/huntaids.c) reads and writes the game's memory once a frame, on the game's update thread,
 // after the game's update: no hook of the game's code, the game library is the same. The drawing (runtime/hunt_overlay.cpp)
 // is the overlay's, over the game's picture and under the touch controls: frame generation and the upscalers never touch it.
@@ -29,8 +30,8 @@ typedef struct {
 } HuntNumber;
 
 typedef struct {
-    char name[48];     // the monster's name in the game's own language ("" when the game's text has none for it)
     int hp, max;
+    bool here;         // in the hunter's zone of the map (else drawn fainter, as MH4U's)
 } HuntBar;
 
 typedef struct {

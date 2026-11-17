@@ -697,7 +697,7 @@ static const char DEFAULT_INI[] =
     "; Default: White\n"
     "DamageNumberColour = White\n"
     "\n"
-    "; In a quest, a bar at the top of the screen for each large monster, with its name and its health\n"
+    "; In a quest, a thin bar at the top of the screen for each large monster, with its health\n"
     "; Default: Off\n"
     "MonsterHealthBars = Off\n"
     "\n"

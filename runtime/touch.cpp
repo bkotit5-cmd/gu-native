@@ -494,7 +494,7 @@ Layout defaults(int kind = KIND_OURS) {
     l.bars_x = l.bars_y = -1.0f, l.bars_k = 1.0f;
     return l;
 }
-const float BARS_K_MIN = .6f, BARS_K_MAX = 1.6f;
+const float BARS_K_MIN = .5f, BARS_K_MAX = 2.0f;  // (MH4U's: half to twice the size they come with)
 std::atomic<float> g_fps_x{-1.0f}, g_fps_y{-1.0f};  // (Layout.fps_x / fps_y, for the game thread: touch_fps_place)
 std::atomic<float> g_bars_x{-1.0f}, g_bars_y{-1.0f}, g_bars_k{1.0f};  // (Layout.bars_*: touch_bars_place)
 void publish_hud(const Layout &l) {  // (to the render thread; the kind and what it hides, the FPS counter's place, to all)
