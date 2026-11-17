@@ -1724,6 +1724,11 @@ static void hud_start(const char *why) {
                  (unsigned long long)g_present_count + 1, (void *)shot_taken);
         shot_taken = NULL;
     }
+    // (the PS1 filter's 15-bit colour, [Graphics] PS1Filter: the 3D picture dithered under the HUD. Scaled plainly, H at its
+    // own size before it is scaled, so the dots grow with the picture's pixels (Sharp: each a block); after FSR, its
+    // picture H'. Off: nothing)
+    const bool ps1 = vk_ps1_on(PS1_COLOUR);
+    if (ps1 && !frame_fsr) vk_ps1_dither(vk_tex(g_h, true));
     // ([Display] UpscaleFilter Sharp, FSR off: the nearest pixels, by the blit always - the draw that can stand in for it,
     // MHGU_PERF_HUDSTART_FUSE, is the linear blit's, and its first comparison is made against that one)
     const bool sharp = plain_only && config_live_upscale_sharp();
@@ -1731,6 +1736,7 @@ static void hud_start(const char *why) {
         scale_to_stand(g_h, hs, sharp ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
         if ((hud_fuse & 2) && !sharp) vk_color_fill_check(hs->backend, vk_tex(g_h, true), 0);  // (the first time: the draw compared with it)
     }
+    if (ps1 && frame_fsr) vk_ps1_dither(hs->backend);
     {  // every change between FSR and plain scaling, with the reason (always logged; at most 500 lines)
         static int last = -1, nlog;
         const char *why_not = frame_fsr ? NULL : !depth || dn < 16 ? "no 3D scene this frame (fewer than 16 depth-writing draws)"

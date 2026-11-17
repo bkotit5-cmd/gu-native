@@ -3556,12 +3556,126 @@ static void save_glsl(const char *src, uint64_t addr, const char *suffix) {
     if (f) { fputs(src, f); fclose(f); }
 }
 
+// ---- The PS1 filter's wobble and bent textures ([Graphics] PS1Filter, 1.0.1.1). A draw of the 3D world's (ps1_world)
+// gets its program with ShaderKey.glsl = PS1_GLSL: the translator reads it as true, so the same GLSL comes out, but the
+// keys differ, so the variant has program-cache entries and pipelines of its own while SHADER_ID and every cache of the
+// plain programs stay as they were. compile_program edits its sources here:
+//  - the vertex shader's main is renamed and called from a new one, which then puts the vertex on a grid of PS1_GRID
+//    over the picture, as the console's rasteriser had no subpixels: polygons wobble as they move;
+//  - the varyings the fragment shader samples textures with as they come in (a register loaded from one and used in a
+//    texture call before it changes: ps1_texcoords) are interpolated without perspective in both stages, so textures
+//    bend across big polygons, as the console drew them. Only where the translator reads varyings as they are
+//    (maxwell_ipa_fold, the usual); without it (a Mali on Vulkan 1.1: translate.c) the wobble alone.
+// The first time the filter is on, these programs are translated and built on the workers: the plain ones draw
+// meanwhile (draw()).
+#define PS1_GLSL 2
+#define PS1_GRID "vec2(213.0, 120.0)"  // (half the grid's pixels: 426 x 240 over the picture, the console's 240 lines)
+
+static char *str_swap(char *s, const char *old, const char *with) {  // (the first `old` in s becomes `with`; s freed)
+    char *at = s ? strstr(s, old) : NULL;
+    if (!at) return s;
+    size_t a = (size_t)(at - s), lo = strlen(old), lw = strlen(with), n = strlen(s);
+    char *r = malloc(n - lo + lw + 1);
+    if (!r) return s;
+    memcpy(r, s, a), memcpy(r + a, with, lw), memcpy(r + a + lw, at + lo, n - a - lo + 1);
+    free(s);
+    return r;
+}
+
+// The varyings (bit k: vk) a fragment shader's texture calls read straight from a register loaded from them
+static uint32_t ps1_texcoords(const char *fs) {
+    int8_t from[512];  // (register -> the varying it holds as it came in, -1 none)
+    memset(from, -1, sizeof from);
+    uint32_t mask = 0;
+    for (const char *l = fs; l && *l;) {
+        const char *e = strchr(l, '\n');
+        size_t n = e ? (size_t)(e - l) : strlen(l);
+        char line[1024];
+        if (n >= sizeof line) n = sizeof line - 1;
+        memcpy(line, l, n), line[n] = 0;
+        l = e ? e + 1 : NULL;
+        const char *t = line;
+        while (*t == ' ') t++;
+        int r, v, c;
+        char end[4] = "";
+        if (sscanf(t, "r%d = as_u(v%d[%d])%3s", &r, &v, &c, end) == 4 && !strcmp(end, ";") && r >= 0 && r < 512 && v >= 0 &&
+            v < 32) {
+            from[r] = (int8_t)v;
+            continue;
+        }
+        const char *call = strstr(line, "texture");
+        if (call && (strstr(call, "texture(") || strstr(call, "textureLod(") || strstr(call, "textureGrad(") ||
+                     strstr(call, "textureOffset(")))
+            for (const char *u = strstr(call, "as_f(r"); u; u = strstr(u + 6, "as_f(r")) {
+                int q = atoi(u + 6);
+                if (q >= 0 && q < 512 && from[q] >= 0) mask |= 1u << from[q];
+            }
+        for (const char *a = strstr(line, " = "); a; a = strstr(a + 3, " = ")) {  // (registers written here: no longer)
+            const char *s = a;
+            while (s > line && s[-1] >= '0' && s[-1] <= '9') s--;
+            if (s > line && s[-1] == 'r' && s < a && (s - 1 == line || s[-2] == ' ' || s[-2] == ';' || s[-2] == '{')) {
+                int q = atoi(s);
+                if (q >= 0 && q < 512) from[q] = -1;
+            }
+        }
+    }
+    return mask;
+}
+
+// The PS1 variant's sources (malloc'd; NULL: the shader as it was)
+static char *ps1_vs(const char *src, uint32_t affine) {
+    char *s = strdup(src);
+    char *r = str_swap(s, "\nvoid main() {", "\nvoid ps1_main() {");
+    if (!r || !strstr(r, "void ps1_main() {")) { free(r); return NULL; }
+    for (int k = 0; k < 32; k++)
+        if (affine >> k & 1) {
+            char o[64], w[80];
+            snprintf(o, sizeof o, "layout(location = %d) out vec4 v%d;", k, k);
+            snprintf(w, sizeof w, "layout(location = %d) noperspective out vec4 v%d;", k, k);
+            r = str_swap(r, o, w);
+        }
+    size_t n = strlen(r);
+    static const char tail[] =
+        "void main() {\n"
+        "  ps1_main();\n"
+        "  if (gl_Position.w > 0.0)\n"
+        "    gl_Position.xy = round(gl_Position.xy / gl_Position.w * " PS1_GRID ") / " PS1_GRID " * gl_Position.w;\n"
+        "}\n";
+    char *out = malloc(n + sizeof tail + 1);
+    if (!out) { free(r); return NULL; }
+    memcpy(out, r, n), out[n] = '\n', memcpy(out + n + 1, tail, sizeof tail);
+    free(r);
+    return out;
+}
+static char *ps1_fs(const char *src, uint32_t affine) {
+    if (!affine) return NULL;
+    char *r = strdup(src);
+    for (int k = 0; k < 32; k++)
+        if (affine >> k & 1) {
+            char o[64], w[80];
+            snprintf(o, sizeof o, "layout(location = %d) in vec4 v%d;", k, k);
+            snprintf(w, sizeof w, "layout(location = %d) noperspective in vec4 v%d;", k, k);
+            r = str_swap(r, o, w);
+        }
+    return r;
+}
+
 static void compile_program(void *arg) {
     Prog *p = arg;
     uint64_t t0 = plat_now_ns();
     size_t nv = 0, nf = 0;
-    uint32_t *sv = vk_glsl_to_spirv(p->vi->msl, STAGE_VERTEX, "vs", &nv);
-    const char *fsrc = p->fi->msl;
+    char *ps1v = NULL, *ps1f = NULL;  // (the PS1 filter's variant, above)
+    if (p->vkey.glsl == PS1_GLSL) {
+        uint32_t affine = maxwell_ipa_fold && vk_ps1_on(PS1_AFFINE) ? ps1_texcoords(p->fi->msl) : 0;
+        ps1v = vk_ps1_on(PS1_WOBBLE) ? ps1_vs(p->vi->msl, affine) : NULL;
+        ps1f = ps1_fs(p->fi->msl, affine);
+        static _Atomic int nlog;
+        if (atomic_fetch_add(&nlog, 1) < 3)
+            LOG("[ps1] program %llx/%llx: wobble %s, bent textures on varyings %#x\n", (unsigned long long)p->code[0],
+                (unsigned long long)p->code[1], ps1v ? "on" : "not possible", affine);
+    }
+    uint32_t *sv = vk_glsl_to_spirv(ps1v ? ps1v : p->vi->msl, STAGE_VERTEX, "vs", &nv);
+    const char *fsrc = ps1f ? ps1f : p->fi->msl;
     char *over = NULL;
     if (getenv("MHGU_GLSL_OVERRIDE")) {  // (debug) glsl_override/<code address>_fs.glsl replaces the translated shader
         char path[96];
@@ -3579,6 +3693,8 @@ static void compile_program(void *arg) {
     }
     uint32_t *sf = sv ? vk_glsl_to_spirv(fsrc, STAGE_FRAGMENT, "fs", &nf) : NULL;
     free(over);
+    free(ps1v);
+    free(ps1f);
     if (!sv || !sf) { free(sv); free(sf); set_state(&p->state, 2, p->t_req); prewarm_pipelines(p); return; }
     p->nbinds = vk_reflect(sv, nv, p->binds, MAX_BIND);
     p->nbinds += vk_reflect(sf, nf, p->binds + p->nbinds, MAX_BIND - p->nbinds);
@@ -5171,6 +5287,30 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 }
 
 static int32_t fsr_cap_base;  // (FSR capture draw: its FSR_CAP_BASE_BINDING value, stage_set)
+// Pixelated textures (1.0.1.1: [Graphics] PS1Filter PS1_TEX_BIAS, [Performance] LowEnd Brick BRICK_TEX_BIAS): the LOD
+// bias for the draw being set up (draw(), around its stage_set calls), 0 none. Only a draw of the 3D world's has one:
+// tested against a depth target, which the HUD's and the menus' 2D never are (cbuf_info places the HUD's pieces by that
+// too); its mipmapped textures that the game made (not a render target: the picture, depth, shadows, reflections) are
+// sampled through textures.c vk_sampler_ps1. A draw with cut-outs (an alpha test, alpha to coverage or a discard in its
+// shader: grass, leaves, hair) gets the nearest texels without the bias (ps1_cutout): a smaller level's alpha is an
+// average, and the cut-outs fill in or vanish. Not a shadow map's draws (a depth-only pass whose depth target is not the
+// 3D picture's): the shadows stay the game's. The scene's own depth-only draws (a depth pre-pass) do get it, as the
+// colour draws they match
+static int ps1_level;
+// A draw of the 3D world's: tested against a depth target, and not a shadow map's (a depth-only pass whose depth target is
+// not the 3D picture's)
+static bool ps1_world(void) {
+    if (!st.ds[0] || st.ds[2] == 8 || !st.rt.depth) return false;  // (8: Always)
+    if (st.rt.depth->width == g_render_size[0] && st.rt.depth->height == g_render_size[1]) return true;
+    for (int i = 0; i < st.rt.ncolor; i++)
+        if (st.rt.color[i]) return true;
+    return false;
+}
+static int ps1_bias(void) {
+    int f = vk_ps1_on(PS1_TEXTURES) ? PS1_TEX_BIAS : 0, b = g_config.low_end == LOW_END_BRICK ? BRICK_TEX_BIAS : 0;
+    return f > b ? f : b;
+}
+static bool ps1_cutout;
 
 static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo *out) {
     ShaderTexture *stx = &si->tex[i];
@@ -5180,9 +5320,11 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
     VkSampler smp = VK_NULL_HANDLE;
     VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL;
     uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;
+    TexBackend *tb = NULL;  // (pixelated textures: the texture's image)
     if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
         NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
         if (e->tex) {
+            if (ps1_level) tb = e->tex->backend;
             view = vk_view(g_fsr_on ? vk_fsr_map(e->tex, false) : e->tex, &e->view, e->has_view, false, stx->type);  // (FSR)
             for (int k = 0; k < nfeedback; k++)
                 if (e->tex == feedback_tex[k] && (stx->type == TEXTYPE_2D || stx->type == TEXTYPE_2D_ARRAY)) {
@@ -5197,7 +5339,13 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
                 }
         }
     }
-    if (h && st.spool && tsc < (uint32_t)st.spool->count) smp = vk_sampler(&((NvnSamplerDesc *)st.spool->entries)[tsc]);
+    if (h && st.spool && tsc < (uint32_t)st.spool->count) {
+        NvnSamplerDesc *sd = &((NvnSamplerDesc *)st.spool->entries)[tsc];
+        if (tb && view && !tb->gpu_owned && sd->min_filter > 1 && !sd->compare_mode)  // (pixelated: see ps1_level)
+            smp = vk_sampler_ps1(sd, ps1_cutout ? 0 : ps1_level);
+        else
+            smp = vk_sampler(sd);
+    }
     if (!view) view = vk_dummy_view(stx->type);
     if (!smp) smp = vk_default_sampler(true);
     *out = (VkDescriptorImageInfo){smp, view, layout};
@@ -6311,6 +6459,126 @@ void vk_color_fill_flush(TexBackend *b) { if (fill.dst && (!b || b == fill.dst))
 static void fill_copy_flush(void) { if (fill.dst && fill.kind == 1) fill_now(); }  // (a copy, clear or dispatch first)
 void vk_color_fill_forget(TexBackend *b) { if (fill.dst == b || fill.src == b) fill.dst = fill.src = NULL; }
 
+// ================================================================== PS1 filter: 15-bit colour ([Graphics] PS1Filter)
+// The picture b (the 3D picture at the start of the HUD: ps1.c, fsr.c hud_start) in place, as the console's 15-bit
+// colour showed it: 5 bits a channel with a 4x4 ordered (Bayer) dither, fixed on the screen (shaders.c ps1.frag: what
+// stays still keeps its dots, for frame generation too). b is copied aside (ps1_copy, kept for the next frame) and drawn
+// back over itself from the copy in a pass of its own; the game's next draw begins its pass again, as after fsr.c's
+// start of the HUD. sRGB is dithered as its bytes (a UNORM view, as the window image is read). 1.0.1.1.
+static VkDescriptorSetLayout ps1_set_layout;
+static VkPipelineLayout ps1_layout;
+static TexBackend ps1_copy;
+
+static VkPipeline ps1_pipeline(VkRenderPass rp) {
+    static struct { VkRenderPass rp; VkPipeline p; } tab[8];
+    static int n;
+    for (int i = 0; i < n; i++) if (tab[i].rp == rp) return tab[i].p;
+    if (!ps1_layout) {
+        VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
+        VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &ps1_set_layout));
+        VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                         .pSetLayouts = &ps1_set_layout};
+        VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &ps1_layout));
+    }
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
+         .module = vk_builtin_shader("resolve.vert"), .pName = "main"},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+         .module = vk_builtin_shader("ps1.frag"), .pName = "main"}};
+    VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+                                                 .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+    VkPipelineViewportStateCreateInfo vs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1,
+                                            .scissorCount = 1};
+    VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                 .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1};
+    VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+                                               .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+    VkPipelineColorBlendAttachmentState att = {.colorWriteMask = 0xF};
+    VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+                                              .attachmentCount = 1, .pAttachments = &att};
+    VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2,
+                                           .pDynamicStates = dyn};
+    VkGraphicsPipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2,
+                                       .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia,
+                                       .pViewportState = &vs, .pRasterizationState = &rs, .pMultisampleState = &ms,
+                                       .pColorBlendState = &cb, .pDynamicState = &dy, .layout = ps1_layout, .renderPass = rp};
+    VkPipeline p = VK_NULL_HANDLE;
+    if (sync_pipeline(&pi, &p) != VK_SUCCESS) LOG("[ps1] the 15-bit colour pipeline failed\n");
+    if (n < 8) tab[n].rp = rp, tab[n++].p = p;
+    return p;
+}
+
+void vk_ps1_dither(TexBackend *b) {
+    if (!b || !b->image || b->samples != 1 || b->aspect != VK_IMAGE_ASPECT_COLOR_BIT) return;
+    if (fill.dst && (fill.dst == b || fill.src == b)) fill_now();  // (MHGU_PERF_HUDSTART_FUSE: a picture still to be drawn)
+    if (in_pass) vk_end_pass(), st.rt_dirty = true;
+    vk_ms_resolve(b);
+    VkFormat f = b->format == VK_FORMAT_R8G8B8A8_SRGB ? VK_FORMAT_R8G8B8A8_UNORM
+               : b->format == VK_FORMAT_B8G8R8A8_SRGB ? VK_FORMAT_B8G8R8A8_UNORM : b->format;
+    TexBackend *c = &ps1_copy;
+    if (!c->image || c->format != b->format || c->width != b->width || c->height != b->height) {
+        if (c->image) {
+            vk_views_forget(c);
+            vk_defer_image(c->image, c->mem);
+            c->image = VK_NULL_HANDLE;
+        }
+        VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
+                                .imageType = VK_IMAGE_TYPE_2D, .format = b->format, .extent = {b->width, b->height, 1},
+                                .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+                                .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+        if (vk_create_image(&ci, &c->image, &c->mem) != VK_SUCCESS) {
+            static int nlog;
+            if (nlog++ < 2) LOG("[ps1] no %ux%u image for the 15-bit colour (format %d): the picture stays as it is\n",
+                                b->width, b->height, b->format);
+            c->image = VK_NULL_HANDLE;
+            return;
+        }
+        c->format = b->format, c->base_type = VK_IMAGE_VIEW_TYPE_2D, c->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        c->width = b->width, c->height = b->height, c->depth = c->layers = c->levels = c->samples = 1;
+        c->gpu_owned = true;
+        vk_image_init_layout(vk_upload_cmd(), c->image, VK_IMAGE_ASPECT_COLOR_BIT);
+    }
+    VkRenderPass rp = render_pass(&f, 1, VK_FORMAT_UNDEFINED, 1, 1);  // (cleared as it begins: every pixel is drawn)
+    VkPipeline p = ps1_pipeline(rp);
+    static const VkComponentMapping id = {0};
+    VkImageView dst = vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D, f, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    VkImageView src = vk_image_view(c, VK_IMAGE_VIEW_TYPE_2D, f, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (!p || !dst || !src) return;
+    VkCommandBuffer cb = vk_cmd();
+    vk_full_barrier(cb);
+    VkImageCopy r = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .extent = {b->width, b->height, 1}};
+    vkCmdCopyImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, c->image, VK_IMAGE_LAYOUT_GENERAL, 1, &r);
+    vk_full_barrier(cb);
+    VkDescriptorSet set = vk_alloc_set(ps1_set_layout);
+    VkDescriptorImageInfo ii = {vk_default_sampler(false), src, VK_IMAGE_LAYOUT_GENERAL};
+    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0, .descriptorCount = 1,
+                              .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
+    vkUpdateDescriptorSets(g_vk.dev, 1, &w, 0, NULL);
+    VkRect2D area = {{0, 0}, {b->width, b->height}};
+    VkClearValue cv = {{{0, 0, 0, 0}}};
+    VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = rp,
+                                .framebuffer = vk_framebuffer(rp, &dst, 1, b->width, b->height), .renderArea = area,
+                                .clearValueCount = 1, .pClearValues = &cv};
+    vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, ps1_layout, 0, 1, &set, 0, NULL);
+    VkViewport vp = {0, 0, (float)b->width, (float)b->height, 0, 1};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &area);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cb);
+    vk_full_barrier(cb);
+    ss_forget();  // (its own pipeline, set and state: the next draw sets them all again)
+    b->ms_valid = false;  // (a multisampled image of it holds the picture before this)
+    gp_mark("  ps1 15-bit colour");
+}
+
 // (FILL_CHECKING, its copies done) the blit's (or copy's) picture and the draw's: the same bytes
 static void fill_check(int kind) {
 #define fc fcs[kind]
@@ -6557,7 +6825,15 @@ static void draw(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.nattrib; i++) vkey.attr_kind[i] = (uint8_t)attr_kind(st.attrib[i] & 0xFF);
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     if (st.color_state[2] >= 1 && st.color_state[2] <= 7) fkey.alpha_func = st.color_state[2];  // (NVN alpha test)
+    const bool ps1v = vk_ps1_on(PS1_WOBBLE | PS1_AFFINE) && ps1_world();  // (the PS1 filter's wobble: compile_program)
+    if (ps1v) vkey.glsl = fkey.glsl = PS1_GLSL;
     Prog *pr = get_program(st.program, &vkey, &fkey);
+    if (ps1v && pr && atomic_load(&pr->state) != 1) {  // (not built yet: the plain program, if it is, meanwhile)
+        ShaderKey pv = vkey, pf = fkey;
+        pv.glsl = pf.glsl = 1;
+        Prog *plain = get_program(st.program, &pv, &pf);
+        if (plain && atomic_load(&plain->state) == 1) pr = plain, vkey = pv, fkey = pf;
+    }
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0, pr->loaded)) {
         if (pr->loaded) pipe_ahead(pr, (uint32_t)r->x[0], vkey.flip_y, fkey.alpha_func);
@@ -6572,13 +6848,16 @@ static void draw(CmdRec *r, bool indexed) {
     VkPrimitiveTopology topo;
     bool native = topology(mode, &topo);
     if (!native && mode != 6 && mode != 7 && mode != 9) { stat_skipped++; return; }
-    if (g_fsr_on) {  // FSR: the frame's structure; at the start of the HUD FSR runs before this draw (fsr.c)
+    // FSR: the frame's structure; at the start of the HUD FSR runs before this draw (fsr.c). The PS1 filter's 15-bit colour
+    // without FSR or plain scaling: the same start of the HUD, where the 3D picture is dithered (ps1.c)
+    if (g_fsr_on || vk_ps1_on(PS1_COLOUR)) {
         FsrDraw fd = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
                       .depth_write = st.ds[0] && st.ds[1], .depth_test = st.ds[0] && st.ds[2] != 8,  // (8: Always)
                       .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18,
                       .vp_w = st.viewport[0][2], .vp_h = st.viewport[0][3]};
         for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = draw_texture(1, pr->fi, i);
-        vk_fsr_draw(&fd);
+        if (g_fsr_on) vk_fsr_draw(&fd);
+        else vk_ps1_draw(&fd);
     }
 
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
@@ -6693,9 +6972,12 @@ static void draw(CmdRec *r, bool indexed) {
     // ---- descriptor sets
     uint32_t doff[34];  // (MHGU_PERF_DYNUBO: the dynamic offsets, set 0's then set 1's)
     int nd = pr->ndyn[0] + pr->ndyn[1];
+    ps1_level = ps1_world() ? ps1_bias() : 0;  // (pixelated textures: texture_info)
+    ps1_cutout = ps1_level && (af || st.ms[0xC] || pr->fi->uses_discard);  // (see ps1_level)
     VkDescriptorSet sets[2] = {stage_set(pr->nbinds, pr->binds, pr->set_layout[0], 0, 0, pr->vi, 0, 0, 0, pr->dyn_mask[0], doff),
                                stage_set(pr->nbinds, pr->binds, pr->set_layout[1], 1, 1, pr->fi, 0, 0, 0, pr->dyn_mask[1],
                                          doff + pr->ndyn[0])};
+    ps1_level = 0;
     if (ss_need(SS_SETS, ss.sets_layout == pr->layout && !memcmp(ss.sets, sets, sizeof sets) &&  // (the same ones: kept)
                              (!nd || !memcmp(ss.doff, doff, (size_t)nd * sizeof *doff)))) {
         ss.sets_layout = pr->layout, memcpy(ss.sets, sets, sizeof sets);
@@ -7133,10 +7415,12 @@ VkRenderPass vk_window_pass(void);
 int vk_window_turn(void);
 static VkPipelineLayout present_layout;
 static VkDescriptorSetLayout present_set_layout;
-// The colour filter and the HDR output (runtime/colour_filter.h): their own layout, the vertex stage's 32 bytes as above
-// and the fragment's after them. Neutral colour in SDR draws with present_pipeline(0), as before.
+// The colour filter, the HDR output (runtime/colour_filter.h) and the PS1 filter's scanlines: their own layout, the vertex
+// stage's 32 bytes as above and the fragment's after them. Neutral colour in SDR without the PS1 filter draws with
+// present_pipeline(0), as before.
 static VkPipelineLayout present_fx_layout;
-#define PRESENT_FX_BYTES 80  // (three rows, the gamma, the HDR's numbers: five vec4)
+#define PRESENT_FX_BYTES 96  // (three rows, the gamma, the HDR's numbers, the scanlines': six vec4)
+#define PS1_SCAN 0.12f       // (the PS1 filter's darker rows: this much darker, a quarter of it more or less by turns)
 
 // kind 0: the picture as it is (present.frag); 1: with the colour filter (present.color); 2: filter and HDR10 encoding
 // (present.hdr)
@@ -7208,7 +7492,8 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     ColourAdjust colour;
     config_live_colour(&colour);
     const bool hdr = vk_window_hdr();
-    const int kind = hdr ? 2 : colour_neutral(&colour) ? 0 : 1;
+    const bool ps1 = vk_ps1_on(PS1_SCANLINES);  // ([Graphics] PS1Filter: the scanlines, below)
+    const int kind = hdr ? 2 : colour_neutral(&colour) && !ps1 ? 0 : 1;
     VkPipeline p = present_pipeline(kind);
     VkPipelineLayout layout = kind ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
@@ -7234,6 +7519,14 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
             config_live_hdr(&hb, &hh);
             HdrParams h = hdr_params(hb, hh, vk_window_hdr_peak());
             fx[16] = h.paper, fx[17] = h.top, fx[18] = h.knee;
+        }
+        if (ps1) {  // ([Graphics] PS1Filter) faint scanlines over the game's picture, its HUD too (the overlay is drawn after
+            // this: the touch controls and the menu never get them), along the picture's rows whatever the panel's turn:
+            // rows of about 2 pixels at 720 to 1080 lines (a whole number of the window's pixels each), every other one
+            // PS1_SCAN darker, flickering a little from one picture to the next as an interlaced screen does
+            static unsigned field;
+            float k = roundf(vh / 480.0f);
+            fx[20] = 1.0f, fx[21] = vh / (k < 1.0f ? 1.0f : k), fx[22] = (float)(field++ & 1), fx[23] = PS1_SCAN;
         }
         vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, PRESENT_FX_BYTES, fx);
     }

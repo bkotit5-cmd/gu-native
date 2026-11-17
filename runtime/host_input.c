@@ -339,6 +339,10 @@ static void control_poll(void) {
                 config_upscale_test(atoi(arg));  // if saved in the menu (tests: the same scene both ways)
                 continue;
             }
+            if (!strcmp(cmd, "ps1")) {  // ps1 0|1: [Graphics] PS1Filter from the next frame, as if saved in the menu (tests:
+                config_ps1_test(atoi(arg));  // the same scene both ways)
+                continue;
+            }
             if (!strcmp(cmd, "fgeval")) {  // fgeval <n> [frames]: n quality samples of frame generation (nvn/vulkan/framegen.c)
                 extern void vk_framegen_eval(int n, int every);
                 vk_framegen_eval(atoi(arg), atoi(arg2));

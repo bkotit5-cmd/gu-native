@@ -129,7 +129,8 @@ typedef struct {
                               // a desktop: 0 off, 1 (On, the menu's Basic) with the GPU's temperature, 2 (Full) also
                               // the GPU's and the CPU's lines
     int pause_background;     // [Application] PauseInBackground: the game stops while the app is in the background
-    int low_end;              // [Performance] LowEnd: 0 off, 1 a weak GPU's frame, 2 Toaster (LOW_END_TOASTER: all of it and more)
+    int low_end;              // [Performance] LowEnd: 0 off, 1 a weak GPU's frame, 2 Toaster (LOW_END_TOASTER: all of it and more),
+                              // 3 Brick (LOW_END_BRICK: Toaster's and more still)
     int lock_on;              // [Controls] LockOn: the camera stays on the monster, and with it a bow's or gun's shots (touch.cpp)
     // (every field's default is in config.c's CONFIG_DEFAULT_VALUES, by position: a new field needs one there)
     int shadows;              // [Performance] Shadows: 0 none drawn (nvn/vulkan/exec.c shadow_skipped)
@@ -213,6 +214,13 @@ typedef struct {
     int number_size;          // [Hunting Aids] DamageNumberSize: 0 Medium (the default), 1 Small, 2 Large
     int number_colour;        // [Hunting Aids] DamageNumberColour: 0 White, 1 Yellow, 2 Red, 3 Light blue, 4 Green
     int monster_bars;         // [Hunting Aids] MonsterHealthBars: a health bar a large monster at the top in a quest
+    int ps1_filter;           // [Graphics] PS1Filter (1.0.1.1, the owner's after a suggestion; off by default, 0: nothing in
+                              // CONFIG_DEFAULT_VALUES; live): the look of the 3D games of the late 90s, style only (no
+                              // setting changes): the 3D world's textures by their nearest texels, a mip level or two
+                              // smaller (nvn/vulkan/textures.c vk_sampler_ps1, exec.c texture_info), the 3D picture in
+                              // 15-bit colour with a 4x4 ordered dither under the HUD (ps1.c, exec.c vk_ps1_dither), and
+                              // over the game's picture, never the overlay, faint scanlines that flicker as an interlaced
+                              // screen's (exec.c vk_present_draw, shaders.c present.color)
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -250,10 +258,20 @@ void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
 #endif
 #define LOW_END_TOASTER 2   // LowEnd = Toaster: everything for speed and the battery (config.c, textures.c, the menu)
 #define TOASTER_SCALE 25    // what the menu's Toaster sets: RenderScale (and LOW_END_FPS)
-#define TOASTER_HUD_LINES 540  // Toaster: the HUD's picture at most this tall (config.c, fsr.c's output)
-// (a desktop) how tall the menu's Low-end mode and Toaster make the 3D picture, whatever the screen: config_lowend_scale
+#define TOASTER_HUD_LINES 540  // Toaster (and Brick): the HUD's picture at most this tall (config.c, fsr.c's output)
+// LowEnd = Brick (1.0.1.1, the owner's): below Toaster, for the weakest phones: all of Toaster's (each `>= LOW_END_TOASTER`)
+// and a smaller 3D picture, and the 3D world's textures by their nearest texels BRICK_TEX_BIAS mip levels smaller (less
+// to read from memory: nvn/vulkan/exec.c texture_info), which looks like a game of the late 90s
+#define LOW_END_BRICK 3
+#define BRICK_SCALE 15      // what the menu's Brick sets: RenderScale (and LOW_END_FPS); config.c keeps 320x180 at least
+#define BRICK_TEX_BIAS 3
+// (a desktop) how tall the menu's Low-end mode, Toaster and Brick make the 3D picture, whatever the screen:
+// config_lowend_scale
 #define LOW_END_LINES 720
 #define TOASTER_LINES 540
+#define BRICK_LINES 360
+// [Graphics] PS1Filter's textures: their nearest texels this many mip levels smaller (Brick's when both)
+#define PS1_TEX_BIAS 2
 enum { UPDATES_OFF, UPDATES_ON };  // (an older file's Ask and Auto: On; Never: Off)
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
@@ -371,6 +389,8 @@ int config_live_effects(void);          // [Performance] Effects
 int config_live_reverb(void);           // [Audio] Reverb
 int config_live_send_all_rewards(void); // [Quest Rewards] SendAllRewards (runtime/hle/rewards.c)
 int config_live_gather_all(void);       // [Gathering] GatherAll (runtime/hle/gather.c)
+int config_live_ps1_filter(void);       // [Graphics] PS1Filter (nvn/vulkan/exec.c, ps1.c, fsr.c)
+void config_ps1_test(int on);           // (tests: MHGU_CONTROL "ps1 0|1") as if saved, until the next save
 // [Colour] (runtime/colour_filter.h ColourAdjust; the window image's pass, nvn/vulkan/exec.c): the saved values, or while
 // the settings menu is open the ones being adjusted there (config_colour_preview), so the picture shows them at once
 struct ColourAdjust;

@@ -31,7 +31,7 @@ static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, l
                      live_shadows = {1}, live_bloom = {1}, live_grass = {1}, live_effects = {1}, live_reverb = {1},
                      live_online_notice, live_send_all_rewards, live_gather_all, live_touch_cam_smooth, live_camera_shake, live_frame_gen,
                      live_upscale_sharp, live_monsters_on_map, live_damage_numbers, live_number_size, live_number_colour,
-                     live_monster_bars;
+                     live_monster_bars, live_ps1_filter;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -148,6 +148,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->number_size != saved.number_size) SDL_SetAtomicInt(&live_number_size, c->number_size);
     if (all || c->number_colour != saved.number_colour) SDL_SetAtomicInt(&live_number_colour, c->number_colour);
     if (all || c->monster_bars != saved.monster_bars) SDL_SetAtomicInt(&live_monster_bars, c->monster_bars);
+    if (all || c->ps1_filter != saved.ps1_filter) SDL_SetAtomicInt(&live_ps1_filter, c->ps1_filter);
     for (int i = 0; i < BINDS; i++)
         for (int k = 0; k < BIND_KEYS; k++)
             if (all || c->binds[i][k] != saved.binds[i][k]) SDL_SetAtomicInt(&live_binds[i][k], c->binds[i][k]);
@@ -185,12 +186,12 @@ void config_store_loaded(const Config *c) {
 void config_runtime_init(const Config *effective) {
     startup = saved; runtime_ready = true;
     // (FSR does the anti-aliasing, and Low-end mode has neither MSAA nor FXAA; a desktop's Low-end mode keeps FXAA, only
-    // Toaster leaves it out: config.c)
+    // Toaster and Brick leave it out: config.c)
     runtime_no_msaa = effective->fsr != 0 || effective->low_end;
 #ifdef __ANDROID__
     runtime_no_fxaa = runtime_no_msaa;
 #else
-    runtime_no_fxaa = effective->fsr != 0 || effective->low_end == LOW_END_TOASTER;
+    runtime_no_fxaa = effective->fsr != 0 || effective->low_end >= LOW_END_TOASTER;
 #endif
     publish_live(effective, true);
     const char *override = getenv("MHGU_FRAMERATE");
@@ -271,6 +272,9 @@ int config_live_effects(void) { return SDL_GetAtomicInt(&live_effects); }
 int config_live_reverb(void) { return SDL_GetAtomicInt(&live_reverb); }
 int config_live_send_all_rewards(void) { return SDL_GetAtomicInt(&live_send_all_rewards); }
 int config_live_gather_all(void) { return SDL_GetAtomicInt(&live_gather_all); }
+// [Graphics] PS1Filter (nvn/vulkan/exec.c, ps1.c and fsr.c read it each frame)
+int config_live_ps1_filter(void) { return SDL_GetAtomicInt(&live_ps1_filter); }
+void config_ps1_test(int on) { SDL_SetAtomicInt(&live_ps1_filter, on ? 1 : 0); }
 // [Hunting Aids] (runtime/hunt_aids.h: runtime/hle/huntaids.c and runtime/hunt_overlay.cpp read them each frame)
 int config_live_monsters_on_map(void) { return SDL_GetAtomicInt(&live_monsters_on_map); }
 int config_live_damage_numbers(void) { return SDL_GetAtomicInt(&live_damage_numbers); }

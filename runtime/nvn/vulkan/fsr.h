@@ -28,6 +28,11 @@ NvnTexture *vk_fsr_map(NvnTexture *t, bool depth);
 NvnTexture *vk_fsr_present(NvnTexture *t);  // device.c backend_present: the texture to show (its stand-in)
 bool vk_fsr_input(NvnTexture *t);  // t is the full-screen image FSR upscales (kept RGBA8: textures.c vk_rt_widen)
 
+// ---- The PS1 filter's 15-bit colour ([Graphics] PS1Filter) where FSR and plain scaling don't run (g_fsr_on false; where
+// they do, fsr.c hud_start dithers): runtime/nvn/vulkan/ps1.c finds the start of the HUD as fsr.c does
+void vk_ps1_draw(const FsrDraw *d);        // exec.c draw(), while it is on: may dither the 3D picture before this draw
+void vk_ps1_present(NvnTexture *t);        // device.c backend_present (without FSR): the frame ends, t is shown
+
 // ---- object motion ([Upscaler] ObjectMotion): a scene draw is drawn a second time through a variant of its vertex
 // shader that stores each vertex's clip position (gl_Position) in a buffer, indexed by gl_VertexIndex; the next frame's
 // copy of the same draw gives the previous positions (fsr.c "object motion").

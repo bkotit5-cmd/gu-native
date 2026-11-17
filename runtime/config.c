@@ -225,6 +225,12 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "FrameGen = Off\n"
     "\n"
+    "; PS1 filter: the look of the 3D games of the late 90s, style only (no other setting changes): the 3D world's\n"
+    "; textures in sharp blocks, the 3D picture in 15-bit colour with a fine pattern of dots, and faint scanlines that\n"
+    "; flicker as on an old TV. The HUD stays readable and this port's own controls and menus never change\n"
+    "; Default: Off\n"
+    "PS1Filter = Off\n"
+    "\n"
     "[Colour]\n"
     "; The colour of the game's picture: the 3D, its HUD and its menus (not the touch controls or this port's menu).\n"
     "; Every one is 0 by default: the picture exactly as the game draws it\n"
@@ -268,15 +274,18 @@ static const char DEFAULT_INI[] =
     "ShaderPrewarm = On\n"
     "\n"
 #ifdef __ANDROID__
-    "; Off, On or Toaster. On, for a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD stays\n"
-    "; sharp over a smaller 3D picture. Toaster: all of that and more, for speed and the battery before looks: the HUD at\n"
-    "; most 540 lines tall and lighter textures still. It does not change the resolution, the frame rate, Shadows, Grass,\n"
-    "; Bloom or Reverb by itself: the menu's switch does that\n"
+    "; Off, On, Toaster or Brick. On, for a weak phone: no bloom or depth of field, cheaper and smaller textures, and the HUD\n"
+    "; stays sharp over a smaller 3D picture. Toaster: all of that and more, for speed and the battery before looks: the HUD\n"
+    "; at most 540 lines tall and lighter textures still. Brick, for the weakest phones: all of Toaster's, and the 3D\n"
+    "; world's textures in big sharp blocks (less to read from memory), a retro look. It does not change the resolution,\n"
+    "; the frame rate, Shadows, Grass, Bloom or Reverb by itself: the menu's switch does that\n"
 #else  // (a PC's GPU takes the game's BC textures as they are: textures.c makes smaller only those it decodes, a Mali's)
-    "; Off, On or Toaster, for a weak GPU such as integrated graphics. On: no MSAA or FSR (FXAA, texture filtering and\n"
-    "; the rest stay as set). Toaster, for the weakest: no FXAA either, and cheaper texture filtering. The menu's switch\n"
-    "; also sets RenderScale for a 3D picture about 720 lines tall at the Resolution of the moment (Toaster: 540) and\n"
-    "; Bloom off, and with Toaster 30 FPS and Shadows off; written here by hand, it changes none of those\n"
+    "; Off, On, Toaster or Brick, for a weak GPU such as integrated graphics. On: no MSAA or FSR (FXAA, texture filtering\n"
+    "; and the rest stay as set). Toaster, for the weakest: no FXAA either, and cheaper texture filtering. Brick: all of\n"
+    "; Toaster's, and the 3D world's textures in big sharp blocks (less to read from memory), a retro look. The menu's\n"
+    "; switch also sets RenderScale for a 3D picture about 720 lines tall at the Resolution of the moment (Toaster: 540,\n"
+    "; Brick: 360) and Bloom off, and with Toaster or Brick 30 FPS and Shadows off; written here by hand, it changes none\n"
+    "; of those\n"
 #endif
     "; Default: Off\n"
     "LowEnd = Off\n"
@@ -944,6 +953,7 @@ const ConfigSetting g_settings[] = {
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Graphics", "FrameGen", frame_gen, false),
+    ON_OFF("Graphics", "PS1Filter", ps1_filter, false),
     {"Colour", "Hue", SET_INT, F(colour_hue), 0, -180, 180, NULL, NULL, false, ERR_COLOUR},
     {"Colour", "Temperature", SET_INT, F(colour_temperature), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
     {"Colour", "Tint", SET_INT, F(colour_tint), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
@@ -957,7 +967,7 @@ const ConfigSetting g_settings[] = {
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, FPS_MIN, FPS_MAX, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
-    {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2", NULL, true,
+    {"Performance", "LowEnd", SET_CHOICE, F(low_end), 0, 0, 0, "Off|false|no|0,On|true|yes|1,Toaster|tostadora|2,Brick|ladrillo|3", NULL, true,
      ERR_MISC},
     ON_OFF("Performance", "Shadows", shadows, false),
     ON_OFF("Performance", "Grass", grass, false),
@@ -1523,7 +1533,7 @@ static void fit_aspect(int w, int h, float aspect, int *rw, int *rh) {
 // whole size it drew 9 times the pixels of the 3D at 33%, and a phone with an Adreno 710 was slower with LowEnd than
 // without; Toaster: at most TOASTER_HUD_LINES, for the HUD, the game's last draw and the window's copy)
 static void lowend_hud(int h, int tw, int th, float aspect) {
-    int ow, oh, cap = g_config.low_end == LOW_END_TOASTER ? TOASTER_HUD_LINES : h * 2 > 720 ? h * 2 : 720;
+    int ow, oh, cap = g_config.low_end >= LOW_END_TOASTER ? TOASTER_HUD_LINES : h * 2 > 720 ? h * 2 : 720;
     if (th > cap) fit_aspect(tw * cap / th, cap, aspect, &ow, &oh);
     else fit_aspect(tw, th, aspect, &ow, &oh);
     g_fsr_output[0] = (uint32_t)ow, g_fsr_output[1] = (uint32_t)oh;
@@ -1531,11 +1541,12 @@ static void lowend_hud(int h, int tw, int th, float aspect) {
 #endif
 
 #ifndef __ANDROID__
-// (a desktop) What the menu's Low-end mode (1) or Toaster (LOW_END_TOASTER) sets RenderScale to: the 3D picture about
-// LOW_END_LINES or TOASTER_LINES tall whatever the screen - Low-end 66% at 1080p, 50% at 1440p, 33% at 4K, 93% at 768p;
-// Toaster 50%, 37%, 25%, 70% - never under 33% (Toaster: 25%) nor over 100%. Of the height config_load fits the 3D
+// (a desktop) What the menu's Low-end mode (1), Toaster (LOW_END_TOASTER) or Brick (LOW_END_BRICK) sets RenderScale to: the
+// 3D picture about LOW_END_LINES, TOASTER_LINES or BRICK_LINES tall whatever the screen - Low-end 66% at 1080p, 50% at
+// 1440p, 33% at 4K, 93% at 768p; Toaster 50%, 37%, 25%, 70%; Brick 33%, 25%, 16%, 46% - never under 33% (Toaster: 25%,
+// Brick: BRICK_SCALE) nor over 100%. Of the height config_load fits the 3D
 // picture to: Resolution's (Desktop: the desktop's; Borderless at most the desktop's), in the picture's shape.
-int config_lowend_scale(const Config *c, int mode) {
+static int fitted_height(const Config *c) {
     int dw = desktop_w > 0 ? desktop_w : 1920, dh = desktop_h > 0 ? desktop_h : 1080;
     bool own = c->width > 0 && c->height > 0;
     int tw = own ? c->width : dw, th = own ? c->height : dh;
@@ -1545,8 +1556,12 @@ int config_lowend_scale(const Config *c, int mode) {
     if (fabsf(aspect - 16.0f / 9.0f) < 0.01f) aspect = 16.0f / 9.0f;
     int w, h;
     fit_aspect(tw, th, aspect, &w, &h);
-    bool toaster = mode == LOW_END_TOASTER;
-    int least = toaster ? 25 : 33, s = h > 0 ? (toaster ? TOASTER_LINES : LOW_END_LINES) * 100 / h : 100;
+    return h;
+}
+int config_lowend_scale(const Config *c, int mode) {
+    int h = fitted_height(c);
+    int lines = mode == LOW_END_BRICK ? BRICK_LINES : mode == LOW_END_TOASTER ? TOASTER_LINES : LOW_END_LINES;
+    int least = mode == LOW_END_BRICK ? BRICK_SCALE : mode == LOW_END_TOASTER ? 25 : 33, s = h > 0 ? lines * 100 / h : 100;
     return s < least ? least : s > 100 ? 100 : s;
 }
 #endif
@@ -1629,7 +1644,7 @@ void config_load(void) {
 #ifdef __ANDROID__
     if (f && !g_shadows_set && g_config.low_end) g_config.shadows = 0;
 #else
-    if (f && !g_shadows_set && g_config.low_end == LOW_END_TOASTER) g_config.shadows = 0;
+    if (f && !g_shadows_set && g_config.low_end >= LOW_END_TOASTER) g_config.shadows = 0;
 #endif
     if (f && !g_bloom_set && g_config.low_end) g_config.bloom = 0;  // (LowEnd alone left the bloom out up to 0.1.6)
     // (L and the target button, off by default up to 0.1.8, when a tap on the target camera's icon turned the lock-on: the
@@ -1691,9 +1706,9 @@ void config_load(void) {
     if ((e = getenv("MHGU_UI_ANCHOR"))) config_parse(config_setting("UIAnchor"), e, &g_config);
     e = getenv("MHGU_RENDER");
     if (e && parse_size(e, &w, &h)) render_auto = false, g_config.render_w = w, g_config.render_h = h;
-    // (test runs, the device's own settings left as they are: MHGU_LOWEND=0|1|2 (Toaster), MHGU_SCALE=<percent>,
+    // (test runs, the device's own settings left as they are: MHGU_LOWEND=0|1|2 (Toaster)|3 (Brick), MHGU_SCALE=<percent>,
     // MHGU_SHADOWS=0|1, MHGU_BLOOM=0|1, MHGU_GRASS=0|1, MHGU_FPS_LIMIT=<fps>; not saved)
-    if ((e = getenv("MHGU_LOWEND"))) g_config.low_end = atoi(e) < 0 ? 0 : atoi(e) > 2 ? 2 : atoi(e);
+    if ((e = getenv("MHGU_LOWEND"))) g_config.low_end = atoi(e) < 0 ? 0 : atoi(e) > LOW_END_BRICK ? LOW_END_BRICK : atoi(e);
     if ((e = getenv("MHGU_BLOOM"))) g_config.bloom = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_GRASS"))) g_config.grass = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_EFFECTS"))) g_config.effects = atoi(e) != 0, config_live_test(&g_config);
@@ -1705,7 +1720,7 @@ void config_load(void) {
     if (g_config.low_end) g_config.fsr = 0, g_config.fxaa = 0, g_config.msaa = 1;  // (none of them on a weak GPU)
 #else  // (a desktop's Low-end mode keeps FXAA, one pass over a small picture: only Toaster turns it off too)
     if (g_config.low_end) g_config.fsr = 0, g_config.msaa = 1;
-    if (g_config.low_end == LOW_END_TOASTER) g_config.fxaa = 0;
+    if (g_config.low_end >= LOW_END_TOASTER) g_config.fxaa = 0;
 #endif
     if ((e = getenv("MHGU_FSR_UPSCALER")))  // (4 or fsr4, xess, anything else FSR 3.1)
         g_config.fsr_upscaler = !strcmp(e, "4") || !strcasecmp(e, "fsr4") ? FSR_UP_4 : !strncasecmp(e, "xess", 4) ? FSR_UP_XESS : FSR_UP_3;
