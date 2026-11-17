@@ -313,7 +313,7 @@ static const char *builtin_src(const char *name, int *stage) {
     // it and the HDR output's encoding (HDR10: BT.2020, SMPTE ST 2084). Push constants after the vertex stage's 32 bytes:
     // the filter's three rows (rgb weights, offset), g.x its gamma exponent; h (HDR): x the paper white in 10000s of nits,
     // y where the SDR white goes (in paper whites), z the knee above which the picture's light is spread up to y; s (the PS1
-    // filter's scanlines, [Graphics] PS1Filter; x 0: none): y the picture's rows, every other one w darker, z the field
+    // filter's scanlines, [Graphics] PS1Filter; x 0: none): y the picture's lines, darker by up to w between them, z the field
     // (by turns a quarter of w more or less: the flicker)
     if (!strcmp(name, "present.color") || !strcmp(name, "present.hdr")) {
         *stage = STAGE_FRAGMENT;
@@ -326,7 +326,7 @@ static const char *builtin_src(const char *name, int *stage) {
                    "void main() {\n"
                    "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
                    "  vec3 s = clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0);\n"
-                   "  if (pc.s.x > 0.5) s *= 1.0 - mod(floor(uv.y * pc.s.y), 2.0) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
+                   "  if (pc.s.x > 0.5) s *= 1.0 - (0.5 - 0.5 * cos(6.2831853 * uv.y * pc.s.y)) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
                    "  o = vec4(s, 1.0);\n"
                    "}\n";
         return "#version 450\n"
@@ -341,7 +341,7 @@ static const char *builtin_src(const char *name, int *stage) {
                "void main() {\n"
                "  vec4 c = vec4(pow(max(texture(t, uv).rgb, vec3(0.0)), vec3(pc.g.x)), 1.0);\n"
                "  vec3 s = clamp(vec3(dot(pc.r0, c), dot(pc.r1, c), dot(pc.r2, c)), 0.0, 1.0);\n"
-               "  if (pc.s.x > 0.5) s *= 1.0 - mod(floor(uv.y * pc.s.y), 2.0) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
+               "  if (pc.s.x > 0.5) s *= 1.0 - (0.5 - 0.5 * cos(6.2831853 * uv.y * pc.s.y)) * pc.s.w * (pc.s.z > 0.5 ? 1.25 : 0.75);\n"
                "  vec3 l = pow(s, vec3(2.2));\n"  // (the light, in paper whites: an SDR screen's gamma)
                "  float m = max(l.r, max(l.g, l.b));\n"
                "  if (m > pc.h.z) { float x = (m - pc.h.z) / (1.0 - pc.h.z); l *= (m + (pc.h.y - 1.0) * x * x) / m; }\n"
@@ -397,22 +397,35 @@ static const char *builtin_src(const char *name, int *stage) {
                  "void main() { o = texelFetch(t, ivec2(gl_FragCoord.xy), 0); }\n", atoi(name + 10));
         return buf;
     }
-    // ps1.frag (the PS1 filter's 15-bit colour, exec.c vk_ps1_dither): the picture copied back, each channel to 5 bits (32
-    // levels) with a 4x4 ordered dither: the Bayer matrix's threshold, (m + 0.5) / 16, added before rounding down, fixed
-    // to the pixel. Black and white stay as they are, the average colour too; what is above 1 (none in the game's
-    // picture) keeps its steps
+    // ps1.frag (the PS1 filter's 3D picture, exec.c vk_ps1_dither), the picture copied back as the console's TV showed it:
+    //  - on a grid of about 240 lines (PS1_LINES): each virtual pixel k x k of the picture's (k = its height / 240, a whole
+    //    number, 1 at the least) takes the colour at its centre, so the dots and the colour steps are as big as the
+    //    console's (at full resolution they were too fine to see);
+    //  - the colours of a TV of then: PS1_SATURATION more saturated (around the luma) and PS1_CONTRAST more contrast
+    //    (around the middle grey);
+    //  - each channel to 5 bits (32 levels) with a 4x4 ordered dither on the virtual pixels: the Bayer matrix's threshold,
+    //    (m + 0.5) / 16, added before rounding down. Black and white stay as they are.
+    // (The MH4U port's filter uses the same grid and amounts)
     if (!strcmp(name, "ps1.frag")) {
         *stage = STAGE_FRAGMENT;
         return "#version 450\n"
                "layout(set = 0, binding = 0) uniform sampler2D t;\n"
                "layout(location = 0) out vec4 o;\n"
+               "#define PS1_LINES 240\n"
+               "#define PS1_SATURATION 1.35\n"
+               "#define PS1_CONTRAST 1.15\n"
                "const float bayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,\n"
                "                                  3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);\n"
                "void main() {\n"
-               "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
-               "  vec4 c = texelFetch(t, p, 0);\n"
-               "  float d = (bayer[(p.y & 3) * 4 + (p.x & 3)] + 0.5) / 16.0;\n"
-               "  o = vec4(floor(max(c.rgb, vec3(0.0)) * 31.0 + d) / 31.0, c.a);\n"
+               "  ivec2 size = textureSize(t, 0);\n"
+               "  int k = max(1, size.y / PS1_LINES);\n"
+               "  ivec2 v = ivec2(gl_FragCoord.xy) / k;\n"
+               "  vec4 c = texelFetch(t, min(v * k + k / 2, size - 1), 0);\n"
+               "  vec3 x = clamp(c.rgb, 0.0, 1.0);\n"
+               "  x = mix(vec3(dot(x, vec3(0.299, 0.587, 0.114))), x, PS1_SATURATION);\n"
+               "  x = clamp((x - 0.5) * PS1_CONTRAST + 0.5, 0.0, 1.0);\n"
+               "  float d = (bayer[(v.y & 3) * 4 + (v.x & 3)] + 0.5) / 16.0;\n"
+               "  o = vec4(floor(x * 31.0 + d) / 31.0, c.a);\n"
                "}\n";
     }
     if (!strcmp(name, "clear.frag.none")) {

@@ -7428,7 +7428,8 @@ static VkDescriptorSetLayout present_set_layout;
 // present_pipeline(0), as before.
 static VkPipelineLayout present_fx_layout;
 #define PRESENT_FX_BYTES 96  // (three rows, the gamma, the HDR's numbers, the scanlines': six vec4)
-#define PS1_SCAN 0.12f       // (the PS1 filter's darker rows: this much darker, a quarter of it more or less by turns)
+#define PS1_SCAN 0.18f       // (the PS1 filter's scanlines: this much darker between lines, a quarter of it more or less
+                             // by turns)
 
 // kind 0: the picture as it is (present.frag); 1: with the colour filter (present.color); 2: filter and HDR10 encoding
 // (present.hdr)
@@ -7529,12 +7530,12 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
             fx[16] = h.paper, fx[17] = h.top, fx[18] = h.knee;
         }
         if (ps1) {  // ([Graphics] PS1Filter) faint scanlines over the game's picture, its HUD too (the overlay is drawn after
-            // this: the touch controls and the menu never get them), along the picture's rows whatever the panel's turn:
-            // rows of about 2 pixels at 720 to 1080 lines (a whole number of the window's pixels each), every other one
-            // PS1_SCAN darker, flickering a little from one picture to the next as an interlaced screen does
+            // this: the touch controls and the menu never get them), along the picture's lines whatever the panel's turn:
+            // the lines of the 3D picture's grid of about 240 (shaders.c ps1.frag: its height over a whole number), up to
+            // PS1_SCAN darker between them, flickering a little from one picture to the next as an interlaced screen does
             static unsigned field;
-            float k = roundf(vh / 480.0f);
-            fx[20] = 1.0f, fx[21] = vh / (k < 1.0f ? 1.0f : k), fx[22] = (float)(field++ & 1), fx[23] = PS1_SCAN;
+            uint32_t k = b->height / 240 ? b->height / 240 : 1;
+            fx[20] = 1.0f, fx[21] = (float)b->height / (float)k, fx[22] = (float)(field++ & 1), fx[23] = PS1_SCAN;
         }
         vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, PRESENT_FX_BYTES, fx);
     }
