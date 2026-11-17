@@ -495,6 +495,27 @@ public class BuilderService extends Service {
      * state goes to the build's log with what was read. And a build quiet for QUIET_MS gets a line in its log (quiet).
      */
     private void watchHeat(OutputStream log) {
+        // (a check that fails, an exception of the system's, must not leave the build's processes stopped for good, as a
+        // paused build's would be with this thread gone: they go on, and the checks start again)
+        while (process != null && !Thread.currentThread().isInterrupted()) {
+            try {
+                watchHeatLoop(log);
+                return;
+            } catch (RuntimeException e) {
+                Log.w(TAG, "builder: heat check", e);
+                say(log, "heat check failed (" + e + "): the build goes on");
+                Process p = process;
+                if (p != null) signalTree(p, 18);  // SIGCONT
+                if (job.active() && !job.status.equals("running")) {
+                    job.status = "running";
+                    note();
+                    changed();
+                }
+            }
+        }
+    }
+
+    private void watchHeatLoop(OutputStream log) {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         boolean saidWrong = false;
         String saidStage = "";  // (a reading at each stage: heatReading)
