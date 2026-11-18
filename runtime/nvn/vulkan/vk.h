@@ -178,6 +178,7 @@ void vk_ps1_dither(TexBackend *b);
 // The PS1 filter ([Graphics] PS1Filter) is on, with one of these parts (ps1.c; MHGU_PS1_PARTS=<mask> for tests)
 enum { PS1_TEXTURES = 1, PS1_COLOUR = 2, PS1_SCANLINES = 4, PS1_WOBBLE = 8, PS1_AFFINE = 16, PS1_ALL = 31 };
 bool vk_ps1_on(int parts);
+bool vk_ps1_part(int parts);  // (in the filter, on or off: a variant program's, which may be built while it is off)
 VkSampler vk_default_sampler(bool linear);
 void vk_image_init_layout(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect);
 // Destruction once every submission that may use the object has completed.

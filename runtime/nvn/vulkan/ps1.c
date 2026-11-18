@@ -17,16 +17,19 @@
 #include "fsr.h"
 #include "vk.h"
 
-// The PS1 filter's parts: all of them while it is on; MHGU_PS1_PARTS=<mask of PS1_*> (read once) only those, for tests
-bool vk_ps1_on(int parts) {
+// The PS1 filter's parts: all of them; MHGU_PS1_PARTS=<mask of PS1_*> (read once) only those, for tests
+bool vk_ps1_part(int parts) {
     static int mask = -1;
     if (mask < 0) {
         const char *e = getenv("MHGU_PS1_PARTS");
         mask = e ? (int)strtol(e, NULL, 0) : PS1_ALL;
         if (e) LOG("[ps1] MHGU_PS1_PARTS=%#x\n", mask);
     }
-    return (mask & parts) && config_live_ps1_filter();
+    return mask & parts;
 }
+
+// ... while it is on
+bool vk_ps1_on(int parts) { return vk_ps1_part(parts) && config_live_ps1_filter(); }
 
 static NvnTexture *g_h;                     // the full-screen image (learnt at the presents; compared, read only when drawn)
 static NvnTexture *last_target, *last_src;  // the frame's last draw: its target, the first texture it sampled

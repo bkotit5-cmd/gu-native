@@ -3670,8 +3670,8 @@ static void compile_program(void *arg) {
     size_t nv = 0, nf = 0;
     char *ps1v = NULL, *ps1f = NULL;  // (the PS1 filter's variant, above)
     if (p->vkey.glsl == PS1_GLSL) {
-        uint32_t affine = maxwell_ipa_fold && vk_ps1_on(PS1_AFFINE) ? ps1_texcoords(p->fi->msl) : 0;
-        ps1v = vk_ps1_on(PS1_WOBBLE) ? ps1_vs(p->vi->msl, affine) : NULL;
+        uint32_t affine = maxwell_ipa_fold && vk_ps1_part(PS1_AFFINE) ? ps1_texcoords(p->fi->msl) : 0;
+        ps1v = vk_ps1_part(PS1_WOBBLE) ? ps1_vs(p->vi->msl, affine) : NULL;
         ps1f = ps1_fs(p->fi->msl, affine);
         static _Atomic int nlog;
         if (atomic_fetch_add(&nlog, 1) < 3)
