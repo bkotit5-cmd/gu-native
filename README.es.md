@@ -13,7 +13,7 @@ Hecho con Claude Code (Opus 5.5). Muchas de las decisiones fueron propias, porqu
 La versión más nueva está en [Releases](../../releases/latest): el APK para Android y `MHGU-PC-<versión>.zip` para PC.
 Habla con otros jugadores y pide ayuda en el [Discord](https://discord.gg/sk5xEjEMwF) de la comunidad.
 
-**¿En iOS?** El port para iOS lo hace Moka Illustra ([mokaillustra](https://github.com/mokaillustra)), a cargo del desarrollo oficial para iOS, en un fork de este proyecto: [mhgu-recomp-ios-fork](https://github.com/mokaillustra/mhgu-recomp-ios-fork). Todo lo de iOS se ve ahí.
+**¿En iOS?** El port para iOS lo hace Moka Illustra ([mokaillustra](https://github.com/mokaillustra)), a cargo del desarrollo oficial para iOS, en un fork de este proyecto: [mhgu-recomp-ios](https://github.com/mokaillustra/mhgu-recomp-ios). Todo lo de iOS se ve ahí.
 
 **¿La misma partida en tu PC y en tu teléfono?** Mira [Jugar en la PC y en el teléfono con la misma partida (Google Drive)](#jugar-en-la-pc-y-en-el-teléfono-con-la-misma-partida-google-drive).
 
@@ -1055,7 +1055,7 @@ El chat, las claves de sala (el generador de la clave de emparejamiento) y los p
 
 Ideas de la comunidad: Alfonso, mandar todas las recompensas a la caja de una vez.
 
-El port para iOS: Moka Illustra ([mokaillustra](https://github.com/mokaillustra)), [mhgu-recomp-ios-fork](https://github.com/mokaillustra/mhgu-recomp-ios-fork), con la autorización de KHORNE.
+El port para iOS: Moka Illustra ([mokaillustra](https://github.com/mokaillustra)), [mhgu-recomp-ios](https://github.com/mokaillustra/mhgu-recomp-ios), con la autorización de KHORNE.
 
 Del mismo autor: [MH4U para Android](https://github.com/khorne-hub/4u-native), Monster Hunter 4 Ultimate recompilado para
 Android de la misma forma.
