@@ -340,7 +340,8 @@ bool in_mode(int i, bool menu) {
     if (emu_ctl(i)) return false;  // (the emulator-style layout's alone)
     // Dash is explicit on the R control; the movement stick never synthesizes R.
     if (i == C_RUN) return false;
-    if (i >= C_MUP && i <= C_MRIGHT) return true;  // one compact D-pad in hunts and game menus
+    if (i == C_HDPAD) return !menu && config_live_touch_show(TB_DPAD);  // the custom four-button D-pad replaces this one in game menus
+    if (i >= C_MUP && i <= C_MRIGHT) return true;  // one compact custom D-pad in hunts and game menus
     if (i == C_MPAD || of_mpad(i)) return false;   // no separate radial menu layout
     if (i == C_ITEML || i == C_ITEMR) return false;
     if (i == C_RUNLOCK) return false;
