@@ -60,6 +60,12 @@ jobs:
             throw "sdkmanager.bat was not found under $toolsRoot"
           }
 
+          # setup-android accepted licenses for its default SDK directory (C:\\Android\\android-sdk).
+          # Khorne's native scripts use %LOCALAPPDATA%\\Android\\Sdk, so accept them again for this SDK root.
+          $licenseAnswers = (1..30 | ForEach-Object { 'y' }) -join "`n"
+          $licenseAnswers | & $manager.FullName "--sdk_root=$sdk" "--licenses"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
           & $manager.FullName "--sdk_root=$sdk" "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
