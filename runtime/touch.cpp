@@ -3036,7 +3036,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
             if (part != f->part) f->part = part, recompute_held(s), tap_due();
         } else if (f->kind == F_BUTTON && f->ctl == C_MPAD) {  // the menu pad: the same (pressed by touch_input, as a
             f->part = mpad_part(place(s.layout, C_MPAD, s.w, s.h), x, y, f->part);  // menu takes it: hle/input.c)
-        } else if (f->kind == F_BUTTON && !f->done && slide_both(s) && slide_keeps(f->ctl) && slide_to(s, f, x, y)) {
+        } else if (f->kind == F_BUTTON && f->link_peer < 0 && !f->done && slide_both(s) && slide_keeps(f->ctl) && slide_to(s, f, x, y)) {
             // (onto another of the game's buttons, the first kept with it, or back onto the one it landed on: slide_to)
         } else if (f->kind == F_BUTTON && (f->ctl == C_ATTACK || f->ctl == C_CORNER)) {  // sliding along it: another part
             int part = 0, c = hit(s.layout, x, y, s.w, s.h, &part, 1.22f, false, s.menu);
