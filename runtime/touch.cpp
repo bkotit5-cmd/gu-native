@@ -1854,6 +1854,7 @@ bool slide_to(State &s, Finger *f, float x, float y) {
     int from = f->ctl;
     if (from == f->home) f->home_keep = finger_buttons(*f) & ~(f->on_bar ? B(BTN_Y) : 0);  // (leaving it: what it pressed there)
     f->ctl = c, f->part = part, f->on_bar = false, f->keep = 0;
+    f->link_peer = -1, f->link_state = 0;  // the finger has left the shared L/R connector
     f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, s.menu) : c == C_ZL ? target_buttons() : c == C_L ? camera_buttons() : 0;
     if (c != f->home) f->keep = f->home_keep & ~finger_buttons(*f);
     recompute_held(s);
