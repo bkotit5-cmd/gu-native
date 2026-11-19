@@ -3529,7 +3529,7 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     bool run_held = false;  // (the Run button)
     for (const Finger &f : s.f) run_held |= f.kind == F_BUTTON && !f.done && f.ctl == C_RUN;
     run_held |= (s.latched >> C_RUN & 1) != 0;  // (held by a tap)
-    bool want = false;  // dash is only sent by the explicit R control
+    bool want = s.run_lock || run_held;  // only an explicitly armed sprint lock or the Run control sends dash; stick tilt alone never does
     const uint64_t XA = B(BTN_X) | B(BTN_A);
     bool keep = ran && now - s.run_t0 >= RUN_X_WAIT && (*buttons & XA) == XA;
     if ((*buttons & B(BTN_X)) && !keep) s.run_x_until = now + RUN_X_WAIT;
