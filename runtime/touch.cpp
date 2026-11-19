@@ -1707,6 +1707,8 @@ const char *mpad_label(int ctl) {  // (a tab: what it presses)
 }
 int mpad_want(const Finger &f) { return f.ctl == C_MPAD ? f.part : 1; }  // (what its finger asks for now)
 
+uint64_t camera_buttons(void);  // defined with the touch-target helpers below
+
 uint64_t finger_buttons(const Finger &f) {
     uint64_t b;
     if (f.link_peer >= 0) {
