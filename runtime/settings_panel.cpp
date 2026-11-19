@@ -240,25 +240,25 @@ struct Theme {
     ImU32 header;     // (game: the header band's colour)
 };
 const Theme &theme() {
-    static const Theme blue = {IM_COL32(6, 10, 17, 250),     IM_COL32(110, 217, 255, 255), IM_COL32(23, 33, 48, 255),
-                               IM_COL32(38, 71, 99, 255),    IM_COL32(41, 82, 117, 255),   IM_COL32(15, 23, 36, 255),
-                               IM_COL32(46, 102, 143, 255),  IM_COL32(111, 216, 255, 255), IM_COL32(111, 216, 255, 255),
-                               IM_COL32(244, 247, 252, 255), IM_COL32(178, 192, 208, 255), IM_COL32(132, 145, 160, 255),
-                               IM_COL32(255, 184, 145, 255), IM_COL32(52, 72, 94, 255),    IM_COL32(13, 20, 31, 255),
-                               false,                        3.f};
-    static const Theme gold = {IM_COL32(34, 25, 19, 248),    IM_COL32(139, 97, 40, 255),   IM_COL32(251, 236, 206, 10),
-                               IM_COL32(229, 195, 126, 28),  IM_COL32(213, 162, 79, 64),   IM_COL32(0, 0, 0, 0),
-                               IM_COL32(0, 0, 0, 0),         IM_COL32(213, 162, 79, 255),  IM_COL32(247, 226, 162, 255),
-                               IM_COL32(242, 216, 170, 255), IM_COL32(175, 150, 128, 255), IM_COL32(124, 107, 90, 255),
-                               IM_COL32(210, 106, 80, 255),  IM_COL32(139, 97, 40, 90),    IM_COL32(42, 31, 23, 252),
-                               true,                         6.f};
-    static const Theme hunter = {IM_COL32(50, 25, 24, 236),    IM_COL32(0, 0, 0, 255),       IM_COL32(0, 0, 0, 0),
-                                 IM_COL32(176, 145, 24, 105),  IM_COL32(176, 145, 24, 235),  IM_COL32(0, 0, 0, 0),
-                                 IM_COL32(0, 0, 0, 0),         IM_COL32(236, 212, 44, 255),  IM_COL32(255, 232, 84, 255),
-                                 IM_COL32(242, 238, 232, 255), IM_COL32(196, 176, 166, 255), IM_COL32(132, 112, 106, 255),
-                                 IM_COL32(255, 96, 72, 255),   IM_COL32(96, 88, 88, 255),    IM_COL32(56, 28, 27, 250),
-                                 false,                        0.f,                          true,
-                                 IM_COL32(108, 46, 46, 255)};
+    // All menu variants use a strict black, white and grey palette. Their layout styles remain distinct.
+    static const Theme blue = {IM_COL32(6, 6, 6, 250), IM_COL32(220, 220, 220, 255), IM_COL32(26, 26, 26, 255),
+                               IM_COL32(44, 44, 44, 255), IM_COL32(65, 65, 65, 255), IM_COL32(12, 12, 12, 255),
+                               IM_COL32(58, 58, 58, 255), IM_COL32(235, 235, 235, 255), IM_COL32(255, 255, 255, 255),
+                               IM_COL32(245, 245, 245, 255), IM_COL32(185, 185, 185, 255), IM_COL32(125, 125, 125, 255),
+                               IM_COL32(220, 220, 220, 255), IM_COL32(68, 68, 68, 255), IM_COL32(12, 12, 12, 255),
+                               false, 3.f};
+    static const Theme gold = {IM_COL32(22, 22, 22, 248), IM_COL32(150, 150, 150, 255), IM_COL32(255, 255, 255, 10),
+                               IM_COL32(255, 255, 255, 28), IM_COL32(190, 190, 190, 64), IM_COL32(0, 0, 0, 0),
+                               IM_COL32(0, 0, 0, 0), IM_COL32(220, 220, 220, 255), IM_COL32(250, 250, 250, 255),
+                               IM_COL32(240, 240, 240, 255), IM_COL32(175, 175, 175, 255), IM_COL32(125, 125, 125, 255),
+                               IM_COL32(220, 220, 220, 255), IM_COL32(130, 130, 130, 90), IM_COL32(26, 26, 26, 252),
+                               true, 6.f};
+    static const Theme hunter = {IM_COL32(12, 12, 12, 236), IM_COL32(245, 245, 245, 255), IM_COL32(0, 0, 0, 0),
+                                 IM_COL32(255, 255, 255, 22), IM_COL32(145, 145, 145, 235), IM_COL32(0, 0, 0, 0),
+                                 IM_COL32(0, 0, 0, 0), IM_COL32(230, 230, 230, 255), IM_COL32(255, 255, 255, 255),
+                                 IM_COL32(245, 245, 245, 255), IM_COL32(195, 195, 195, 255), IM_COL32(135, 135, 135, 255),
+                                 IM_COL32(225, 225, 225, 255), IM_COL32(100, 100, 100, 255), IM_COL32(18, 18, 18, 250),
+                                 false, 0.f, true, IM_COL32(35, 35, 35, 255)};
     return s.draft.menu_theme == THEME_BLUE ? blue : s.draft.menu_theme == THEME_HUNTER ? hunter : gold;
 }
 ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
@@ -403,10 +403,10 @@ struct Look {
 Look touch_look() {
     const Theme &t = theme();
     if (t.game)
-        return {IM_COL32(28, 20, 15, 235),   IM_COL32(112, 76, 34, 255),  IM_COL32(222, 186, 96, 255),
-                IM_COL32(92, 62, 22, 255),   IM_COL32(244, 232, 200, 255), IM_COL32(204, 186, 160, 255),
-                IM_COL32(255, 214, 92, 255), IM_COL32(206, 158, 42, 240),  IM_COL32(122, 82, 22, 225),
-                IM_COL32(74, 34, 31, 255)};
+        return {IM_COL32(14, 14, 14, 235), IM_COL32(180, 180, 180, 255), IM_COL32(245, 245, 245, 255),
+                IM_COL32(84, 84, 84, 255), IM_COL32(255, 255, 255, 255), IM_COL32(205, 205, 205, 255),
+                IM_COL32(255, 255, 255, 255), IM_COL32(190, 190, 190, 240), IM_COL32(95, 95, 95, 225),
+                IM_COL32(28, 28, 28, 255)};
     return {t.popup, t.divider | IM_COL32_A_MASK, t.accent, fade(t.accent, .35f), t.text, t.text_dim, t.accent_bright,
             fade(t.accent, .55f), fade(t.accent, .25f), t.popup};
 }
@@ -552,13 +552,13 @@ void open_discord() {
 void switch_mark(ImDrawList *dl, const ImRect &r, bool on) {
     const Look k = touch_look();
     float line = s.m.line, in = line * 1.3f, side = r.GetHeight() - in * 2;
-    dl->AddRectFilled(r.Min, r.Max, on ? IM_COL32(58, 112, 40, 255) : IM_COL32(18, 12, 10, 230));
-    dl->AddRect(r.Min, r.Max, on ? k.rule : k.edge, 0, 0, line * .7f);
+    dl->AddRectFilled(r.Min, r.Max, on ? IM_COL32(238, 238, 238, 255) : IM_COL32(18, 18, 18, 230));
+    dl->AddRect(r.Min, r.Max, on ? IM_COL32(255, 255, 255, 255) : k.edge, 0, 0, line * .7f);
     float x = on ? r.Max.x - in - side : r.Min.x + in;
     ImRect knob(x, r.Min.y + in, x + side, r.Max.y - in);
-    dl->AddRectFilled(knob.Min, knob.Max, on ? k.glow : IM_COL32(128, 108, 92, 255));
+    dl->AddRectFilled(knob.Min, knob.Max, on ? IM_COL32(12, 12, 12, 255) : IM_COL32(165, 165, 165, 255));
     dl->AddRect(knob.Min, knob.Max, IM_COL32(0, 0, 0, 170), 0, 0, std::max(1.f, line * .4f));
-    diamond(dl, knob.GetCenter(), side * .2f, on ? IM_COL32(28, 20, 15, 255) : IM_COL32(60, 48, 40, 255));
+    diamond(dl, knob.GetCenter(), side * .2f, on ? IM_COL32(255, 255, 255, 255) : IM_COL32(12, 12, 12, 255));
 }
 // The sections' marks in the column at the left (the MH4U port's the same), drawn as lines in col at c, about size
 // across: a controller, an eye, two crossed swords, two hunters, the smithy's hammer, a cog and a scroll
@@ -4804,7 +4804,7 @@ void touch_row(ImDrawList *dl, const Row &r, const ImRect &rect, bool lit, bool 
         dl->AddRectFilledMultiColor(rect.Min, rect.Max, k.bar0, k.bar1, k.bar1, k.bar0);
         dl->AddRect(rect.Min, rect.Max, fade(k.glow, held ? 1.f : .8f), 0, 0, line * .6f);
         if (held)
-            dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(255, 240, 200, 40));
+            dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(255, 255, 255, 40));
     } else if (held && !plated)
         dl->AddRectFilled(rect.Min, rect.Max, fade(k.glow, .14f));
     if (!plated && t.game) {  // (lines between the rows, as in the game's lists)
@@ -4814,7 +4814,7 @@ void touch_row(ImDrawList *dl, const Row &r, const ImRect &rect, bool lit, bool 
     dl->PushClipRect(rect.Min, rect.Max, true);
     if (lit && !plated)
         diamond(dl, ImVec2(rect.Min.x + font * .55f, cy), font * .2f, k.glow);
-    ImU32 ink = !r.enabled ? t.text_off : lit ? IM_COL32(255, 248, 232, 255) : r.current ? k.glow : k.ink;
+    ImU32 ink = !r.enabled ? t.text_off : lit ? IM_COL32(255, 255, 255, 255) : r.current ? k.glow : k.ink;
     float x = plated ? rect.GetCenter().x - label.x * .5f : rect.Min.x + font * 1.1f;
     shadow_text(dl, font, ImVec2(x, cy - label.y * .5f), ink, r.title.c_str(), wrap);
     float right = rect.Max.x - font * .6f - (r.remove ? forget_side() + font * .4f : 0);  // (draw_rows' x at the right)
@@ -4836,7 +4836,7 @@ void touch_row(ImDrawList *dl, const Row &r, const ImRect &rect, bool lit, bool 
         fit(value, stepper ? room - bs * 2 - font * .4f : room - font * (r.menu || goes_on ? 1.4f : .3f));
         ImVec2 size = ImGui::CalcTextSize(value.c_str());
         float vx = stepper ? right - room * .5f - size.x * .5f : right - size.x - ((r.menu && r.enabled) || goes_on ? font * 1.1f : 0);
-        ImU32 value_ink = r.warn ? IM_COL32(255, 110, 96, 255) : !r.enabled ? t.text_off : lit ? ink : k.rule;
+        ImU32 value_ink = r.warn ? IM_COL32(220, 220, 220, 255) : !r.enabled ? t.text_off : lit ? ink : k.rule;
         shadow_text(dl, font, ImVec2(vx, cy - size.y * .5f), value_ink, value.c_str());
         if (r.menu && r.enabled) {  // (a tap lists the choices)
             float m = font * .26f, mx = right - font * .4f;
@@ -4869,7 +4869,7 @@ void tile_draw(ImDrawList *dl, const Row &r, const ImRect &rect, bool lit, bool 
         dl->AddRect(rect.Min, rect.Max, fade(k.glow, held ? 1.f : .85f), 0, 0, line * .7f);
     } else
         plate(dl, rect, line * .8f, held, r.enabled);
-    ImU32 ink = !r.enabled ? theme().text_off : lit ? IM_COL32(255, 248, 232, 255) : k.ink;
+    ImU32 ink = !r.enabled ? theme().text_off : lit ? IM_COL32(255, 255, 255, 255) : k.ink;
     float right = rect.Max.x - f * .75f, x = rect.Min.x + f * .8f, room = right - f * .7f - x;
     chevron(dl, ImVec2(right, cy), f * .26f, 1, lit ? ink : fade(k.rule, .85f), std::max(2.f, line));
     if (lit)
@@ -5197,7 +5197,7 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
                                  2.f);
         w->DrawList->PushClipRect(rect.Min, rect.Max, true);
         ImU32 ink = !r.enabled ? t.text_off : selected && t.bar ? t.accent_bright : t.text;
-        ImU32 value_ink = r.warn ? IM_COL32(255, 110, 96, 255) : ink;
+        ImU32 value_ink = r.warn ? IM_COL32(220, 220, 220, 255) : ink;
         if (r.current)  // (the dropdown's choice now: a bar on its left)
             w->DrawList->AddRectFilled(rect.Min, ImVec2(rect.Min.x + font * .22f, rect.Max.y), t.accent,
                                        t.rounding, ImDrawFlags_RoundCornersLeft);
@@ -5358,7 +5358,7 @@ void draw_dropdown(std::vector<Row> &options, float scale, float base) {
 void draw_frame(ImGuiWindow *w, const Theme &look) {
     if (!look.game)
         return;
-    const ImU32 red = IM_COL32(176, 34, 30, 255), green = IM_COL32(80, 142, 54, 255), gold = IM_COL32(222, 190, 40, 255);
+    const ImU32 red = IM_COL32(235, 235, 235, 255), green = IM_COL32(105, 105, 105, 255), gold = IM_COL32(222, 190, 40, 255);
     float b = w->WindowBorderSize, x0 = w->Pos.x + b, x1 = w->Pos.x + w->Size.x - b, y0 = w->Pos.y + b,
           y1 = w->Pos.y + w->Size.y - b, line = std::max(2.f, ImGui::GetFontSize() * .14f);
     w->DrawList->PushClipRectFullScreen();
@@ -5680,9 +5680,9 @@ void touch_picker(std::vector<Row> &options, float scale) {
     float x0 = win->Pos.x, y0 = win->Pos.y, x1 = x0 + win->Size.x, by = y0 + (band - side) * .5f + line * .5f;
     dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y0 + band), k.band);
     if (look.game) {
-        dl->AddRectFilled(ImVec2(x0, y0 + band), ImVec2(x1, y0 + band + line), IM_COL32(176, 34, 30, 255));
+        dl->AddRectFilled(ImVec2(x0, y0 + band), ImVec2(x1, y0 + band + line), IM_COL32(235, 235, 235, 255));
         dl->AddRectFilled(ImVec2(x0, y0 + band + line), ImVec2(x1, y0 + band + line * 1.7f),
-                          IM_COL32(80, 142, 54, 255));
+                          IM_COL32(105, 105, 105, 255));
     }
     ImRect shut(x1 - pad - side, by, x1 - pad, by + side);
     bool held = false;
@@ -5793,9 +5793,9 @@ void touch_panel(bool *open, const Config &before) {
     float band = std::max(.11f * H, f * 2.9f), side = band * .8f, by = y0 + (band - side) * .5f + line * .5f;
     dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y0 + band), k.band);
     if (look.game) {  // (the game's red and green rules under it)
-        dl->AddRectFilled(ImVec2(x0, y0 + band), ImVec2(x1, y0 + band + line), IM_COL32(176, 34, 30, 255));
+        dl->AddRectFilled(ImVec2(x0, y0 + band), ImVec2(x1, y0 + band + line), IM_COL32(235, 235, 235, 255));
         dl->AddRectFilled(ImVec2(x0, y0 + band + line), ImVec2(x1, y0 + band + line * 1.7f),
-                          IM_COL32(80, 142, 54, 255));
+                          IM_COL32(105, 105, 105, 255));
     } else
         dl->AddRectFilled(ImVec2(x0, y0 + band), ImVec2(x1, y0 + band + line * .7f), look.accent);
     float title_x = x0 + pad * 1.5f, right = x1 - pad;
@@ -5905,7 +5905,7 @@ void touch_panel(bool *open, const Config &before) {
         tw = std::clamp(tw + f * 3.f, (end - left) * .16f, (end - left) * .3f);  // (a 4:3 screen: up to .3, the names at their size)
         float gap = pad * .5f, credits = std::max(f * 2.f, s.m.row * .62f), ornament = pad * 1.6f;
         float th = std::min((bottom - top - credits - ornament - gap * (PAGES - 2)) / (PAGES - 1), s.m.row * 1.1f);
-        ImU32 bright = IM_COL32(255, 248, 232, 255);
+        ImU32 bright = IM_COL32(255, 255, 255, 255);
         for (int i = 0; i < PAGES; i++) {
             bool small = i == ABOUT_PAGE;
             ImRect r = small ? ImRect(left + tw * .05f, bottom - credits, left + tw * .95f, bottom)
@@ -5949,7 +5949,7 @@ void touch_panel(bool *open, const Config &before) {
         list_rect = ImRect(left, y, end, bottom);
     } else if (s.view == View::Keyboard) {  // (the text typed so far, the keys under it)
         ImRect field(left, top, end, top + f * 2.3f);
-        dl->AddRectFilled(field.Min, field.Max, IM_COL32(14, 10, 8, 235));
+        dl->AddRectFilled(field.Min, field.Max, IM_COL32(14, 14, 14, 235));
         dl->AddRect(field.Min, field.Max, k.rule, 0, 0, line * .7f);
         std::string text = s.keyboard.buffer;
         text.insert(s.keyboard.cursor, "|");
