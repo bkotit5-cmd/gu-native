@@ -3102,7 +3102,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
             if (b) pulse(s, b, MIN_PRESS - (now - f->t0), 0, true, f->sent != want, f->ctl, want);
         } else {
             uint64_t b = finger_buttons(*f);
-            if (b) pulse(s, b, MIN_PRESS - (now - f->t0));
+            if (b) pulse(s, b, MIN_PRESS - (now - f->t0), 0, s.menu && f->ctl >= C_MUP && f->ctl <= C_MRIGHT);
         }
     }
     if (f->kind == F_STICK) {
@@ -3257,6 +3257,10 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
         s.pad_held |= mpad_buttons(f.ctl, f.sent);
     }
     if (!any) said_want = said_sent = said_ctl = -1;
+    // Our compact directional buttons feed the same game-menu input lane as the old menu pad.
+    if (s.menu)
+        for (const Finger &f : s.f)
+            if (f.kind == F_BUTTON && !f.done && f.ctl >= C_MUP && f.ctl <= C_MRIGHT) s.pad_held |= finger_buttons(f);
     // the editor, asked for from the settings menu (which closes itself: settings_panel.cpp): once it has closed
 #ifndef __ANDROID__
     if (s.edit_request && s.hud_edit) s.edit_request = false;  // (the HUD editor open: one at a time)
