@@ -13,6 +13,8 @@ NDK="$SDK/ndk/27.0.12077973"
 CMAKE="$SDK/cmake/3.22.1/bin/cmake.exe"
 NINJA="$SDK/cmake/3.22.1/bin/ninja.exe"
 OUT="$HERE/build/$ABI"
+# The configure log is redirected below, so its parent must exist first.
+mkdir -p "$OUT"
 m() { cygpath -m "$1"; }
 
 # las mismas ids que el Makefile: ambos lados de la interfaz runtime <-> código del juego deben coincidir
