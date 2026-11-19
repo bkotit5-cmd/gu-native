@@ -5358,7 +5358,7 @@ void draw_dropdown(std::vector<Row> &options, float scale, float base) {
 void draw_frame(ImGuiWindow *w, const Theme &look) {
     if (!look.game)
         return;
-    const ImU32 red = IM_COL32(235, 235, 235, 255), green = IM_COL32(105, 105, 105, 255), gold = IM_COL32(222, 190, 40, 255);
+    const ImU32 red = IM_COL32(235, 235, 235, 255), green = IM_COL32(105, 105, 105, 255), gold = IM_COL32(245, 245, 245, 255);
     float b = w->WindowBorderSize, x0 = w->Pos.x + b, x1 = w->Pos.x + w->Size.x - b, y0 = w->Pos.y + b,
           y1 = w->Pos.y + w->Size.y - b, line = std::max(2.f, ImGui::GetFontSize() * .14f);
     w->DrawList->PushClipRectFullScreen();
