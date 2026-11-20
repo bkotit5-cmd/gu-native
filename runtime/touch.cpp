@@ -1770,12 +1770,12 @@ Rect text_plate(float w, float h) {
     return {w * .5f - pw * .5f, y0, w * .5f + pw * .5f, y0 + ph, true};
 }
 
-// The target button (ZL on the layout): in a hunt the game's change target, as the player's Control Type has it
-// (hle/mousecam.c: ZL in Type 1, the d-pad in Type 2, the right stick's click in Type 3; the lock-on follows the
-// monster it chooses); in a town ZL, the way to the multiplayer menu. 0: nothing a touch button can press
+// The target button (ZL on the layout) normally follows the game's target-control mapping. Control Type 3 is
+// deliberately different: ZL is reserved for its Hunter Arts (ZL + X / A / B), so keep this control as real ZL.
+// Target selection in that type remains on the game's R3 control; the port's separate Lock-on button stays independent.
 bool target_in_town(void) { return plat_now_ns() - g_town_ns < 500 * MS || g_menu_town.load(); }
 uint64_t target_buttons(void) {
-    if (target_in_town()) return B(BTN_ZL);
+    if (target_in_town() || game_control_type() == 2) return B(BTN_ZL);
     return mousecam_target_buttons();
 }
 // The camera button (L on the layout): the game's camera centring, L, or ZL in a hunt
@@ -5077,6 +5077,7 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
         dl->AddCircle(g.c, g.r * 1.16f, fade(GLOW, a * (mousecam_lock_following() ? .6f + .3f * sinf(SDL_GetTicksNS() / 1e9f * 4) : .45f)),
                       40, g.r * .09f);
     Icon ic = DEFS[i].icon;
+    if (i == C_ZL && !s.edit && game_control_type() == 2) ic = I_LETTER;  // (Control Type 3: this is ZL, not the target-select control)
     char letter[8];
     snprintf(letter, sizeof letter, "%s", i == C_ZL && !s.edit ? target_letter()
                                           : i == C_L && !s.edit && camera_buttons() == B(BTN_ZL) ? "ZL" : DEFS[i].letter);
@@ -6002,12 +6003,11 @@ extern "C" void touch_draw(float w, float h) {
         if (dbg && m && was > 0.0f && out <= 0.0f) rt_logf("[touch] menu pad gone, %.0f ms after the last menu window\n", (now - m) / 1e6);
         was = out;
     }
-    // (in a menu of the game's the player's buttons stay, at half strength so its window reads under them, as in the
-    // MH4U port; the menu pad's group over them at full)
+    // The player's controls keep the configured opacity when a game menu opens; opening the menu must not dim them.
+    // The menu pad's own controls are drawn separately above them.
     for (int i = 0; i < C_COUNT; i++) {
         if (!in_mode(i, s.menu)) continue;
-        float k = s.menu ? .5f : 1.0f;
-        if (k > .01f) control(dl, font, s.layout, i, w, h, s, a * k);
+        control(dl, font, s.layout, i, w, h, s, a);
     }
     ButtonLink lr_link{};
     if (button_link_geometry(s.layout, w, h, s.menu, &lr_link)) {
