@@ -22,15 +22,15 @@
 //     with the page tabs above it (L and R, or ZL and ZR by the game's option) and a small Minus below it. The stick
 //     keeps walking where the game lets the hunter walk (it moves the cursor where the hunter isn't played: the title,
 //     the main menu); A, B and the rest stay what they are. A drag anywhere else moves the cursor, a step every so far
-//   - the game's own HUD, moved out of the thumbs' way (nvn/vulkan/exec.c): a tap on the item bar (bottom middle)
-//     uses the item, a swipe on it turns the bar, a long press holds it open with its neighbouring items (as L held,
-//     with no L: hle/itembar.c); a tap on a Hunter Art's panel (top right) performs it. The target camera's icons take
+//   - the game's own HUD, moved out of the thumbs' way (nvn/vulkan/exec.c): the item bar is passive to touch
+//     (no item-use tap, no swipe to change items/ammo, and no long-press strip). A Hunter Art panel tap still performs the art.
+//     The target camera's icons take no taps (a drag there turns the camera); with the controls hidden (a controller, a keyboard) a lit padlock by them
 //     no taps (a drag there turns the camera); with the controls hidden (a controller, a keyboard) a lit padlock by them
 //     shows while the lock-on is on
 //   - with a bow or a bowgun in hand, in a hunt, a layout of their own: a large button under the thumb that fires
 //     (a drag on it, held, aims: the right thumb can't be on the screen and on a button at once), a smaller one that
 //     reloads (a bow: its melee attack), aim, crouching fire (a bow: its coating), dodge, sheathe, and arrows for the
-//     ammo; a swipe up or down on the item bar changes the ammo too. Laid out on its own in the editor
+//     ammo; item-bar swipes do not change ammo. Laid out on its own in the editor
 //   - anywhere else: dragging turns the camera by the angle moved, as in a phone game (the hunt camera's own angles,
 //     runtime/hle/mousecam.c; elsewhere as the right stick). No double tap does anything there (up to 0.1.9.3 one
 //     centred the camera, L: pressed by accident in a fight it turned the camera away, gu-native #130, #132); the camera
@@ -478,7 +478,7 @@ void epanel_line(char out[80], const EditPanel &ep) { snprintf(out, 80, "editor_
 const char *const HUD_NAME[HP_COUNT] = {"Item bar", "Hunter Arts", "Target camera", "Clock", "Health and stamina",
                                         "Sharpness and gauges", "Party", "Map"};
 HudVals hud_default(void) { return {0.0f, 0.0f, 1.0f, 1.0f, false}; }
-// (the item bar with the touch controls: a finger picks and uses the items on it, and swipes it: never hidden there)
+// (the item bar is part of the HUD and stays visible; touch gestures on it are passive)
 bool hud_hide_ok(int prof, int part) { return !(prof == HUD_TOUCH && part == HP_ITEMS); }
 // The emulator-style layout's own places for the controls both kinds have (DEFS has the port's): the stick a little
 // higher, over the d-pad; the settings button between the stick and the shoulders; the Lock-on button above the diamond
@@ -1504,7 +1504,7 @@ uint64_t min_press(void) {
 #define MIN_PRESS min_press()
 // (the aim's tap: let go within this, the game's own tap of R, under its 14 frames at 60 FPS with an update to spare)
 const uint64_t AIM_TAP = 180 * MS;
-const uint64_t BAR_HOLD = 400 * MS;  // (a finger kept this long on the item bar, unmoved, holds it open: as the MH4U port)
+
 
 // The Run button at its default place in a layout of the corner style (saved before the button was there): inside the
 // band's hollow, where next_style puts it, when the band would cover it (both are placed from the same corner: any
@@ -3024,16 +3024,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
         } else if (f->kind == F_CAMERA || (f->kind == F_BUTTON && f->ctl == C_RFIRE && f->moved && !f->done && !s.menu)) {
             s.cam_dx += dx, s.cam_dy += dy, s.cam_ns = now;  // (a drag on the shot aims while it is held)
         } else if (f->kind == F_STICK) stick_to(s, x, y);
-        else if (f->kind == F_ITEM) {  // a swipe turns the bar, an item every so far; up or down with a gun: the ammo
-            f->swipe += dx, f->swipe_y += dy;
-            float step = .055f * s.h;
-            if (g_ranged.load() && !f->done && fabsf(f->swipe_y) >= step * 1.3f && fabsf(f->swipe_y) > fabsf(f->swipe)) {
-                ammo_step(s, f->swipe_y < 0 ? 1 : -1), tap_due();
-                f->done = true;  // (one step a swipe: each takes a moment, and two would look like none)
-            }
-            while (!f->done && f->swipe >= step) item_step(s, 1, now), f->swipe -= step;
-            while (!f->done && f->swipe <= -step) item_step(s, -1, now), f->swipe += step;
-        } else if (f->kind == F_BUTTON && is_dpad(f->ctl)) {  // the d-pad: the direction the thumb is in now
+        // F_ITEM is intentionally passive: dragging the item bar never cycles items or ammo.
+        else if (f->kind == F_BUTTON && is_dpad(f->ctl)) {  // the d-pad: the direction the thumb is in now
             int part = dpad_part(place(s.layout, f->ctl, s.w, s.h), x, y, f->part);
             if (part != f->part) f->part = part, recompute_held(s), tap_due();
         } else if (f->kind == F_BUTTON && f->ctl == C_MPAD) {  // the menu pad: the same (pressed by touch_input, as a
@@ -3073,20 +3065,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
         f->x = x, f->y = y;
         return true;
     }
-    // up / cancelled. (Where the finger lifted counts too: a quick flick can come with no motion between its down and
-    // its up, and on the item bar that was a tap: the item used instead of the bar turned)
+    // up / cancelled. Item-bar touches are passive: neither a tap nor a short final swipe does anything.
     if (hypotf(x - f->x0, y - f->y0) > .025f * s.h) f->moved = true;
-    if (f->kind == F_ITEM && e->type == SDL_EVENT_FINGER_UP && !f->done) {
-        f->swipe += x - f->x, f->swipe_y += y - f->y;
-        float step = .055f * s.h;
-        if (g_ranged.load() && fabsf(f->swipe_y) >= step * 1.3f && fabsf(f->swipe_y) > fabsf(f->swipe)) {
-            ammo_step(s, f->swipe_y < 0 ? 1 : -1), tap_due();
-            f->done = true;
-        }
-        // (the last bit of a swipe: an item more once it is most of a step, as the finger lifting ends it)
-        while (!f->done && f->swipe >= step * .6f) item_step(s, 1, now), f->swipe -= step;
-        while (!f->done && f->swipe <= -step * .6f) item_step(s, -1, now), f->swipe += step;
-    }
     bool tap = !f->moved && now - f->t0 < 300 * MS && e->type == SDL_EVENT_FINGER_UP;
     bool cancel = e->type == SDL_EVENT_FINGER_CANCELED;
     // The aim with a gun out (its R): a tap, let go within AIM_TAP and not slid, is the game's tap of R, the scope; held
@@ -3125,9 +3105,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
         }
     }
     if (f->kind == F_EDIT) s.pinch = false;
-    if (f->kind == F_ITEM && s.bar_open && f->id == s.bar_finger) s.bar_open = false;  // (closed: no item used)
-    // A tap on the item bar only selects/keeps the current item; it must not send Y and consume it.
-    // Swiping still cycles items and a long press still opens the neighbouring-item strip.
+    if (f->kind == F_ITEM && s.bar_open && f->id == s.bar_finger) s.bar_open = false;
+    // The item bar is not an input surface: touching, dragging or holding it never uses an item, changes selection or opens a strip.
     if (f->kind == F_ARTS && tap && f->part >= 0) art_tap(s, f->part, now);  // a tap on a Hunter Art's panel: that art
     // the settings button: a tap opens the port's menu (a long press opened the editor: touch_input)
     if (f->kind == F_BUTTON && f->ctl == C_SETTINGS && !f->done && e->type == SDL_EVENT_FINGER_UP) overlay_toggle_settings();
@@ -3366,16 +3345,9 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     for (int i = 0; i < C_COUNT && s.latched; i++)
         if ((s.latched >> i & 1) && (!in_mode(i, s.menu) || !(s.layout.hold >> i & 1))) unlatch(s, 1ull << i, DEFS[i].key), recompute_held(s);
     if (s.edit && s.img_open && now - s.img_scan_ns > 1500 * MS) img_scan(s);
-    // A long press on the item bar holds it open, its neighbouring items shown as while L is held, with nothing pressed
-    // (L would turn the camera): a swipe meanwhile turns it, lifting closes it and uses no item (#109, as the MH4U port's)
-    for (Finger &f : s.f)
-        if (f.kind == F_ITEM && !f.done && !f.moved && !s.bar_open && now - f.t0 > BAR_HOLD && !s.menu) {
-            s.bar_open = true, s.bar_finger = f.id;
-            tap_due();
-            if (dbg) rt_logf("[touch] item bar held open\n");
-        }
-    if (s.bar_open && (menu || s.menu || !visible)) s.bar_open = false;  // (a menu over it: closed)
-    itembar_hold(s.bar_open);
+    // Touch gestures on the item bar are disabled. Keep the game's neighbouring-item strip closed.
+    s.bar_open = false;
+    itembar_hold(false);
     // The stick's locked run ends once a run can't go on: StickRun turned off, the port's menu or one of the game's open,
     // the controls hidden or in the editor, the weapon out, the hunter not played (a cutscene, a cart, the quest's end);
     // and as the stick or the lock circle is touched again (touch_event)
@@ -4966,13 +4938,15 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
             // the sprint lock's circle: faded in as the thumb pushes up past the rim while a lock could start; lit with
             // the thumb on it (armed) and locked
             // (toward the circle, wherever the editor put it: above the stick unless moved)
-            float v = s.run_lock || s.run_over ? 1.0f : 0.0f;
+            float v = s.run_lock || s.run_over ? 1.0f : s.run_can ? .48f : 0.0f;
             Geo lg = lock_geo(l, s, w, h);
             if (!s.run_lock && !s.run_over && s.run_can && s.stick_on) {
                 float ux = lg.c.x - s.bx, uy = lg.c.y - s.by, ud = std::max(1.0f, hypotf(ux, uy));
                 float dx = s.fx - s.bx, dy = s.fy - s.by, d = hypotf(dx, dy), up = d > 1.0f ? (dx * ux + dy * uy) / (d * ud) : 0.0f;
                 float reach = std::max(1.0f, ud - lg.r - .9f * g.r);
-                v = std::clamp((d - .9f * g.r) / reach, 0.0f, 1.0f) * std::clamp((up - LOCK_UP) / .15f, 0.0f, 1.0f);
+                float progress = std::clamp((d - .9f * g.r) / reach, 0.0f, 1.0f) *
+                                 std::clamp((up - LOCK_UP) / .15f, 0.0f, 1.0f);
+                v = .48f + .52f * progress;
             }
             lock_circle_of(dl, l, lg.c, lg.r, a * v, s.run_over, s.run_lock);
             if (s.run && !pic_texture(l.image[C_STICK])) {  // (running: a gold ring round the rim, and streaks behind the
@@ -4987,7 +4961,14 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
                 }
             }
         }
-        else stick_of(dl, l, g.c, g.c, g.r, a * .8f, false);
+        else {
+            stick_of(dl, l, g.c, g.c, g.r, a * .8f, false);
+            // Keep the sprint-lock target discoverable above the stick whenever running is currently allowed.
+            if (s.run_can && !s.edit) {
+                Geo lg = lock_geo(l, s, w, h);
+                lock_circle_of(dl, l, lg.c, lg.r, a * .48f, false, false);
+            }
+        }
         return;
     }
     if (i >= C_MUP && i <= C_MRIGHT) {
