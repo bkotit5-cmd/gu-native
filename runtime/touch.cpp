@@ -1,4 +1,5 @@
 // Touch controls for phones, in the Monster Hunter style: bronze-rimmed dark discs with cream glyphs and the game's
+// Android CI trigger only: this comment does not change runtime behavior.
 // button letter on a small badge.
 //   - left thumb: a stick fixed at its place (the knob follows the thumb inside the rim); a light tilt walks, a full
 //     one runs ([Touch] StickRun: the thumb well past the rim holds R, the dash, with the weapon sheathed); lifted inside
