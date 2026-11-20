@@ -4076,20 +4076,20 @@ const char *const TB_TITLES[TB_COUNT] = {"Attacks (A / X)", "Evade (B)", "Guard 
                                          "Crouching fire / coating", "Ammo arrows", "Item bar arrows", "ZL in menus", "ZR in menus",
                                          "Menu pad", "Run with the stick", "Keep guarding while sliding", "Lock-on button", "Floating stick",
                                          "L and R in menus", "D-pad in menus", "Hunter Arts with a controller",
-                                         "Long press hides the controls", "Slide between buttons: both pressed", "Game Target Cam"};
+                                         "Long press hides the controls", "Slide between buttons: both pressed"};
 const char *const TB_KEYS[TB_COUNT] = {"ShowAttacks", "ShowDodge", "ShowGuard", "ShowSheathe", "ShowPlus", "ShowMinus", "ShowDpad",
                                        "ShowL", "ShowZL", "ShowZR", "ShowL3", "ShowR3", "ShowStick", "ShowRanged", "ShowFire",
                                        "ShowSecond", "ShowAim", "ShowRangedSpecial", "ShowAmmo", "ShowItemArrows", "ShowMenuZL",
                                        "ShowMenuZR", "ShowMenuPad", "StickRun", "GuardSlide", "ShowLockOn", "FloatingStick",
-                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController", "HoldToHide", "SlideBoth", "ShowGameTarget"};
+                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController", "HoldToHide", "SlideBoth"};
 // (their rows' order: each way of a button by it - keeping the guard by Guard, the run and the floating stick by the stick,
 // the D-pad in menus by the D-pad -, the menu pad before the tabs that go with it; the Hunter Arts' taps with a controller
 // last, a controller's way. The floating stick and the Arts' taps have rows of their own elsewhere: tb_elsewhere)
 const int TB_ORDER[TB_COUNT] = {TB_ATTACKS, TB_DODGE, TB_GUARD, TB_GUARD_SLIDE, TB_SLIDE_BOTH, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD,
-                                TB_DPAD_MENUS, TB_L, TB_ZL, TB_GAME_TARGET, TB_LOCKON, TB_ZR, TB_L3, TB_R3, TB_STICK, TB_FLOAT_STICK, TB_STICK_RUN,
+                                TB_DPAD_MENUS, TB_L, TB_ZL, TB_LOCKON, TB_ZR, TB_L3, TB_R3, TB_STICK, TB_FLOAT_STICK, TB_STICK_RUN,
                                 TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_PAD, TB_MENU_LR,
                                 TB_MENU_ZL, TB_MENU_ZR, TB_ARTS_PAD, TB_HOLD_HIDE};
-static_assert(TB_COUNT == 33, "TB_ORDER: a place for each of the touch settings");
+static_assert(TB_COUNT == 32, "TB_ORDER: a place for each of the touch settings");
 int s_combo;  // the combined button being edited
 void touch_button_rows(std::vector<Row> &r) {
     Config &c = s.draft;
@@ -4548,7 +4548,6 @@ const PhoneHelp PHONE_HELP[] = {
      "Algunos drivers de Adreno repiten la imagen 3D en grilla con una resolución 3D baja: Auto deja MSAA 2x en ese caso. Si la imagen se ve oscura o parpadea, o para ganar velocidad, elige Off."},
     {"LockOn", "Tap the Lock-on button on the screen (a controller: click the right stick; hold it with Control Type 3, where the click changes the target) and the camera keeps turning to the monster, the one the Target Cam chose or the nearest large one, until you tap it again. The target button changes the monster. Bows and bowguns fire at it from a normal stance; your own aim, crouching fire and the styles' moves are left to you. Turning the camera yourself pauses it for a moment.",
      "Toca el botón Fijar objetivo en la pantalla (un mando: aprieta la palanca derecha; mantenla apretada con el Tipo de control 3, donde el clic cambia el objetivo) y la cámara sigue girando hacia el monstruo, el que eligió la cámara objetivo o el grande más cercano, hasta que lo vuelvas a tocar. El botón de objetivo cambia el monstruo. Arcos y ballestas disparan hacia él desde la postura normal; tu propio apuntado, el fuego agachado y los movimientos de los estilos quedan en tus manos. Girar la cámara tú mismo la pausa un momento."},
-    {"ShowGameTarget", "A separate touch button for the game's own Target Cam. It sends the input chosen by the game's Control Type (Control Type 3 uses the right-stick click); it does not activate the port's camera-follow Lock-on.", "Un botón táctil aparte para la Cámara objetivo del juego. Envía la entrada elegida por el Tipo de control del juego (el Tipo 3 usa el clic de la palanca derecha); no activa el seguimiento de cámara propio del port."},
     {"ShowLockOn", "The port's own button, not one of the game's: a tap locks the camera on the monster and it keeps turning to it; another tap lets go. The target button changes the monster. It lights up while the lock-on is on, and shows while Lock-on is on in Controls.",
      "Un botón propio del port, no del juego: un toque fija la cámara en el monstruo y la sigue girando hacia él; otro toque la suelta. El botón de objetivo cambia el monstruo. Se ilumina mientras está fijado, y aparece mientras Fijar objetivo está activado en Controles."},
     {"GyroAim", "Aiming a bow or a bowgun (a gun's aim, its scope, crouching fire; a bow's aiming mode), turning the phone turns the aim too, from where it was as the aim began, with what your fingers or the sticks do. A controller with a gyro is read instead of the phone. The gyroscope is read only while you aim.",

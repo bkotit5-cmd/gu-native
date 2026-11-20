@@ -417,7 +417,6 @@ static const char DEFAULT_INI[] =
     "ShowDpad = Off\n"
     "ShowL = On\n"
     "ShowZL = On\n"
-    "ShowGameTarget = On\n"
     "ShowZR = Off\n"
     "ShowL3 = Off\n"
     "ShowR3 = Off\n"
@@ -1026,7 +1025,6 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Touch", "StickRun", touch_show[TB_STICK_RUN], false),
     ON_OFF("Touch", "GuardSlide", touch_show[TB_GUARD_SLIDE], false),
     ON_OFF("Touch", "ShowLockOn", touch_show[TB_LOCKON], false),
-    ON_OFF("Touch", "ShowGameTarget", touch_show[TB_GAME_TARGET], false),
     ON_OFF("Touch", "FloatingStick", touch_show[TB_FLOAT_STICK], false),
     ON_OFF("Touch", "ShowMenuLR", touch_show[TB_MENU_LR], false),
     ON_OFF("Touch", "DpadInMenus", touch_show[TB_DPAD_MENUS], false),

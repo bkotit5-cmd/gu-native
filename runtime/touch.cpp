@@ -121,7 +121,6 @@ enum Ctl {
     C_ITEML, C_ITEMR,                                                                      // (the item bar's arrows)
     C_RUNLOCK,                                                                             // (the sprint lock's circle)
     C_LOCKON,                                                                              // (the port's Lock-on button)
-    C_GAME_TARGET,                                                                          // (the game's Target Cam input; separate from the port's Lock-on)
     // the emulator-style layout's (a profile of that kind, Layout.kind: every one presses its button of the game's and
     // nothing else, as an emulator's pad on the screen; the stick, the settings and Lock-on buttons, the item bar's
     // arrows and the combined buttons are the same controls in both kinds)
@@ -219,7 +218,6 @@ const Def DEFS[C_COUNT] = {
     // tap turns the lock-on (lock_set). On the right thumb's arc above Y and left of L, as far from both as they are from
     // each other (the MH4U port's place, from its arc). Hunts only: in a town it is in the editor alone
     {"lock_on", "Lock-on", I_LOCKON, "", 0, true, .43f, .58f, .045f},
-    {"game_target", "Game Target Cam", I_TARGET_SELECT, "", 0, true, .56f, .66f, .045f},
     // the emulator-style layout: A, B, X and Y in a diamond under the right thumb, the d-pad below the stick on the left,
     // the shoulders by the screen's edges (as tabs, the inner pair above and inward), Minus and Plus inward of them, the
     // sticks' clicks by the stick and below the diamond (the place of an emulator's right stick: a drag anywhere turns
@@ -298,7 +296,6 @@ int show_setting(int i) {  // the [Touch] Show* a control follows (the settings 
     case C_ITEML: case C_ITEMR: return TB_ITEM_ARROWS;
     case C_RUNLOCK: return TB_STICK_RUN;
     case C_LOCKON: return TB_LOCKON;
-    case C_GAME_TARGET: return TB_GAME_TARGET;
     default: return -1;
     }
 }
@@ -326,7 +323,7 @@ bool lockon_here(bool menu) {
 // A control the emulator-style layout's editor can hide (Layout.off): any of its own but the settings button, the way back
 // to the settings ([Touch] Show* hide the port's own layout's, in the settings: its editor has no Hide for those)
 bool hideable(int i) {
-    return g_kind.load() == KIND_EMU && i != C_SETTINGS && (emu_ctl(i) || i == C_STICK || i == C_LOCKON || i == C_GAME_TARGET || is_combo(i));
+    return g_kind.load() == KIND_EMU && i != C_SETTINGS && (emu_ctl(i) || i == C_STICK || i == C_LOCKON || is_combo(i));
 }
 // The emulator-style layout: its own buttons, the stick, the settings and Lock-on buttons, the combined buttons, each but
 // the settings button unless its editor hid it; in a menu of the game's nothing changes (its d-pad is always there: no
@@ -336,7 +333,6 @@ bool emu_mode(int i, bool menu) {
     if (emu_ctl(i) || i == C_SETTINGS || i == C_STICK) return true;
     if (is_combo(i)) return config_live_touch_combo(i - C_COMBO) != 0;
     if (i == C_LOCKON) return lockon_here(menu) && config_live_touch_show(TB_LOCKON);
-    if (i == C_GAME_TARGET) return !menu && g_in_quest.load() && config_live_touch_show(TB_GAME_TARGET);
     return false;
 }
 bool in_mode(int i, bool menu) {
@@ -350,7 +346,6 @@ bool in_mode(int i, bool menu) {
     if (i == C_ITEML || i == C_ITEMR) return false;
     if (i == C_RUNLOCK) return false;
     if (i == C_LOCKON && !lockon_here(menu)) return false;
-    if (i == C_GAME_TARGET && (menu || !g_in_quest.load())) return false;
     if (menu && (i == C_L || i == C_R)) return true;
     if (menu && i == C_MENU) return true;
     if (is_ranged(i) ? !ranged_layout() : ranged_layout() && (i == C_ATTACK || i == C_HEAVY || i == C_LIGHT || i == C_CORNER ||
@@ -377,14 +372,12 @@ bool in_editor(int i) {
         if (i == C_ITEML || i == C_ITEMR) return config_live_touch_show(TB_ITEM_ARROWS) != 0;
         if (i == C_RUNLOCK) return config_live_touch_show(TB_STICK_RUN) != 0;
         if (i == C_LOCKON) return config_live_lock_on() && config_live_touch_show(TB_LOCKON);
-        if (i == C_GAME_TARGET) return config_live_touch_show(TB_GAME_TARGET) != 0;
         return is_combo(i) && config_live_touch_combo(i - C_COMBO) != 0;
     }
     if (i == C_MPAD || of_mpad(i)) return false;
     if (i == C_ITEML || i == C_ITEMR) return config_live_touch_show(TB_ITEM_ARROWS) != 0;
     if (i == C_RUNLOCK) return config_live_touch_show(TB_STICK_RUN) != 0;
     if (i == C_LOCKON) return config_live_lock_on() && config_live_touch_show(TB_LOCKON);  // (a town's editor too)
-    if (i == C_GAME_TARGET) return config_live_touch_show(TB_GAME_TARGET) != 0;
     return i < C_LAID && (in_mode(i, false) || in_mode(i, true));
 }
 const ImVec2 PILL_U(.766f, -.643f);  // the pill's axis on the screen (y down): up and to the right
@@ -489,8 +482,7 @@ HudVals hud_default(void) { return {0.0f, 0.0f, 1.0f, 1.0f, false}; }
 bool hud_hide_ok(int prof, int part) { return !(prof == HUD_TOUCH && part == HP_ITEMS); }
 // The emulator-style layout's own places for the controls both kinds have (DEFS has the port's): the stick a little
 // higher, over the d-pad; the settings button between the stick and the shoulders; the Lock-on button above the diamond
-const struct { int c; float x, y; } EMU_PLACES[] = {{C_STICK, .27f, .42f}, {C_SETTINGS, .065f, .50f}, {C_LOCKON, .45f, .54f},
-                                                    {C_GAME_TARGET, .56f, .54f}};
+const struct { int c; float x, y; } EMU_PLACES[] = {{C_STICK, .27f, .42f}, {C_SETTINGS, .065f, .50f}, {C_LOCKON, .45f, .54f}};
 void def_place(int kind, int i, float *x, float *y) {
     *x = DEFS[i].x, *y = DEFS[i].y;
     if (kind == KIND_EMU)
@@ -1729,7 +1721,7 @@ uint64_t finger_buttons(const Finger &f) {
           : is_dpad(f.ctl) ? dpad_buttons(f.part)
           : is_combo(f.ctl) ? (uint64_t)config_live_touch_combo(f.ctl - C_COMBO)
           : f.ctl == C_LIGHT && f.part ? PILL_BUTTONS[2]
-          : f.btn || f.ctl == C_ZL || f.ctl == C_GAME_TARGET ? f.btn
+          : f.btn || f.ctl == C_ZL ? f.btn
           : DEFS[f.ctl].buttons;
     }
     return b | f.keep | (f.on_bar ? B(BTN_Y) : 0);
@@ -1827,12 +1819,11 @@ bool button_link_at(const Layout &l, float x, float y, float w, float h, bool me
     return true;
 }
 // and its badge: the button it presses (a d-pad's direction: an arrow, target_badge)
-const char *target_letter_for(uint64_t b) {
+const char *target_letter(void) {
+    uint64_t b = target_buttons();
     return b & B(BTN_L) ? "L" : b & B(BTN_RSTICK) ? "R3" : b & B(BTN_LSTICK) ? "L3" : b & B(BTN_DOWN) ? "v"
          : b & B(BTN_RIGHT) ? ">" : b & B(BTN_LEFT) ? "<" : b ? "ZL" : "";
 }
-const char *target_letter(void) { return target_letter_for(target_buttons()); }
-const char *game_target_letter(void) { return target_letter_for(mousecam_target_buttons()); }
 
 // [Touch] SlideBoth ("Slide between buttons: both pressed", on by default; 1.0.1, Discord: "R to B, like R to X"; the MH4U
 // port's the same): a thumb that slides from one of the game's face or shoulder buttons onto another keeps the first pressed
@@ -1848,7 +1839,7 @@ bool slide_both(const State &s) { return config_live_touch_show(TB_SLIDE_BOTH) &
 bool slide_keeps(int c) {
     switch (c) {
     case C_ATTACK: case C_CORNER: case C_HEAVY: case C_LIGHT: case C_R: case C_DODGE: case C_SHEATHE: case C_ZR: case C_ZL:
-    case C_GAME_TARGET: case C_L: case C_RSECOND: case C_RSPECIAL: case C_RDODGE: case C_RSHEATHE:
+    case C_L: case C_RSECOND: case C_RSPECIAL: case C_RDODGE: case C_RSHEATHE:
     case C_EA: case C_EB: case C_EX: case C_EY: case C_EL: case C_ER: case C_EZL: case C_EZR:
         return true;
     default:
@@ -1867,9 +1858,7 @@ bool slide_to(State &s, Finger *f, float x, float y) {
     if (from == f->home) f->home_keep = finger_buttons(*f) & ~(f->on_bar ? B(BTN_Y) : 0);  // (leaving it: what it pressed there)
     f->ctl = c, f->part = part, f->on_bar = false, f->keep = 0;
     f->link_peer = -1, f->link_state = 0;  // the finger has left the shared L/R connector
-    f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, s.menu)
-                   : c == C_GAME_TARGET ? mousecam_target_buttons()
-                   : c == C_ZL ? target_buttons() : c == C_L ? camera_buttons() : 0;
+    f->btn = is_ranged(c) ? ranged_buttons(c, s.drawn, s.menu) : c == C_ZL ? target_buttons() : c == C_L ? camera_buttons() : 0;
     if (c != f->home) f->keep = f->home_keep & ~finger_buttons(*f);
     recompute_held(s);
     tap_due();
@@ -1915,7 +1904,7 @@ const char *T(const char *english) { return settings_text(g_language, english); 
 // port's the same
 bool holdable(int i) {
     if (i < 0 || i >= C_LAID) return false;
-    return !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_SETTINGS || i == C_LOCKON || i == C_GAME_TARGET ||
+    return !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_SETTINGS || i == C_LOCKON ||
              i == C_ITEML || i == C_ITEMR || i == C_RUNLOCK || i == C_AMMO_UP || i == C_AMMO_DOWN || i == C_RAIM);
 }
 // A picture of the player's (Layout.image) can be on every control the editor places (1.0.1, the owner's call: the round
@@ -2931,9 +2920,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
             f->kind = F_BUTTON, f->ctl = c, f->part = part, f->home = c;
             f->link_peer = linked ? C_R : -1, f->link_state = linked ? link_state : 0;
             f->btn = linked ? link.buttons :
-                      is_ranged(c) ? ranged_buttons(c, s.drawn, s.menu)
-                                   : c == C_GAME_TARGET ? mousecam_target_buttons()
-                                   : c == C_ZL ? target_buttons() : c == C_L ? camera_buttons() : 0;
+                     is_ranged(c) ? ranged_buttons(c, s.drawn, s.menu) : c == C_ZL ? target_buttons() : c == C_L ? camera_buttons() : 0;
             if ((c == C_AMMO_UP || c == C_AMMO_DOWN) && !s.menu)
                 ammo_step(s, c == C_AMMO_UP ? 1 : -1), f->repeat_ns = now + 550 * MS;  // (held: more steps, touch_input)
             if (c == C_LOCKON) lock_set(s, !s.lock, "the Lock-on button");  // (as it lands; lit while held, presses nothing)
@@ -5092,8 +5079,7 @@ void control_face(ImDrawList *dl, ImFont *font, const Layout &l, int i, float w,
     Icon ic = DEFS[i].icon;
     if (i == C_ZL && !s.edit && game_control_type() == 2) ic = I_LETTER;  // (Control Type 3: this is ZL, not the target-select control)
     char letter[8];
-    snprintf(letter, sizeof letter, "%s", i == C_GAME_TARGET ? game_target_letter()
-                                          : i == C_ZL && !s.edit ? target_letter()
+    snprintf(letter, sizeof letter, "%s", i == C_ZL && !s.edit ? target_letter()
                                           : i == C_L && !s.edit && camera_buttons() == B(BTN_ZL) ? "ZL" : DEFS[i].letter);
     if (is_ranged(i)) ranged_face(i, s.edit ? 1 : s.drawn, &ic, letter, sizeof letter);
     bool lit = mask || (i == C_LOCKON && s.lock && !s.edit);  // (the Lock-on button lit while the lock-on is on)
