@@ -3126,8 +3126,8 @@ extern "C" bool touch_event(const SDL_Event *e) {
     }
     if (f->kind == F_EDIT) s.pinch = false;
     if (f->kind == F_ITEM && s.bar_open && f->id == s.bar_finger) s.bar_open = false;  // (closed: no item used)
-    if (f->kind == F_ITEM && tap && !f->done && fabsf(f->swipe) < .02f * s.h && fabsf(f->swipe_y) < .02f * s.h)
-        pulse(s, B(BTN_Y), 80 * MS), tap_due();  // a tap: the item (Y)
+    // A tap on the item bar only selects/keeps the current item; it must not send Y and consume it.
+    // Swiping still cycles items and a long press still opens the neighbouring-item strip.
     if (f->kind == F_ARTS && tap && f->part >= 0) art_tap(s, f->part, now);  // a tap on a Hunter Art's panel: that art
     // the settings button: a tap opens the port's menu (a long press opened the editor: touch_input)
     if (f->kind == F_BUTTON && f->ctl == C_SETTINGS && !f->done && e->type == SDL_EVENT_FINGER_UP) overlay_toggle_settings();
@@ -3379,10 +3379,11 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     // The stick's locked run ends once a run can't go on: StickRun turned off, the port's menu or one of the game's open,
     // the controls hidden or in the editor, the weapon out, the hunter not played (a cutscene, a cart, the quest's end);
     // and as the stick or the lock circle is touched again (touch_event)
-    bool stick_run = false;  // stick tilt and the sprint-lock gesture must never synthesize R
-    s.run_can = false;
+    bool stick_run = false;  // reaching the rim never auto-runs; the explicit Run Lock remains available
+    bool stick_lock = config_live_touch_show(TB_STICK_RUN) != 0;
+    s.run_can = stick_lock && s.drawn != 1 && !s.menu && play && visible && !s.edit && !menu;
     if (s.run_lock && !s.run_can)
-        run_end(s, !stick_run ? "StickRun off" : menu ? "the settings menu" : !visible || s.edit ? "the controls hidden or edited"
+        run_end(s, !stick_lock ? "StickRun off" : menu ? "the settings menu" : !visible || s.edit ? "the controls hidden or edited"
                  : s.menu ? "a menu of the game's" : s.drawn == 1 ? "the weapon out" : "the hunter not played");
     bool ran = s.run;  // (the run's R in the last update that got to the end: below)
     s.run = false;
