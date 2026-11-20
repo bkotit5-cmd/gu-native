@@ -121,7 +121,7 @@ typedef struct {
     int touch_controls;       // [Touch] Controls: TOUCH_*, the controls on the screen (runtime/touch.cpp)
     int touch_hud;            // [Touch] MoveHUD: the HUD moves out of the thumbs' way while they show (nvn/vulkan/exec.c)
     float touch_camera;       // [Touch] CameraSpeed: the camera's turn for a drag (1: about 90 degrees a screen height)
-    float touch_opacity;      // [Touch] Opacity: of the controls, 0.2 .. 1
+    float touch_opacity;      // [Touch] Opacity: of the controls, 0.05 .. 1
     int render_scale;         // [Display] RenderScale: RenderResolution Auto's 3D size, percent of the screen's (10..100)
     int touch_vibration;      // [Touch] Vibration: a short tick when a touch control is pressed (runtime/haptics.c)
     int phone_rumble;         // [Controls] PhoneRumble: the game's rumble on the phone's vibrator too (runtime/haptics.c)
