@@ -1037,7 +1037,7 @@ const ConfigSetting g_settings[] = {
     COMBO(1), COMBO(2), COMBO(3), COMBO(4), COMBO(5), COMBO(6),
     {"Touch", "CameraSpeed", SET_FLOAT, F(touch_camera), 0, 0.2f, 5.0f, NULL, NULL, false, ERR_VIEW},
     {"Touch", "CameraSmoothing", SET_INT, F(touch_cam_smooth), 0, 0, 100, NULL, NULL, false, ERR_MISC},
-    {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.2f, 1.0f, NULL, NULL, false, ERR_VIEW},
+    {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.05f, 1.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Touch", "Vibration", touch_vibration, false),
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
     KEYS("MoveRight", BIND_MOVE_RIGHT), KEYS("Walk", BIND_WALK), KEYS("CameraUp", BIND_CAM_UP),
