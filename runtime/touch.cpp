@@ -23,9 +23,9 @@
 //     keeps walking where the game lets the hunter walk (it moves the cursor where the hunter isn't played: the title,
 //     the main menu); A, B and the rest stay what they are. A drag anywhere else moves the cursor, a step every so far
 //   - the game's own HUD, moved out of the thumbs' way (nvn/vulkan/exec.c): the item bar is passive to touch
-//     (no item-use tap, no swipe to change items/ammo, and no long-press strip). A Hunter Art panel tap still performs the art.
-//     The target camera's icons take no taps (a drag there turns the camera); with the controls hidden (a controller, a keyboard) a lit padlock by them
-//     no taps (a drag there turns the camera); with the controls hidden (a controller, a keyboard) a lit padlock by them
+//     is passive to touch: no item-use tap, no swipe-to-cycle or ammo swipe, and no long-press strip. A Hunter Art panel tap still performs the art.
+//     The target camera's icons take no taps (a drag there turns the camera); with the controls hidden, a lit padlock by them
+//     shows while the lock-on is on.
 //     shows while the lock-on is on
 //   - with a bow or a bowgun in hand, in a hunt, a layout of their own: a large button under the thumb that fires
 //     (a drag on it, held, aims: the right thumb can't be on the screen and on a button at once), a smaller one that
