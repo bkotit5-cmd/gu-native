@@ -45,6 +45,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "settings_locale.h"
 #include "settings_panel.h"
 #include "verify.h"
+#include "weapon_tree.h"
 
 #define LOG(...) rt_logf(__VA_ARGS__)  // (Windows: queued, the log's own thread writes it)
 
@@ -862,6 +863,7 @@ void overlay_frame(void *cpu) {
     // is in the background, its clock held: runtime/hle/vi.c)
     vi_pause_game();
     huntaids_frame();  // (the hunting aids' step, after the game's update: runtime/hle/huntaids.c)
+    weapontree_frame();  // update the Smithy weapon-tree snapshot when its hook has data
     frame_once(cpu);
 #ifdef __ANDROID__
     // (the settings menu open, playing alone: the game waits here, as on the console's HOME menu - gu-native #94. The menu
@@ -928,7 +930,8 @@ static void frame_once(void *cpu) {
     if (stats) perfstats_tick();  // (every frame, built or its copy drawn again: the longest gap is between the game's frames)
     bool hunt = huntaids_any();  // (the hunting aids' numbers or bars: runtime/hunt_overlay.cpp)
     bool fading = settings_panel_fading();  // (the settings menu closed a moment ago: fading out, taking no input)
-    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !hunt && !credits && !fading) {  // (nothing to draw)
+    bool tree = weapon_tree_drawing();
+    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !hunt && !credits && !fading && !tree) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear(), g_snap_seq++;
         apply_input(io);  // (keep the queue short)
@@ -947,7 +950,7 @@ static void frame_once(void *cpu) {
     // frames a minute drawn again, now ~3,300; the overlay's share of this thread 3.8 % -> 0.3 % (about 0.4 ms a frame);
     // =2 compared 6,659 such frames, none differed. MHGU_PERF_STATS_REUSE=0: frames with the plate built, as before
     bool alone = touch && !open && !free_render && !notice && !plate && !chat && !chat_over && !credits && !fading && !g_modal_open &&
-                 !g_settings_open && !g_forge_open && !settings_panel_confirming();
+                 !g_settings_open && !g_forge_open && !settings_panel_confirming() && !tree;
     bool same = g_perf_overlay_reuse && alone && g_reuse_last && g_snap.Valid && w == g_reuse_w && h == g_reuse_h &&
                 now - g_reuse_built_ns < 1000000000ull && (!stats || (g_perf_stats_reuse && perfstats_same((float)w, (float)h))) &&
                 hunt_overlay_unchanged((float)w, (float)h) && touch_draw_unchanged((float)w, (float)h);
@@ -1083,8 +1086,9 @@ static void frame_once(void *cpu) {
     if (chat && !g_modal_open) draw_chat(line, now, scale);
     if (stats) perfstats_draw((float)w, (float)h);  // (under the touch controls, on the same background list)
     hunt_overlay_draw((float)w, (float)h);  // (the hunting aids' numbers and bars: after the plate, under the controls)
-    if (touch) touch_draw((float)w, (float)h);  // (the touch controls: runtime/touch.cpp)
+    if (touch && !weapon_tree_is_open()) touch_draw((float)w, (float)h);  // tree owns touch while open
     if (chat_over) chat_port_draw((float)w, (float)h);  // (over them: the chat button, the last lines)
+    if (tree && !g_settings_open) weapon_tree_draw((float)w, (float)h);
     ImGui::Render();
     settings_panel_after_render(ImGui::GetDrawData());
 
