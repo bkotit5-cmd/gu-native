@@ -7522,8 +7522,8 @@ static VkShaderModule user_shader_module(void) {
     return module;
 }
 
-// kind 0: the picture as it is (present.frag); 1: with the colour filter (present.color); 2: filter and HDR10 encoding
-// (present.hdr)
+// kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding; 3: user GLSL
+// fragment post-process (SDR only).
 static VkPipeline present_pipeline(int kind) {
     static VkPipeline pipes[4];
     static VkRenderPass made_for[4];
