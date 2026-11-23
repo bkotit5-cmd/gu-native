@@ -1235,12 +1235,18 @@ extern "C" void overlay_user_textures_prepare(VkImageView (*view_of)(uint32_t te
 }
 
 #ifndef MHGU_NULL_BACKEND
+static void user_tex_backend_reset(void) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (UserTex &u : g_user_tex) u.set = VK_NULL_HANDLE, u.set_view = VK_NULL_HANDLE;
+    g_dead_user_tex_sets.clear();  // the old descriptor pool was destroyed by ImGui_ImplVulkan_Shutdown
+}
+
 static void user_tex_sets(void) {
     g_user_tex_draws++;
     for (UserTex &u : g_user_tex) {
         if (!u.live || !u.vk || u.vk == u.set_view) continue;
         if (u.set) g_dead_user_tex_sets.push_back({u.set, g_user_tex_draws});
-        u.set = ImGui_ImplVulkan_AddTexture(VK_NULL_HANDLE, u.vk, VK_IMAGE_LAYOUT_GENERAL);
+        u.set = ImGui_ImplVulkan_AddTexture(u.vk, VK_IMAGE_LAYOUT_GENERAL);
         u.set_view = u.set ? u.vk : VK_NULL_HANDLE;
     }
     size_t k = 0;
@@ -1278,6 +1284,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         if (g_pass) {
             g_ready = false;
             ImGui_ImplVulkan_Shutdown();
+            user_tex_backend_reset();
         }
         ImGui_ImplVulkan_InitInfo info = {};
         info.ApiVersion = VK_API_VERSION_1_2;
