@@ -31,7 +31,7 @@ DEFS, SE, TD = J('definitions.json'), J('structs_and_enums.json'), J('typedefs_d
 STRUCTS, ENUMS, ENUMTYPES, LOC = SE['structs'], SE['enums'], SE['enumtypes'], SE['locations']
 
 # hand-written in runtime/forge_imgui.c (contexts, allocators, the frame itself, context hooks, files, texture pixels,
-# glyph ranges)
+# glyph ranges, point lists)
 OVERRIDE = {'igCreateContext', 'igDestroyContext', 'igSetAllocatorFunctions', 'igGetAllocatorFunctions', 'igMemAlloc',
             'igMemFree', 'igNewFrame', 'igEndFrame', 'igRender', 'igGetDrawData', 'igAddContextHook',
             'igImFileOpen', 'igImFileClose', 'igImFileGetSize', 'igImFileRead', 'igImFileWrite',
