@@ -1814,7 +1814,9 @@ const char *const bind_titles[] = {"Move forward", "Move back", "Move left", "Mo
                                    "ZR", "Plus", "Minus", "D-pad up", "D-pad down", "D-pad left", "D-pad right",
                                    "Left stick click", "Right stick click", "Item left", "Item right",
                                    "Combined button 1", "Combined button 2", "Combined button 3", "Combined button 4",
-                                   "Combined button 5", "Combined button 6"};
+                                   "Combined button 5", "Combined button 6", "Combined button 7", "Combined button 8", "Combined button 9",
+                                   "Combined button 10", "Combined button 11", "Combined button 12", "Combined button 13",
+                                   "Combined button 14", "Combined button 15"};
 static_assert(std::size(bind_titles) == BINDS, "a title for each keybind");
 // What else a key (or KEY_MOUSE + a mouse button) does: one of the recomp's own keys (keymap.h), a keybind other than
 // skip, or (for a keybind's) the chat key; nullptr: nothing
