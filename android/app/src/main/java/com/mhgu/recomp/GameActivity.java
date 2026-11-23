@@ -368,6 +368,8 @@ public class GameActivity extends SDLActivity {
     public static void importCheats() { startImport(ImportActivity.CHEATS); }
     public static void importMod() { startImport(ImportActivity.MOD); }
     public static void importDlc() { startImport(ImportActivity.DLC); }
+    /** Settings -> Shader: manage imported GLSL fragment shaders. */
+    public static void showShaders() { startImport(ImportActivity.SHADER); }
     private static void startImport(int kind) {
         SDLActivity activity = mSingleton;
         if (activity != null) activity.startActivity(new Intent(activity, ImportActivity.class).putExtra(ImportActivity.KIND, kind));
