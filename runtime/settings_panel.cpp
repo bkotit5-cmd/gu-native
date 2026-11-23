@@ -584,13 +584,14 @@ void section_icon(ImDrawList *dl, int section, ImVec2 c, float size, ImU32 col) 
         diamond(dl, c, h * .12f, col);
         break;
     }
-    case 2:  // (Gameplay: two swords crossed, their guards and pommels)
-        for (int side = -1; side <= 1; side += 2) {
-            dl->AddLine(at(-.8f * side, -.8f), at(.56f * side, .56f), col, w);
-            dl->AddLine(at(.3f * side, .74f), at(.74f * side, .3f), col, w);
-            dl->AddCircleFilled(at(.76f * side, .76f), w * 1.1f, col);
-        }
+    case 2: {  // (Shader: a four-point sparkle)
+        dl->AddLine(at(0, -.9f), at(0, .9f), col, w);
+        dl->AddLine(at(-.9f, 0), at(.9f, 0), col, w);
+        dl->AddLine(at(-.58f, -.58f), at(.58f, .58f), col, w);
+        dl->AddLine(at(-.58f, .58f), at(.58f, -.58f), col, w);
+        diamond(dl, c, h * .2f, col);
         break;
+    }
     case 3:  // (Multiplayer: two hunters side by side)
         for (float x : {-.42f, .42f}) {
             dl->AddCircle(at(x, -.42f), h * .24f, col, 0, w);
@@ -686,10 +687,10 @@ void guide_button(ImDrawList *dl, ImVec2 p, float size, int physical, bool shoul
 // its own with its basic rows, and pages one level down (View::Page) for the rest, each opened by a row with an arrow.
 // The rows come from entries placed on a page (MENU_ENTRY: the page, an order, a function that adds the rows, one that
 // puts their options back as they come for Reset, and when they show), so an option is added, or moved, in one place
-constexpr int PAGES = 7, ABOUT_PAGE = 6;  // (Controls, Graphics & Audio, Gameplay, Multiplayer, Mods & Cheats, System, Credits & Licenses)
-const char *const page_names[PAGES] = {"Controls", "Graphics & Audio", "Gameplay", "Multiplayer", "Mods & Cheats", "System",
+constexpr int PAGES = 7, ABOUT_PAGE = 6;  // (Controls, Graphics & Audio, Shader, Multiplayer, Mods & Cheats, System, Credits & Licenses)
+const char *const page_names[PAGES] = {"Controls", "Graphics & Audio", "Shader", "Multiplayer", "Mods & Cheats", "System",
                                        "Credits & Licenses"};
-const char *const page_ids[PAGES] = {"controls", "graphics", "gameplay", "multiplayer", "mods", "system", "about"};
+const char *const page_ids[PAGES] = {"controls", "graphics", "shader", "multiplayer", "mods", "system", "about"};
 // A page one level down: its id ("graphics/screen"), its title (English: tr), the page its row is on and where among
 // that page's entries; shown (none: always) hides its row, link fills it in (a summary as its value, a help)
 struct MenuPage {
@@ -2584,8 +2585,8 @@ void gather_rows(std::vector<Row> &r) {
 void reset_gather() { s.draft.gather_all = config_defaults().gather_all; }
 // The qol group's places (MENU.md 3.3, 3.5, 3.6): Send all under After a quest on Gameplay; the import on DLC and event
 // quests and the shortcut on System (Android: a desktop's has no such screens, its README says where the files go)
-MENU_ENTRY("gameplay", 65, gather_rows, reset_gather);
-MENU_ENTRY("gameplay", 70, rewards_rows, reset_rewards);
+MENU_ENTRY("internal/gameplay", 65, gather_rows, reset_gather);
+MENU_ENTRY("internal/gameplay", 70, rewards_rows, reset_rewards);
 #ifdef __ANDROID__
 MENU_ENTRY("mods/dlc", 10, extra_import_row);
 MENU_ENTRY("system", 75, shortcut_row);
@@ -2604,7 +2605,7 @@ void flex_row(std::vector<Row> &r) {
                           "si te quedas quieto, la pose se ve entera. Apagado: la pose entera, como lo hace el juego.");
 }
 void reset_flex() { s.draft.flex_cancel = config_defaults().flex_cancel; }
-MENU_ENTRY("gameplay/comforts", 20, flex_row, reset_flex);
+MENU_ENTRY("internal/gameplay/comforts", 20, flex_row, reset_flex);
 // ---------------------------------------------------------------- the pages and their entries (MENU.md)
 // Each option of the menu, as an entry on its page; the pages one level down, each with its row's place on the page
 // above. Other options join with a MENU_ENTRY of their own (MENU.md: the places kept for 1.0's)
@@ -2615,8 +2616,8 @@ MENU_PAGE("controls/keys", "Keyboard and mouse", "controls", 100);
 MENU_PAGE("graphics/picture", "Picture and sound", "graphics", 80);
 MENU_PAGE("graphics/screen", "Screen and HUD", "graphics", 90);
 MENU_PAGE("graphics/advanced", "Advanced", "graphics", 100);
-MENU_PAGE("gameplay/health", "Monster health", "gameplay", 50);
-MENU_PAGE("gameplay/comforts", "Comforts", "gameplay", 90);
+MENU_PAGE("internal/gameplay/health", "Monster health", "internal/gameplay", 50);
+MENU_PAGE("internal/gameplay/comforts", "Comforts", "internal/gameplay", 90);
 MENU_PAGE("multiplayer/chat", "Chat", "multiplayer", 40);  // (1.0: the chat group's, S32)
 MENU_PAGE("multiplayer/friends", "Friends", "multiplayer", 50);
 // (1.0: the cross group's, S36; its row's value says what online play goes through now)
@@ -3234,7 +3235,7 @@ MENU_ENTRY("graphics/picture", 80, rows_graphics_picture_80, reset_graphics_pict
 // the game's whole picture as it reaches the screen (the 3D, its HUD, its menus), not the touch controls or this menu.
 // Every control at 0 is the picture as the game draws it, byte for byte. The picture follows the rows while the menu is
 // open (config_colour_preview, report); Save keeps them, closing without saving puts the saved ones back.
-MENU_PAGE("graphics/colour", "Colour", "graphics", 85);
+MENU_PAGE("internal/colour", "Colour", "internal", 85);
 std::string colour_value(int v, const char *unit = "") {
     char b[32];
     snprintf(b, sizeof b, v > 0 ? "+%d%s" : "%d%s", v, unit);
@@ -3277,7 +3278,7 @@ void rows_graphics_colour_10(std::vector<Row> &r) {
     r.back().help = tr("Puts every colour control back to 0: the picture exactly as the game draws it.");
 }
 void reset_graphics_colour_10() { colour_draft_reset(); }
-MENU_ENTRY("graphics/colour", 10, rows_graphics_colour_10, reset_graphics_colour_10);
+MENU_ENTRY("internal/colour", 10, rows_graphics_colour_10, reset_graphics_colour_10);
 // The HDR output: on a phone, shown only where the window's surface offers HDR10 (vk_surface_hdr10: what Android says of
 // the screen is not enough; an Anbernic RG406V says HDR10 and its surface has none), On or not: an On saved where it can't
 // be stays SDR, harmless, and says so once in the log. A desktop's monitor may have it whatever can be told before the
@@ -3312,7 +3313,7 @@ void reset_graphics_colour_50() {
     Config f = config_defaults(), &c = s.draft;
     c.hdr = f.hdr, c.hdr_brightness = f.hdr_brightness, c.hdr_highlights = f.hdr_highlights;
 }
-MENU_ENTRY("graphics/colour", 50, rows_graphics_colour_50, reset_graphics_colour_50, shown_graphics_colour_50);
+MENU_ENTRY("internal/colour", 50, rows_graphics_colour_50, reset_graphics_colour_50, shown_graphics_colour_50);
 // Graphics & Audio > Screen and HUD (the Display tab of 0.1.9: a phone's window is the screen, at its own resolution)
 #ifndef __ANDROID__
 void rows_graphics_screen_10(std::vector<Row> &r) {
@@ -3467,7 +3468,7 @@ void reset_hunt_aids() {
     c.number_colour = f.number_colour;
     c.monster_bars = f.monster_bars;
 }
-MENU_ENTRY("graphics/screen", 95, hunt_aids_rows, reset_hunt_aids);
+MENU_ENTRY("internal/hunting", 95, hunt_aids_rows, reset_hunt_aids);
 // Graphics & Audio > Advanced
 #ifdef __ANDROID__
 void rows_graphics_advanced_20(std::vector<Row> &r) {  // (an Adreno on a Vulkan 1.1 driver: device.c msaa_floor)
@@ -3530,7 +3531,7 @@ void rows_gameplay_40(std::vector<Row> &r) {
     add_bool(r, "bonus", "Bonus content", &s.draft.bonus_content, ini("BonusContent"));
 }
 void reset_gameplay_40() { s.draft.bonus_content = config_defaults().bonus_content; }
-MENU_ENTRY("gameplay", 40, rows_gameplay_40, reset_gameplay_40);
+MENU_ENTRY("internal/gameplay", 40, rows_gameplay_40, reset_gameplay_40);
 // Gameplay > Monster health
 void rows_gameplay_health_10(std::vector<Row> &r) {
     Config &c = s.draft;
@@ -3602,7 +3603,7 @@ void reset_gameplay_health_10() {
     s.draft.hp = config_defaults().hp;
     quest_keys();
 }
-MENU_ENTRY("gameplay/health", 10, rows_gameplay_health_10, reset_gameplay_health_10);
+MENU_ENTRY("internal/gameplay/health", 10, rows_gameplay_health_10, reset_gameplay_health_10);
 
 // ---- Multiplayer: the internet first (a hub server, the default one already set), then the local network
 void rows_multiplayer_10(std::vector<Row> &r) {
