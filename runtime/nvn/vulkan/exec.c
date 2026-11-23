@@ -27,6 +27,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -7455,13 +7456,79 @@ static VkPipelineLayout present_fx_layout;
 #define PS1_SCAN 0.18f       // (the PS1 filter's scanlines: this much darker between lines, a quarter of it less on every
                              // other picture: 18 % and 13.5 %, as MH4U for Android's)
 
+// A user shader is a single Vulkan GLSL fragment pass. Android stores it under MHGU_HOME/shaders; on desktop
+// the same folder is relative to the app's working directory. active.txt is a basename written by the Shader page.
+static bool user_glsl_suffix(const char *name) {
+    size_t n = strlen(name);
+    if (n < 5 || name[n - 5] != '.') return false;
+    const char *e = name + n - 4;
+    return (e[0] == 'g' || e[0] == 'G') && (e[1] == 'l' || e[1] == 'L') &&
+           (e[2] == 's' || e[2] == 'S') && (e[3] == 'l' || e[3] == 'L');
+}
+static VkShaderModule user_shader_module(void) {
+    static bool attempted;
+    static VkShaderModule module;
+    if (attempted) return module;
+    attempted = true;
+
+    const char *home = getenv("MHGU_HOME");
+    char marker[1400], source_path[1600], name[256];
+    if (home && *home) snprintf(marker, sizeof marker, "%s/shaders/active.txt", home);
+    else snprintf(marker, sizeof marker, "shaders/active.txt");
+
+    FILE *f = fopen(marker, "rb");
+    if (!f) return VK_NULL_HANDLE;
+    size_t n = fread(name, 1, sizeof name - 1, f);
+    fclose(f);
+    name[n] = 0;
+    while (n && (name[n - 1] == '\n' || name[n - 1] == '\r' || name[n - 1] == ' ' || name[n - 1] == '\t'))
+        name[--n] = 0;
+    if (!n || !user_glsl_suffix(name)) {
+        LOG("[shader] active GLSL marker has an invalid filename\n");
+        return VK_NULL_HANDLE;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (name[i] == '/' || name[i] == 92 || name[i] == ':' || name[i] == 0) {
+            LOG("[shader] active GLSL marker contains a path\n");
+            return VK_NULL_HANDLE;
+        }
+    }
+    if (home && *home) snprintf(source_path, sizeof source_path, "%s/shaders/%s", home, name);
+    else snprintf(source_path, sizeof source_path, "shaders/%s", name);
+
+    f = fopen(source_path, "rb");
+    if (!f) {
+        LOG("[shader] selected GLSL file is missing: %s\n", source_path);
+        return VK_NULL_HANDLE;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return VK_NULL_HANDLE; }
+    long bytes = ftell(f);
+    if (bytes <= 0 || bytes > (2L << 20) || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        LOG("[shader] %s: file must be between 1 byte and 2 MB\n", name);
+        return VK_NULL_HANDLE;
+    }
+    char *src = malloc((size_t)bytes + 1);
+    if (!src) { fclose(f); return VK_NULL_HANDLE; }
+    bool read_ok = fread(src, 1, (size_t)bytes, f) == (size_t)bytes;
+    fclose(f);
+    if (!read_ok) { free(src); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
+    src[bytes] = 0;
+
+    module = vk_compile_glsl(src, STAGE_FRAGMENT, name);
+    free(src);
+    if (module) LOG("[shader] user GLSL ready: %s\n", name);
+    else LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
+    return module;
+}
+
 // kind 0: the picture as it is (present.frag); 1: with the colour filter (present.color); 2: filter and HDR10 encoding
 // (present.hdr)
 static VkPipeline present_pipeline(int kind) {
-    static VkPipeline pipes[3];
-    static VkRenderPass made_for[3];
+    static VkPipeline pipes[4];
+    static VkRenderPass made_for[4];
     VkRenderPass rp = vk_window_pass();
-    if (pipes[kind] && made_for[kind] == rp) return pipes[kind];
+    if (made_for[kind] == rp) return pipes[kind];
     if (!present_layout) {
         VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
         VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
@@ -7471,18 +7538,21 @@ static VkPipeline present_pipeline(int kind) {
                                          .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_layout));
     }
-    if (kind && !present_fx_layout) {
+    if ((kind == 1 || kind == 2) && !present_fx_layout) {
         VkPushConstantRange r[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 32}, {VK_SHADER_STAGE_FRAGMENT_BIT, 32, PRESENT_FX_BYTES}};
         VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
                                          .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 2, .pPushConstantRanges = r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_fx_layout));
     }
     VkPipeline *pp = &pipes[kind];
+    VkShaderModule fragment = kind == 3 ? user_shader_module()
+                              : vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag");
+    if (!fragment) return VK_NULL_HANDLE;
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
          .module = vk_builtin_shader("present.vert"), .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-         .module = vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag"), .pName = "main"}};
+         .module = fragment, .pName = "main"}};
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                                                  .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
@@ -7501,8 +7571,13 @@ static VkPipeline present_pipeline(int kind) {
                                        .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vs,
                                        .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds,
                                        .pColorBlendState = &cb, .pDynamicState = &dy,
-                                       .layout = kind ? present_fx_layout : present_layout, .renderPass = rp};
-    VK_CHECK(vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, pp));
+                                       .layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout, .renderPass = rp};
+    VkResult result = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, pp);
+    if (result != VK_SUCCESS) {
+        made_for[kind] = rp;  // don't retry a broken user pipeline on every presented frame
+        LOG("[shader] presentation pipeline %d failed: %d\n", kind, result);
+        return VK_NULL_HANDLE;
+    }
     made_for[kind] = rp;
     return *pp;
 }
@@ -7526,9 +7601,18 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     config_live_colour(&colour);
     const bool hdr = vk_window_hdr();
     const bool ps1 = vk_ps1_on(PS1_SCANLINES);  // ([Graphics] PS1Filter: the scanlines, below)
-    const int kind = hdr ? 2 : colour_neutral(&colour) && !ps1 ? 0 : 1;
-    VkPipeline p = present_pipeline(kind);
-    VkPipelineLayout layout = kind ? present_fx_layout : present_layout;
+    const int stock_kind = hdr ? 2 : colour_neutral(&colour) && !ps1 ? 0 : 1;
+    int kind = stock_kind;
+    VkPipeline p = VK_NULL_HANDLE;
+    if (!hdr && user_shader_module()) {
+        kind = 3;
+        p = present_pipeline(kind);
+    }
+    if (!p) {
+        kind = stock_kind;
+        p = present_pipeline(kind);
+    }
+    VkPipelineLayout layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
     // ([Display] UpscaleFilter Sharp: a 3D picture smaller than the screen that is the game's own frame, its HUD in it - a
     // phone without Low-end mode, a smaller RenderResolution - scaled up by its nearest pixels. With the HUD's picture at
@@ -7541,7 +7625,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &ds, 0, NULL);
     ss.known &= ~SS_SETS;  // (not draw's sets any more)
-    if (kind) {
+    if (kind == 1 || kind == 2) {
         ColourMatrix m;
         colour_matrix(&colour, &m);
         float fx[PRESENT_FX_BYTES / 4] = {0};
