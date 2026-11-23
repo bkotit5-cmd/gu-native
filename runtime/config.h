@@ -25,7 +25,8 @@ enum {
     BIND_A, BIND_B, BIND_X, BIND_Y, BIND_L, BIND_R, BIND_ZL, BIND_ZR, BIND_PLUS, BIND_MINUS,
     BIND_DPAD_UP, BIND_DPAD_DOWN, BIND_DPAD_LEFT, BIND_DPAD_RIGHT, BIND_LSTICK, BIND_RSTICK,
     BIND_ITEM_LEFT, BIND_ITEM_RIGHT,
-    BIND_COMBO1, BIND_COMBO2, BIND_COMBO3, BIND_COMBO4, BIND_COMBO5, BIND_COMBO6, BINDS
+    BIND_COMBO1, BIND_COMBO2, BIND_COMBO3, BIND_COMBO4, BIND_COMBO5, BIND_COMBO6,
+    BIND_COMBO7, BIND_COMBO8, BIND_COMBO9, BIND_COMBO10, BIND_COMBO11, BIND_COMBO12, BIND_COMBO13, BIND_COMBO14, BIND_COMBO15, BINDS
 };
 #define BIND_KEYS 2
 #define KEY_MOUSE 0x1000
@@ -51,12 +52,12 @@ enum {
 enum { TB_ATTACKS, TB_DODGE, TB_GUARD, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD, TB_L, TB_ZL, TB_ZR, TB_L3, TB_R3, TB_STICK,
        TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_ZL, TB_MENU_ZR, TB_MENU_PAD,
        TB_STICK_RUN, TB_GUARD_SLIDE, TB_LOCKON, TB_FLOAT_STICK, TB_MENU_LR, TB_DPAD_MENUS, TB_ARTS_PAD, TB_HOLD_HIDE,
-       TB_SLIDE_BOTH, TB_COUNT };
+       TB_SLIDE_BOTH, TB_MAP_BUTTON, TB_WEAPON_TREE, TB_COUNT };
 // (the item bar's arrows on by default, as in the MH4U port; the Lock-on button too; the floating stick off; the menu
 // pad's L and R and the Hunter Arts' taps with a controller as up to 0.1.9.3, the D-pad in menus off: the menu pad takes
 // its place, as then; the long press that hides the controls on, and a slide between buttons off)
-#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0}
-#define TOUCH_COMBOS 6
+#define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1}
+#define TOUCH_COMBOS 15
 // a controller's buttons a combined button can be on (the less used ones)
 enum { PADB_NONE, PADB_L3, PADB_R3, PADB_MINUS, PADB_GUIDE, PADB_MISC, PADB_PADDLE1, PADB_PADDLE2, PADB_PADDLE3, PADB_PADDLE4,
        PADB_TOUCHPAD, PADB_COUNT };
@@ -221,6 +222,8 @@ typedef struct {
                               // 15-bit colour with a 4x4 ordered dither under the HUD (ps1.c, exec.c vk_ps1_dither), and
                               // over the game's picture, never the overlay, faint scanlines that flicker as an interlaced
                               // screen's (exec.c vk_present_draw, shaders.c present.color)
+    int text_outline;          // [Graphics] TextOutline: dark outline around quest dialogue/help text
+    int hud_shrink;            // [Display] HUDSize: 0..40, 100 minus this value
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -390,7 +393,12 @@ int config_live_reverb(void);           // [Audio] Reverb
 int config_live_send_all_rewards(void); // [Quest Rewards] SendAllRewards (runtime/hle/rewards.c)
 int config_live_gather_all(void);       // [Gathering] GatherAll (runtime/hle/gather.c)
 int config_live_ps1_filter(void);       // [Graphics] PS1Filter (nvn/vulkan/exec.c, ps1.c, fsr.c)
-void config_ps1_test(int on);           // (tests: MHGU_CONTROL "ps1 0|1") as if saved, until the next save
+void config_ps1_test(int on);
+int config_live_text_outline(void);      // [Graphics] TextOutline (nvn/vulkan/exec.c)
+void config_text_outline_test(int on);
+int config_live_hud_shrink(void);        // [Display] HUDSize (runtime/hud_parts.h, nvn/vulkan/exec.c)
+bool config_hud_preview(const Config *draft);
+void config_hud_test(int shrink);           // (tests: MHGU_CONTROL "ps1 0|1") as if saved, until the next save
 // [Colour] (runtime/colour_filter.h ColourAdjust; the window image's pass, nvn/vulkan/exec.c): the saved values, or while
 // the settings menu is open the ones being adjusted there (config_colour_preview), so the picture shows them at once
 struct ColourAdjust;

@@ -50,6 +50,7 @@
 #include "settings_panel.h"
 #include "textinput.h"
 #include "touch.h"
+#include "weapon_tree.h"
 #ifdef __ANDROID__
 #include <jni.h>
 static void report_soon(void);  // (the input report: a device came or went)
@@ -80,6 +81,8 @@ static const int bind_buttons[BINDS] = {
     [BIND_DPAD_DOWN] = BTN_DOWN, [BIND_DPAD_LEFT] = BTN_LEFT, [BIND_DPAD_RIGHT] = BTN_RIGHT, [BIND_LSTICK] = BTN_LSTICK,
     [BIND_RSTICK] = BTN_RSTICK, [BIND_ITEM_LEFT] = -2, [BIND_ITEM_RIGHT] = -2,
     [BIND_COMBO1] = -3, [BIND_COMBO2] = -3, [BIND_COMBO3] = -3, [BIND_COMBO4] = -3, [BIND_COMBO5] = -3, [BIND_COMBO6] = -3,
+    [BIND_COMBO7] = -3, [BIND_COMBO8] = -3, [BIND_COMBO9] = -3, [BIND_COMBO10] = -3, [BIND_COMBO11] = -3,
+    [BIND_COMBO12] = -3, [BIND_COMBO13] = -3, [BIND_COMBO14] = -3, [BIND_COMBO15] = -3,
 };
 static uint32_t mouse_held;  // the mouse buttons held (bit: SDL_BUTTON_*), while captured
 // (the game's menus: the buttons pressed while a menu had the mouse, or held as one took it, are the menu's until let
@@ -988,6 +991,7 @@ void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_FINGER_UP && textinput_active()) textinput_tap();  // (the screen keyboard, if hidden)
     if (e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
         settings_panel_credits_tap();  // (the credits shown at the start close at a tap: runtime/settings_panel.cpp)
+    if (weapon_tree_event(e)) return;
     if (touch_event(e)) return;  // (fingers: the touch controls, or the settings menu's mouse: runtime/touch.cpp)
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
 #ifndef __ANDROID__
@@ -1639,12 +1643,16 @@ void host_input_update(void) {
     if (rstick_hold && plat_now_ns() >= rstick_hold) touch_lock_toggle(), rstick_hold = 0;
     rstick_was = rstick;
     if (rstick && !r3_targets) b &= ~B(BTN_RSTICK);
+    if (!overlay_menu_open()) {
+        b = weapon_tree_buttons(b, lx, ly);
+        if (weapon_tree_is_open()) lx = ly = rx = ry = 0, mouse_moved = false;
+    }
     b |= touch_lock_buttons(b, mouse_moved || (int64_t)rx * rx + (int64_t)ry * ry > 12000LL * 12000);  // (round: as the game's)
     // (with the lock-on on, a bowgun's shot is aimed first, whatever fires it: runtime/touch.cpp; standing still, no stick
     // past a quarter, as 0.1.8 aimed it)
     b = touch_lock_shot(b, (int64_t)lx * lx + (int64_t)ly * ly < 8192LL * 8192);
     // (the touch controls' menu pad: what it alone presses the game reads only while a menu takes input, hle/input.c)
-    uint64_t menu_only = touch_menu_buttons() & ~b;
+    uint64_t menu_only = weapon_tree_is_open() ? 0 : touch_menu_buttons() & ~b;
     b |= menu_only;
 
     // A controller can reach host settings without needing a keyboard.

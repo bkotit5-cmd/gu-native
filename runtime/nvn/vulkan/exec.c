@@ -27,6 +27,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -1878,7 +1879,8 @@ static uint32_t pass_ncolor, pass_samples = 1, pass_w, pass_h;
 static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out from under the game's scissor
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
-static bool ui_scissor_mid;    // wider than 16:9: the draw being set up is a piece kept in the middle 16:9 (the Meownster
+static bool ui_scissor_mid;
+static bool ui_dialogue_piece;  // the bottom-left dialogue/help panel's text draw, for TextOutline
                                // Hunters' map), and its scissor narrows about the middle with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
 static bool ui_window_pass;  // and one of a menu's windows (not the chat's log or the Quest Complete stamp, drawn there too)
@@ -4981,6 +4983,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         anchor = ANCHOR_CENTER;
                         vanchor = pos_y < 240.0f ? V_TOP : pos_y > 480.0f ? V_BOTTOM : V_CENTER;
                     } else if (fabsf(pos_z - 96.0f) < 0.5f) {
+                        ui_dialogue_piece = pos_y >= 360.0f && pos_x < 650.0f;
                         // 96.0: Dialogue & Help text box (bottom left), and the button guides of the village / Hub (top
                         // left and right)
                         anchor = pos_x >= 650.0f ? ANCHOR_RIGHT : ANCHOR_LEFT;
@@ -5211,10 +5214,26 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         if (hud_moves || part_custom) {  // (at 16:9 without the touch controls, left alone: the game's)
                             hud_place_piece(&hp, pos_x, pos_y, &new_pos_x, &new_pos_y);
                             g_hud_shift_dx[part] = hp.shift_x, g_hud_shift_dy[part] = hp.shift_y;
-                            part_k = hp.k, hud_hidden = hp.hidden;
+                            part_k = hp.k * hp.g, hud_hidden = hp.hidden;
                         }
                     }
                     if (!hud_moves && !part_custom) new_pos_x = pos_x, new_pos_y = pos_y;  // (told only: drawn where the game put it)
+                    {
+                        float g = hud_global();
+                        if (g != 1.0f && hunt_hud && !town && part < 0 && !ui_loading_pass) {
+                            float ax = -1.0f, ay = 0.0f;
+                            bool z94 = pos_z < 95.0f, z96 = fabsf(pos_z - 96.0f) < 0.5f, z100 = fabsf(pos_z - 100.0f) < 0.5f;
+                            if (z94) ax = 640.0f, ay = vanchor == V_TOP ? 0.0f : vanchor == V_BOTTOM ? 720.0f : 360.0f;
+                            else if (z96 && pos_y >= 360.0f) ax = 640.0f - 640.0f * s, ay = 720.0f;
+                            else if (z96) ax = pos_x >= 650.0f ? anchor_right : anchor_left, ay = 0.0f;
+                            else if (ui_stamp_pass && fabsf(pos_z - 97.0f) < 0.5f) ax = 640.0f, ay = 360.0f;
+                            else if (z100 && pos_x >= 1000.0f && pos_y > 600.0f && pos_y < 712.0f) ax = anchor_right, ay = 720.0f;
+                            if (ax >= 0.0f) {
+                                new_pos_x = ax + (new_pos_x - ax) * g, new_pos_y = ay + (new_pos_y - ay) * g;
+                                part_k = g, part_custom = true;
+                            }
+                        }
+                    }
                     if (window_piece) hud_window_piece(new_pos_x, new_pos_y);
                     {  // (a part moved from the game's place: where it went, and not drawn while it lies on a menu's window)
                         // (the touch arrangement moves all but the minimap)
@@ -6828,7 +6847,51 @@ static void depth_bias_tell(const float f[3], bool depth_clamp) {
         (int)pass_depth, f[0], f[1], f[2], depth_clamp ? "on" : "off");
 }
 
+// [Graphics] TextOutline (1.0.2, GU#243: the red words of the dialogues hard to read over a bright picture). The game draws
+// a box's text as one draw of its glyph quads, all with its font program (FONT_FS_HASH, sampling the 1024x1024 font page:
+// a hudtrace of the character select's help box, layer 96 at 31,610). For such a draw in the bottom left box (layer 96,
+// ui_dialogue_piece), with the option on, the same draw first 8 more times, moved a pixel or two (the picture's 720 lines
+// to the target's) all round, through a variant of its pipeline that only darkens what is under the letters (colour:
+// zero x src + (1 - src alpha) x dst; alpha kept): a dark outline, the letters' own colours drawn over it as always.
+// Its pipeline is built in the background; until it is there the letters are drawn as they come. Off, nothing here runs
+#define FONT_FS_HASH 0x5ff836c343508db6ull
+static uint64_t prog_fs_hash(Prog *p);
+static bool text_outline(VkCommandBuffer cb, const PipeKey *k, Prog *pr, bool use_index, uint32_t count, uint32_t icount,
+                         uint32_t inst, uint32_t first, int32_t base_vertex, uint32_t base_inst) {
+    if (!ui_dialogue_piece || !config_live_text_outline() || !st.rt.ncolor || !k->ncolor || prog_fs_hash(pr) != FONT_FS_HASH)
+        return false;
+    PipeKey ko = *k;
+    ko.blend_on |= 1;
+    static const uint8_t darken[8] = {0, 1, 6, 1, 2, 1, 1, 0};  // (NVN: src ZERO, dst ONE_MINUS_SRC_ALPHA; alpha ZERO, ONE; ADD)
+    memcpy(&ko.blend[0][1], &darken[1], 6);  // (bytes 1-6: the factors and operations; 0 and 7 the draw's own)
+    bool created = false;
+    Pipe *op = pipe_slot(&ko, &created);
+    if (!op) return false;
+    if (created) {
+        pipe_record(op);
+        run_job(build_pipeline, op);
+    }
+    if (atomic_load(&op->state) != 1) return false;  // (not built yet: these frames without the outline)
+    const VkViewport v = ss.vp;
+    const float px = fmaxf(1.0f, roundf(fabsf(v.height) / 720.0f * 1.5f));
+    static const int8_t dirs[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, op->pipe);
+    for (int i = 0; i < 8; i++) {
+        VkViewport o = v;
+        o.x += dirs[i][0] * px, o.y += dirs[i][1] * px;
+        vkCmdSetViewport(cb, 0, 1, &o);
+        if (!use_index) vkCmdDraw(cb, count, inst, first, base_inst);
+        else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
+    }
+    vkCmdSetViewport(cb, 0, 1, &v);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, ss.pipe);  // (the draw's own, which ss still holds)
+    static int nlog;
+    if (nlog++ < 1) LOG("[hud] text outline: the dialogue box's letters outlined (%.0f px)\n", px);
+    return true;
+}
+
 static void draw(CmdRec *r, bool indexed) {
+    ui_dialogue_piece = false;
     dtex_si[0] = dtex_si[1] = NULL;  // (MHGU_PERF_TEXSCAN: the last draw's textures are no longer this one's)
     if (!st.program) { stat_skipped++; return; }
     if (shadow_skipped()) { stat_skipped++; return; }
@@ -7223,6 +7286,7 @@ static void draw(CmdRec *r, bool indexed) {
             }
         }
     }
+    text_outline(cb, &k, pr, use_index, count, icount, inst, first, base_vertex, base_inst);
     if (!use_index) vkCmdDraw(cb, count, inst, first, base_inst);
     else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
     stat_draws++;
@@ -7455,13 +7519,79 @@ static VkPipelineLayout present_fx_layout;
 #define PS1_SCAN 0.18f       // (the PS1 filter's scanlines: this much darker between lines, a quarter of it less on every
                              // other picture: 18 % and 13.5 %, as MH4U for Android's)
 
-// kind 0: the picture as it is (present.frag); 1: with the colour filter (present.color); 2: filter and HDR10 encoding
-// (present.hdr)
+// A user shader is a single Vulkan GLSL fragment pass. Android stores it under MHGU_HOME/shaders; on desktop
+// the same folder is relative to the app's working directory. active.txt is a basename written by the Shader page.
+static bool user_glsl_suffix(const char *name) {
+    size_t n = strlen(name);
+    if (n < 5 || name[n - 5] != '.') return false;
+    const char *e = name + n - 4;
+    return (e[0] == 'g' || e[0] == 'G') && (e[1] == 'l' || e[1] == 'L') &&
+           (e[2] == 's' || e[2] == 'S') && (e[3] == 'l' || e[3] == 'L');
+}
+static VkShaderModule user_shader_module(void) {
+    static bool attempted;
+    static VkShaderModule module;
+    if (attempted) return module;
+    attempted = true;
+
+    const char *home = getenv("MHGU_HOME");
+    char marker[1400], source_path[1600], name[256];
+    if (home && *home) snprintf(marker, sizeof marker, "%s/shaders/active.txt", home);
+    else snprintf(marker, sizeof marker, "shaders/active.txt");
+
+    FILE *f = fopen(marker, "rb");
+    if (!f) return VK_NULL_HANDLE;
+    size_t n = fread(name, 1, sizeof name - 1, f);
+    fclose(f);
+    name[n] = 0;
+    while (n && (name[n - 1] == '\n' || name[n - 1] == '\r' || name[n - 1] == ' ' || name[n - 1] == '\t'))
+        name[--n] = 0;
+    if (!n || !user_glsl_suffix(name)) {
+        LOG("[shader] active GLSL marker has an invalid filename\n");
+        return VK_NULL_HANDLE;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (name[i] == '/' || name[i] == 92 || name[i] == ':' || name[i] == 0) {
+            LOG("[shader] active GLSL marker contains a path\n");
+            return VK_NULL_HANDLE;
+        }
+    }
+    if (home && *home) snprintf(source_path, sizeof source_path, "%s/shaders/%s", home, name);
+    else snprintf(source_path, sizeof source_path, "shaders/%s", name);
+
+    f = fopen(source_path, "rb");
+    if (!f) {
+        LOG("[shader] selected GLSL file is missing: %s\n", source_path);
+        return VK_NULL_HANDLE;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return VK_NULL_HANDLE; }
+    long bytes = ftell(f);
+    if (bytes <= 0 || bytes > (2L << 20) || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        LOG("[shader] %s: file must be between 1 byte and 2 MB\n", name);
+        return VK_NULL_HANDLE;
+    }
+    char *src = malloc((size_t)bytes + 1);
+    if (!src) { fclose(f); return VK_NULL_HANDLE; }
+    bool read_ok = fread(src, 1, (size_t)bytes, f) == (size_t)bytes;
+    fclose(f);
+    if (!read_ok) { free(src); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
+    src[bytes] = 0;
+
+    module = vk_compile_glsl(src, STAGE_FRAGMENT, name);
+    free(src);
+    if (module) LOG("[shader] user GLSL ready: %s\n", name);
+    else LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
+    return module;
+}
+
+// kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding; 3: user GLSL
+// fragment post-process (SDR only).
 static VkPipeline present_pipeline(int kind) {
-    static VkPipeline pipes[3];
-    static VkRenderPass made_for[3];
+    static VkPipeline pipes[4];
+    static VkRenderPass made_for[4];
     VkRenderPass rp = vk_window_pass();
-    if (pipes[kind] && made_for[kind] == rp) return pipes[kind];
+    if (made_for[kind] == rp) return pipes[kind];
     if (!present_layout) {
         VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
         VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
@@ -7471,18 +7601,21 @@ static VkPipeline present_pipeline(int kind) {
                                          .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_layout));
     }
-    if (kind && !present_fx_layout) {
+    if ((kind == 1 || kind == 2) && !present_fx_layout) {
         VkPushConstantRange r[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 32}, {VK_SHADER_STAGE_FRAGMENT_BIT, 32, PRESENT_FX_BYTES}};
         VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
                                          .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 2, .pPushConstantRanges = r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_fx_layout));
     }
     VkPipeline *pp = &pipes[kind];
+    VkShaderModule fragment = kind == 3 ? user_shader_module()
+                              : vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag");
+    if (!fragment) return VK_NULL_HANDLE;
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
          .module = vk_builtin_shader("present.vert"), .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-         .module = vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag"), .pName = "main"}};
+         .module = fragment, .pName = "main"}};
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                                                  .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
@@ -7501,8 +7634,13 @@ static VkPipeline present_pipeline(int kind) {
                                        .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vs,
                                        .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds,
                                        .pColorBlendState = &cb, .pDynamicState = &dy,
-                                       .layout = kind ? present_fx_layout : present_layout, .renderPass = rp};
-    VK_CHECK(vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, pp));
+                                       .layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout, .renderPass = rp};
+    VkResult result = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, pp);
+    if (result != VK_SUCCESS) {
+        made_for[kind] = rp;  // don't retry a broken user pipeline on every presented frame
+        LOG("[shader] presentation pipeline %d failed: %d\n", kind, result);
+        return VK_NULL_HANDLE;
+    }
     made_for[kind] = rp;
     return *pp;
 }
@@ -7526,9 +7664,18 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     config_live_colour(&colour);
     const bool hdr = vk_window_hdr();
     const bool ps1 = vk_ps1_on(PS1_SCANLINES);  // ([Graphics] PS1Filter: the scanlines, below)
-    const int kind = hdr ? 2 : colour_neutral(&colour) && !ps1 ? 0 : 1;
-    VkPipeline p = present_pipeline(kind);
-    VkPipelineLayout layout = kind ? present_fx_layout : present_layout;
+    const int stock_kind = hdr ? 2 : colour_neutral(&colour) && !ps1 ? 0 : 1;
+    int kind = stock_kind;
+    VkPipeline p = VK_NULL_HANDLE;
+    if (!hdr && user_shader_module()) {
+        kind = 3;
+        p = present_pipeline(kind);
+    }
+    if (!p) {
+        kind = stock_kind;
+        p = present_pipeline(kind);
+    }
+    VkPipelineLayout layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
     // ([Display] UpscaleFilter Sharp: a 3D picture smaller than the screen that is the game's own frame, its HUD in it - a
     // phone without Low-end mode, a smaller RenderResolution - scaled up by its nearest pixels. With the HUD's picture at
@@ -7541,7 +7688,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &ds, 0, NULL);
     ss.known &= ~SS_SETS;  // (not draw's sets any more)
-    if (kind) {
+    if (kind == 1 || kind == 2) {
         ColourMatrix m;
         colour_matrix(&colour, &m);
         float fx[PRESENT_FX_BYTES / 4] = {0};

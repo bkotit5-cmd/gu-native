@@ -52,7 +52,7 @@
     [BIND_DPAD_LEFT] = {SDL_SCANCODE_LEFT}, [BIND_DPAD_RIGHT] = {SDL_SCANCODE_RIGHT},                                 \
     [BIND_LSTICK] = DEFAULT_L3_KEYS, [BIND_RSTICK] = {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT},                          \
     [BIND_ITEM_LEFT] = {KEY_WHEEL_UP}, [BIND_ITEM_RIGHT] = {KEY_WHEEL_DOWN}}
-_Static_assert(BIND_COMBO6 - BIND_COMBO1 + 1 == TOUCH_COMBOS, "a keybind for each combined button");
+_Static_assert(BIND_COMBO15 - BIND_COMBO1 + 1 == TOUCH_COMBOS, "a keybind for each combined button");
 // (the screen's own size, full screen, on a phone and on a PC: the game at the display's resolution, not a smaller
 // picture made bigger)
 #define CONFIG_DEFAULT_SIZE 0, 0
@@ -536,7 +536,7 @@ static const char DEFAULT_INI[] =
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick), for the camera (the right stick)\n"
     "; and for turning the item bar (ItemLeft / ItemRight: one item per press, in a hunt, without holding L).\n"
-    "; Combo1Key to Combo6Key press the buttons of [Touch] Combo1 to Combo6, the combined buttons, while held.\n"
+    "; Combo1Key to Combo15Key press the buttons of [Touch] Combo1 to Combo15, the combined buttons, while held.\n"
     "; Up to two each, separated by a comma, or None.\n"
     "; Mouse buttons: Mouse Left, Mouse Right, Mouse Middle, Mouse 4, Mouse 5, Wheel Up, Wheel Down.\n"
 #ifndef __ANDROID__  // (runtime/host_input.c mod_spent: a phone's keyboard as before)
@@ -925,6 +925,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 #define KEYS(key, bind) {"Keybinds", key, SET_KEYS, F(binds[bind]), 0, 0, 0, NULL, NULL, false, ERR_KEYS}
 static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8};
+static const int hud_shrink_values[] = {0, 5, 10, 15, 20, 25, 30, 35, 40};
 static const int number_size_values[] = {1, 0, 2};  // (Small, Medium, Large: Medium 0, the default of a field left 0)
 const ConfigSetting g_settings[] = {
     {"Display", "Mode", SET_CHOICE, F(display_mode), 0, 0, 0,
@@ -939,6 +940,7 @@ const ConfigSetting g_settings[] = {
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
      ERR_MISC},
     ON_OFF("Display", "FillScreen", fill_screen, true),
+    {"Display", "HUDSize", SET_CHOICE, F(hud_shrink), 0, 0, 0, "100,95,90,85,80,75,70,65,60", hud_shrink_values, false, ERR_MISC},
     {"Display", "GPU", SET_TEXT, F(gpu), sizeof g_config.gpu, 0, 0, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
     ON_OFF("Anti-aliasing", "FXAA", fxaa, false),
@@ -955,6 +957,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Graphics", "FrameGen", frame_gen, false),
     ON_OFF("Graphics", "PS1Filter", ps1_filter, false),
+    ON_OFF("Graphics", "TextOutline", text_outline, false),
     {"Colour", "Hue", SET_INT, F(colour_hue), 0, -180, 180, NULL, NULL, false, ERR_COLOUR},
     {"Colour", "Temperature", SET_INT, F(colour_temperature), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
     {"Colour", "Tint", SET_INT, F(colour_tint), 0, -100, 100, NULL, NULL, false, ERR_COLOUR},
@@ -1025,6 +1028,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Touch", "StickRun", touch_show[TB_STICK_RUN], false),
     ON_OFF("Touch", "GuardSlide", touch_show[TB_GUARD_SLIDE], false),
     ON_OFF("Touch", "ShowLockOn", touch_show[TB_LOCKON], false),
+    ON_OFF("Touch", "ShowMapButton", touch_show[TB_MAP_BUTTON], true),
+    ON_OFF("Touch", "ShowWeaponTree", touch_show[TB_WEAPON_TREE], true),
     ON_OFF("Touch", "FloatingStick", touch_show[TB_FLOAT_STICK], false),
     ON_OFF("Touch", "ShowMenuLR", touch_show[TB_MENU_LR], false),
     ON_OFF("Touch", "DpadInMenus", touch_show[TB_DPAD_MENUS], false),
@@ -1035,6 +1040,7 @@ const ConfigSetting g_settings[] = {
     {"Touch", "Combo" #n "Pad", SET_CHOICE, F(touch_combo_pad[n - 1]), 0, 0, 0, \
      "None,L3,R3,Minus,Guide,Misc,Paddle1,Paddle2,Paddle3,Paddle4,Touchpad", NULL, false, ERR_MISC}
     COMBO(1), COMBO(2), COMBO(3), COMBO(4), COMBO(5), COMBO(6),
+    COMBO(7), COMBO(8), COMBO(9), COMBO(10), COMBO(11), COMBO(12), COMBO(13), COMBO(14), COMBO(15),
     {"Touch", "CameraSpeed", SET_FLOAT, F(touch_camera), 0, 0.2f, 5.0f, NULL, NULL, false, ERR_VIEW},
     {"Touch", "CameraSmoothing", SET_INT, F(touch_cam_smooth), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     {"Touch", "Opacity", SET_FLOAT, F(touch_opacity), 0, 0.05f, 1.0f, NULL, NULL, false, ERR_VIEW},
@@ -1050,6 +1056,9 @@ const ConfigSetting g_settings[] = {
     // (not "Combo1": [Touch] has that key, and a key names one setting whatever its section)
     KEYS("Combo1Key", BIND_COMBO1), KEYS("Combo2Key", BIND_COMBO2), KEYS("Combo3Key", BIND_COMBO3),
     KEYS("Combo4Key", BIND_COMBO4), KEYS("Combo5Key", BIND_COMBO5), KEYS("Combo6Key", BIND_COMBO6),
+    KEYS("Combo7Key", BIND_COMBO7), KEYS("Combo8Key", BIND_COMBO8), KEYS("Combo9Key", BIND_COMBO9),
+    KEYS("Combo10Key", BIND_COMBO10), KEYS("Combo11Key", BIND_COMBO11), KEYS("Combo12Key", BIND_COMBO12),
+    KEYS("Combo13Key", BIND_COMBO13), KEYS("Combo14Key", BIND_COMBO14), KEYS("Combo15Key", BIND_COMBO15),
     {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},

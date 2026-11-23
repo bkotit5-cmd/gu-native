@@ -751,6 +751,49 @@ void pc_import_mod(void) {
     SDL_ShowOpenFileDialog(mod_picked, NULL, ui_window(), filters, 1, NULL, false);
 }
 
+// ---- user GLSL fragment shader (runtime/nvn/vulkan/exec.c): one fullscreen Vulkan post-process pass.
+static void SDLCALL shader_picked(void *ud, const char *const *list, int filter) {
+    (void)ud, (void)filter;
+    if (!list || !list[0]) return;
+    char name[300], to[400];
+    safe_name(base_name(list[0]), name, sizeof name - 1);
+    size_t n = strlen(name);
+    bool glsl = n >= 5 && name[n - 5] == '.' &&
+                (name[n - 4] == 'g' || name[n - 4] == 'G') &&
+                (name[n - 3] == 'l' || name[n - 3] == 'L') &&
+                (name[n - 2] == 's' || name[n - 2] == 'S') &&
+                (name[n - 1] == 'l' || name[n - 1] == 'L');
+    if (!glsl) {
+        if (n + 5 >= sizeof name) { notice("Load GLSL shader", "The filename is too long."); return; }
+        strcat(name, ".glsl");
+    }
+    if (!exists("shaders", SDL_PATHTYPE_DIRECTORY) && !SDL_CreateDirectory("shaders")) {
+        notice("Load GLSL shader", SDL_GetError());
+        return;
+    }
+    snprintf(to, sizeof to, "shaders/%s", name);
+    if (!SDL_CopyFile(list[0], to)) {
+        notice("Load GLSL shader", SDL_GetError());
+        return;
+    }
+    SDL_IOStream *f = SDL_IOFromFile("shaders/active.txt", "wb");
+    bool ok = f && SDL_WriteIO(f, name, strlen(name)) == strlen(name);
+    if (f && !SDL_CloseIO(f)) ok = false;
+    if (!ok) {
+        notice("Load GLSL shader", "The shader was copied, but could not be selected.");
+        return;
+    }
+    char msg[420];
+    snprintf(msg, sizeof msg, "%s will be used after the game restarts.", name);
+    notice("Load GLSL shader", msg);
+}
+
+void pc_import_shader(void) {
+    static SDL_DialogFileFilter filters[1];  // (kept until the dialog answers)
+    filters[0] = (SDL_DialogFileFilter){T("GLSL shaders (.glsl)"), "glsl"};
+    SDL_ShowOpenFileDialog(shader_picked, NULL, ui_window(), filters, 1, NULL, false);
+}
+
 // ---- the layout editor's Add pictures: the player's own pictures for the touch buttons (PNG or BMP, which the runtime
 // reads; Android's PicturesActivity takes JPG and WebP too, made PNG) copied into the layout profiles' images folder,
 // where the editor's window lists them (it reads the folder again while it is open). Their own responsibility

@@ -63,6 +63,11 @@ typedef struct {
 } OverlayTarget;
 void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t);
 
+// Forge 2.0.0: NVN textures registered by plugins for ImGui::Image.
+uint64_t overlay_user_texture_add(uint32_t tex, const void *view);
+bool overlay_user_texture_remove(uint64_t id);
+void overlay_user_textures_prepare(VkImageView (*view_of)(uint32_t tex, const void *view));
+
 #ifdef __cplusplus
 }
 #endif

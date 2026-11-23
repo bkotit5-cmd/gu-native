@@ -35,6 +35,7 @@ void pc_open_log_folder(void);
 void pc_import_cheats(void);
 void pc_import_mod(void);
 void pc_import_pictures(void);  // (the layout profiles' images folder: touch_pictures_dir)
+void pc_import_shader(void);  // copy and activate a user GLSL fragment shader
 void pc_mod_dialog(bool zip);  // (any thread) the dialog the next pc_import_mod opens: the mod's .zip, else its folder
 // The Cheats and Mods tabs (the menu's thread): the cheat files (UTF-8 names, each up to 256 bytes, at most max) in the
 // cheats folders the game reads, one added since the start too, sorted

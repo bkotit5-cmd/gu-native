@@ -584,13 +584,14 @@ void section_icon(ImDrawList *dl, int section, ImVec2 c, float size, ImU32 col) 
         diamond(dl, c, h * .12f, col);
         break;
     }
-    case 2:  // (Gameplay: two swords crossed, their guards and pommels)
-        for (int side = -1; side <= 1; side += 2) {
-            dl->AddLine(at(-.8f * side, -.8f), at(.56f * side, .56f), col, w);
-            dl->AddLine(at(.3f * side, .74f), at(.74f * side, .3f), col, w);
-            dl->AddCircleFilled(at(.76f * side, .76f), w * 1.1f, col);
-        }
+    case 2: {  // (Shader: a four-point sparkle)
+        dl->AddLine(at(0, -.9f), at(0, .9f), col, w);
+        dl->AddLine(at(-.9f, 0), at(.9f, 0), col, w);
+        dl->AddLine(at(-.58f, -.58f), at(.58f, .58f), col, w);
+        dl->AddLine(at(-.58f, .58f), at(.58f, -.58f), col, w);
+        diamond(dl, c, h * .2f, col);
         break;
+    }
     case 3:  // (Multiplayer: two hunters side by side)
         for (float x : {-.42f, .42f}) {
             dl->AddCircle(at(x, -.42f), h * .24f, col, 0, w);
@@ -686,10 +687,10 @@ void guide_button(ImDrawList *dl, ImVec2 p, float size, int physical, bool shoul
 // its own with its basic rows, and pages one level down (View::Page) for the rest, each opened by a row with an arrow.
 // The rows come from entries placed on a page (MENU_ENTRY: the page, an order, a function that adds the rows, one that
 // puts their options back as they come for Reset, and when they show), so an option is added, or moved, in one place
-constexpr int PAGES = 7, ABOUT_PAGE = 6;  // (Controls, Graphics & Audio, Gameplay, Multiplayer, Mods & Cheats, System, Credits & Licenses)
-const char *const page_names[PAGES] = {"Controls", "Graphics & Audio", "Gameplay", "Multiplayer", "Mods & Cheats", "System",
+constexpr int PAGES = 7, ABOUT_PAGE = 6;  // (Controls, Graphics & Audio, Shader, Multiplayer, Mods & Cheats, System, Credits & Licenses)
+const char *const page_names[PAGES] = {"Controls", "Graphics & Audio", "Shader", "Multiplayer", "Mods & Cheats", "System",
                                        "Credits & Licenses"};
-const char *const page_ids[PAGES] = {"controls", "graphics", "gameplay", "multiplayer", "mods", "system", "about"};
+const char *const page_ids[PAGES] = {"controls", "graphics", "shader", "multiplayer", "mods", "system", "about"};
 // A page one level down: its id ("graphics/screen"), its title (English: tr), the page its row is on and where among
 // that page's entries; shown (none: always) hides its row, link fills it in (a summary as its value, a help)
 struct MenuPage {
@@ -954,6 +955,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(number_colour);
     SAME(monster_bars);
     SAME(ps1_filter);
+    SAME(text_outline);
+    SAME(hud_shrink);
     SAME(colour_hue);  // (Graphics & Audio > Colour)
     SAME(colour_temperature);
     SAME(colour_tint);
@@ -2512,6 +2515,23 @@ void cache_clear_row(std::vector<Row> &r) {
         "primeras zonas pueden tironear o mostrar modelos tarde hasta que estén armados. Un segundo toque, antes de que "
         "el juego vuelva a empezar, conserva la caché.");
 }
+// User GLSL shaders: a single fullscreen fragment pass over the resolved game image.
+void user_shader_rows(std::vector<Row> &r) {
+#ifdef __ANDROID__
+    action(r, "shader.glsl", en_es("Load GLSL shader", "Cargar shader GLSL"), []() { ui_request_activity("showShaders"); });
+#else
+    action(r, "shader.glsl", en_es("Load GLSL shader", "Cargar shader GLSL"), []() { pc_import_shader(); });
+#endif
+    r.back().help = en_es(
+        "Loads a custom Vulkan GLSL fragment shader from a .glsl file. It runs as a fullscreen post-process after the game is drawn. "
+        "Use the supplied interface: set 0 binding 0 sampler2D t, location 0 vec2 uv input and location 0 vec4 o output. "
+        "Single-pass shaders only; custom shaders replace the Colour and PS1 presentation filters and are bypassed for HDR output.",
+        "Carga un shader de fragmento Vulkan GLSL desde un archivo .glsl. Se ejecuta como postproceso a pantalla completa después "
+        "del juego. Usa la interfaz indicada: sampler2D t en set 0 binding 0, entrada vec2 uv en location 0 y salida vec4 o "
+        "en location 0. Solo un pase; reemplaza los filtros de Color y PS1 y no se aplica a la salida HDR.");
+}
+MENU_ENTRY("shader", 10, user_shader_rows);
+
 // [Performance] Effects (runtime/hle/effects.c): the game's particle effects, drawn or not, at once
 void effects_row(std::vector<Row> &r) {
     Config &c = s.draft;
@@ -2584,8 +2604,8 @@ void gather_rows(std::vector<Row> &r) {
 void reset_gather() { s.draft.gather_all = config_defaults().gather_all; }
 // The qol group's places (MENU.md 3.3, 3.5, 3.6): Send all under After a quest on Gameplay; the import on DLC and event
 // quests and the shortcut on System (Android: a desktop's has no such screens, its README says where the files go)
-MENU_ENTRY("gameplay", 65, gather_rows, reset_gather);
-MENU_ENTRY("gameplay", 70, rewards_rows, reset_rewards);
+MENU_ENTRY("internal/gameplay", 65, gather_rows, reset_gather);
+MENU_ENTRY("internal/gameplay", 70, rewards_rows, reset_rewards);
 #ifdef __ANDROID__
 MENU_ENTRY("mods/dlc", 10, extra_import_row);
 MENU_ENTRY("system", 75, shortcut_row);
@@ -2604,7 +2624,7 @@ void flex_row(std::vector<Row> &r) {
                           "si te quedas quieto, la pose se ve entera. Apagado: la pose entera, como lo hace el juego.");
 }
 void reset_flex() { s.draft.flex_cancel = config_defaults().flex_cancel; }
-MENU_ENTRY("gameplay/comforts", 20, flex_row, reset_flex);
+MENU_ENTRY("internal/gameplay/comforts", 20, flex_row, reset_flex);
 // ---------------------------------------------------------------- the pages and their entries (MENU.md)
 // Each option of the menu, as an entry on its page; the pages one level down, each with its row's place on the page
 // above. Other options join with a MENU_ENTRY of their own (MENU.md: the places kept for 1.0's)
@@ -2615,8 +2635,8 @@ MENU_PAGE("controls/keys", "Keyboard and mouse", "controls", 100);
 MENU_PAGE("graphics/picture", "Picture and sound", "graphics", 80);
 MENU_PAGE("graphics/screen", "Screen and HUD", "graphics", 90);
 MENU_PAGE("graphics/advanced", "Advanced", "graphics", 100);
-MENU_PAGE("gameplay/health", "Monster health", "gameplay", 50);
-MENU_PAGE("gameplay/comforts", "Comforts", "gameplay", 90);
+MENU_PAGE("internal/gameplay/health", "Monster health", "internal/gameplay", 50);
+MENU_PAGE("internal/gameplay/comforts", "Comforts", "internal/gameplay", 90);
 MENU_PAGE("multiplayer/chat", "Chat", "multiplayer", 40);  // (1.0: the chat group's, S32)
 MENU_PAGE("multiplayer/friends", "Friends", "multiplayer", 50);
 // (1.0: the cross group's, S36; its row's value says what online play goes through now)
@@ -3234,7 +3254,7 @@ MENU_ENTRY("graphics/picture", 80, rows_graphics_picture_80, reset_graphics_pict
 // the game's whole picture as it reaches the screen (the 3D, its HUD, its menus), not the touch controls or this menu.
 // Every control at 0 is the picture as the game draws it, byte for byte. The picture follows the rows while the menu is
 // open (config_colour_preview, report); Save keeps them, closing without saving puts the saved ones back.
-MENU_PAGE("graphics/colour", "Colour", "graphics", 85);
+MENU_PAGE("internal/colour", "Colour", "internal", 85);
 std::string colour_value(int v, const char *unit = "") {
     char b[32];
     snprintf(b, sizeof b, v > 0 ? "+%d%s" : "%d%s", v, unit);
@@ -3277,7 +3297,7 @@ void rows_graphics_colour_10(std::vector<Row> &r) {
     r.back().help = tr("Puts every colour control back to 0: the picture exactly as the game draws it.");
 }
 void reset_graphics_colour_10() { colour_draft_reset(); }
-MENU_ENTRY("graphics/colour", 10, rows_graphics_colour_10, reset_graphics_colour_10);
+MENU_ENTRY("internal/colour", 10, rows_graphics_colour_10, reset_graphics_colour_10);
 // The HDR output: on a phone, shown only where the window's surface offers HDR10 (vk_surface_hdr10: what Android says of
 // the screen is not enough; an Anbernic RG406V says HDR10 and its surface has none), On or not: an On saved where it can't
 // be stays SDR, harmless, and says so once in the log. A desktop's monitor may have it whatever can be told before the
@@ -3312,7 +3332,7 @@ void reset_graphics_colour_50() {
     Config f = config_defaults(), &c = s.draft;
     c.hdr = f.hdr, c.hdr_brightness = f.hdr_brightness, c.hdr_highlights = f.hdr_highlights;
 }
-MENU_ENTRY("graphics/colour", 50, rows_graphics_colour_50, reset_graphics_colour_50, shown_graphics_colour_50);
+MENU_ENTRY("internal/colour", 50, rows_graphics_colour_50, reset_graphics_colour_50, shown_graphics_colour_50);
 // Graphics & Audio > Screen and HUD (the Display tab of 0.1.9: a phone's window is the screen, at its own resolution)
 #ifndef __ANDROID__
 void rows_graphics_screen_10(std::vector<Row> &r) {
@@ -3384,6 +3404,18 @@ void rows_graphics_screen_70(std::vector<Row> &r) {
 }
 void reset_graphics_screen_70() { s.draft.ui_anchor = config_defaults().ui_anchor; }
 MENU_ENTRY("graphics/screen", 70, rows_graphics_screen_70, reset_graphics_screen_70);
+void rows_graphics_screen_75(std::vector<Row> &r) {
+    const int shrink = std::clamp(s.draft.hud_shrink, 0, 40) / 5 * 5;
+    char value[16];
+    snprintf(value, sizeof value, "%d%%", 100 - shrink);
+    Row row;
+    row.id = "hud_size", row.title = tr("HUD size"), row.value = value, row.key = ini("HUDSize");
+    row.number = true;
+    row.adjust = [shrink](int d) { s.draft.hud_shrink = std::clamp(shrink - d * 5, 0, 40); };
+    r.push_back(std::move(row));
+}
+void reset_graphics_screen_75() { s.draft.hud_shrink = config_defaults().hud_shrink; }
+MENU_ENTRY("graphics/screen", 75, rows_graphics_screen_75, reset_graphics_screen_75);
 #ifndef __ANDROID__  // (a desktop's, with the mouse: on a phone the touch layout editor moves them)
 void rows_graphics_screen_80(std::vector<Row> &r) {
     action(r, "hud.edit", tr("Move the HUD"), []() {
@@ -3399,6 +3431,12 @@ void rows_graphics_screen_90(std::vector<Row> &r) {
 }
 void reset_graphics_screen_90() { s.draft.fill_screen = config_defaults().fill_screen; }
 MENU_ENTRY("graphics/screen", 90, rows_graphics_screen_90, reset_graphics_screen_90);
+void rows_graphics_screen_92(std::vector<Row> &r) {
+    add_bool(r, "textoutline", tr("Text outline"), &s.draft.text_outline, ini("TextOutline"));
+    r.back().help = tr("Adds a dark outline around dialogue and help-box letters in quests, making them easier to read over bright backgrounds.");
+}
+void reset_graphics_screen_92() { s.draft.text_outline = config_defaults().text_outline; }
+MENU_ENTRY("graphics/screen", 92, rows_graphics_screen_92, reset_graphics_screen_92);
 // The hunting aids (1.0.1, the owner's: "everything off by default, so whoever wants it turns it on"; MH4U for Android has
 // the first two with the same names and texts): runtime/hunt_aids.h, hle/huntaids.c, hunt_overlay.cpp
 void hunt_aids_rows(std::vector<Row> &r) {
@@ -3467,7 +3505,7 @@ void reset_hunt_aids() {
     c.number_colour = f.number_colour;
     c.monster_bars = f.monster_bars;
 }
-MENU_ENTRY("graphics/screen", 95, hunt_aids_rows, reset_hunt_aids);
+MENU_ENTRY("internal/hunting", 95, hunt_aids_rows, reset_hunt_aids);
 // Graphics & Audio > Advanced
 #ifdef __ANDROID__
 void rows_graphics_advanced_20(std::vector<Row> &r) {  // (an Adreno on a Vulkan 1.1 driver: device.c msaa_floor)
@@ -3530,7 +3568,7 @@ void rows_gameplay_40(std::vector<Row> &r) {
     add_bool(r, "bonus", "Bonus content", &s.draft.bonus_content, ini("BonusContent"));
 }
 void reset_gameplay_40() { s.draft.bonus_content = config_defaults().bonus_content; }
-MENU_ENTRY("gameplay", 40, rows_gameplay_40, reset_gameplay_40);
+MENU_ENTRY("internal/gameplay", 40, rows_gameplay_40, reset_gameplay_40);
 // Gameplay > Monster health
 void rows_gameplay_health_10(std::vector<Row> &r) {
     Config &c = s.draft;
@@ -3602,7 +3640,7 @@ void reset_gameplay_health_10() {
     s.draft.hp = config_defaults().hp;
     quest_keys();
 }
-MENU_ENTRY("gameplay/health", 10, rows_gameplay_health_10, reset_gameplay_health_10);
+MENU_ENTRY("internal/gameplay/health", 10, rows_gameplay_health_10, reset_gameplay_health_10);
 
 // ---- Multiplayer: the internet first (a hub server, the default one already set), then the local network
 void rows_multiplayer_10(std::vector<Row> &r) {
@@ -4076,20 +4114,20 @@ const char *const TB_TITLES[TB_COUNT] = {"Attacks (A / X)", "Evade (B)", "Guard 
                                          "Crouching fire / coating", "Ammo arrows", "Item bar arrows", "ZL in menus", "ZR in menus",
                                          "Menu pad", "Run with the stick", "Keep guarding while sliding", "Lock-on button", "Floating stick",
                                          "L and R in menus", "D-pad in menus", "Hunter Arts with a controller",
-                                         "Long press hides the controls", "Slide between buttons: both pressed"};
+                                         "Long press hides the controls", "Slide between buttons: both pressed", "Map button: show / hide minimap", "Weapon tree button"};
 const char *const TB_KEYS[TB_COUNT] = {"ShowAttacks", "ShowDodge", "ShowGuard", "ShowSheathe", "ShowPlus", "ShowMinus", "ShowDpad",
                                        "ShowL", "ShowZL", "ShowZR", "ShowL3", "ShowR3", "ShowStick", "ShowRanged", "ShowFire",
                                        "ShowSecond", "ShowAim", "ShowRangedSpecial", "ShowAmmo", "ShowItemArrows", "ShowMenuZL",
                                        "ShowMenuZR", "ShowMenuPad", "StickRun", "GuardSlide", "ShowLockOn", "FloatingStick",
-                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController", "HoldToHide", "SlideBoth"};
+                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController", "HoldToHide", "SlideBoth", "ShowMapButton", "ShowWeaponTree"};
 // (their rows' order: each way of a button by it - keeping the guard by Guard, the run and the floating stick by the stick,
 // the D-pad in menus by the D-pad -, the menu pad before the tabs that go with it; the Hunter Arts' taps with a controller
 // last, a controller's way. The floating stick and the Arts' taps have rows of their own elsewhere: tb_elsewhere)
 const int TB_ORDER[TB_COUNT] = {TB_ATTACKS, TB_DODGE, TB_GUARD, TB_GUARD_SLIDE, TB_SLIDE_BOTH, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD,
                                 TB_DPAD_MENUS, TB_L, TB_ZL, TB_LOCKON, TB_ZR, TB_L3, TB_R3, TB_STICK, TB_FLOAT_STICK, TB_STICK_RUN,
                                 TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_PAD, TB_MENU_LR,
-                                TB_MENU_ZL, TB_MENU_ZR, TB_ARTS_PAD, TB_HOLD_HIDE};
-static_assert(TB_COUNT == 32, "TB_ORDER: a place for each of the touch settings");
+                                TB_MENU_ZL, TB_MENU_ZR, TB_ARTS_PAD, TB_HOLD_HIDE, TB_MAP_BUTTON, TB_WEAPON_TREE};
+static_assert(TB_COUNT == 34, "TB_ORDER: a place for each of the touch settings");
 int s_combo;  // the combined button being edited
 void touch_button_rows(std::vector<Row> &r) {
     Config &c = s.draft;
@@ -4112,6 +4150,8 @@ void touch_button_rows(std::vector<Row> &r) {
                 r.back().help = tr("The menu pad's L and R tabs above it, which turn the menus' pages (ZL and ZR when the game's options turn pages with them). Off: the menu pad without them.");
             if (i == TB_ARTS_PAD)
                 r.back().help = tr("With a controller connected (the touch controls hidden), a tap on a Hunter Art's panel performs it, with what your Control Type uses for it. Off: the panel takes no taps then.");
+            if (i == TB_MAP_BUTTON)
+                r.back().help = tr("On: a button in a hunt hides or shows the minimap. Move and resize it with Customize controls and HUD. Off: no map button.");
             if (i == TB_SLIDE_BOTH)  // (1.0.1, both platforms; the MH4U port's the same name and default)
                 r.back().help = tr("On: a thumb that slides from one button onto another keeps both pressed, as two fingers would: R onto B as onto X, Evade onto an attack, one attack onto the other, any of A, B, X, Y and the shoulder buttons onto another, the combined buttons too. Slid back onto the button it started on, that one alone again. Never in the game's menus. Off: the slides of 1.0.");
 #ifndef __ANDROID__  // (the default ini says nothing of these two; a phone's: PHONE_HELP)
@@ -6095,7 +6135,8 @@ void report(bool *open) {
 #endif
     capture_wheel = is_capturing && s.capture_bind >= 0;  // (the capture view doesn't scroll)
     textinput_menu_keyboard(*open && s.view == View::Keyboard && s.keyboard.phone);  // (its key asked for it: textinput.c)
-    config_colour_preview(*open ? &s.draft : nullptr);  // (Graphics & Audio > Colour: the picture follows the draft now)
+    config_colour_preview(*open ? &s.draft : nullptr);
+    if (config_hud_preview(*open ? &s.draft : nullptr)) touch_hud_step();  // (Graphics & Audio > Colour: the picture follows the draft now)
     if (!*open)
         s.editing = false;
 }
@@ -6670,7 +6711,8 @@ void settings_panel_before_frame(bool open) {
     }
 }
 void settings_panel_idle(void) {
-    config_colour_preview(nullptr);  // (closed: the saved colour)
+    config_colour_preview(nullptr);
+    if (config_hud_preview(nullptr)) touch_hud_step();  // (closed: the saved colour)
     s.editing = false;
     textinput_menu_keyboard(false);
     is_dirty = false;

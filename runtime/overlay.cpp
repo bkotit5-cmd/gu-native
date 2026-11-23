@@ -45,6 +45,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "settings_locale.h"
 #include "settings_panel.h"
 #include "verify.h"
+#include "weapon_tree.h"
 
 #define LOG(...) rt_logf(__VA_ARGS__)  // (Windows: queued, the log's own thread writes it)
 
@@ -862,6 +863,7 @@ void overlay_frame(void *cpu) {
     // is in the background, its clock held: runtime/hle/vi.c)
     vi_pause_game();
     huntaids_frame();  // (the hunting aids' step, after the game's update: runtime/hle/huntaids.c)
+    weapontree_frame();  // update the Smithy weapon-tree snapshot when its hook has data
     frame_once(cpu);
 #ifdef __ANDROID__
     // (the settings menu open, playing alone: the game waits here, as on the console's HOME menu - gu-native #94. The menu
@@ -928,7 +930,8 @@ static void frame_once(void *cpu) {
     if (stats) perfstats_tick();  // (every frame, built or its copy drawn again: the longest gap is between the game's frames)
     bool hunt = huntaids_any();  // (the hunting aids' numbers or bars: runtime/hunt_overlay.cpp)
     bool fading = settings_panel_fading();  // (the settings menu closed a moment ago: fading out, taking no input)
-    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !hunt && !credits && !fading) {  // (nothing to draw)
+    bool tree = weapon_tree_drawing();
+    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !hunt && !credits && !fading && !tree) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear(), g_snap_seq++;
         apply_input(io);  // (keep the queue short)
@@ -947,7 +950,7 @@ static void frame_once(void *cpu) {
     // frames a minute drawn again, now ~3,300; the overlay's share of this thread 3.8 % -> 0.3 % (about 0.4 ms a frame);
     // =2 compared 6,659 such frames, none differed. MHGU_PERF_STATS_REUSE=0: frames with the plate built, as before
     bool alone = touch && !open && !free_render && !notice && !plate && !chat && !chat_over && !credits && !fading && !g_modal_open &&
-                 !g_settings_open && !g_forge_open && !settings_panel_confirming();
+                 !g_settings_open && !g_forge_open && !settings_panel_confirming() && !tree;
     bool same = g_perf_overlay_reuse && alone && g_reuse_last && g_snap.Valid && w == g_reuse_w && h == g_reuse_h &&
                 now - g_reuse_built_ns < 1000000000ull && (!stats || (g_perf_stats_reuse && perfstats_same((float)w, (float)h))) &&
                 hunt_overlay_unchanged((float)w, (float)h) && touch_draw_unchanged((float)w, (float)h);
@@ -1083,8 +1086,9 @@ static void frame_once(void *cpu) {
     if (chat && !g_modal_open) draw_chat(line, now, scale);
     if (stats) perfstats_draw((float)w, (float)h);  // (under the touch controls, on the same background list)
     hunt_overlay_draw((float)w, (float)h);  // (the hunting aids' numbers and bars: after the plate, under the controls)
-    if (touch) touch_draw((float)w, (float)h);  // (the touch controls: runtime/touch.cpp)
+    if (touch && !weapon_tree_is_open()) touch_draw((float)w, (float)h);  // tree owns touch while open
     if (chat_over) chat_port_draw((float)w, (float)h);  // (over them: the chat button, the last lines)
+    if (tree && !g_settings_open) weapon_tree_draw((float)w, (float)h);
     ImGui::Render();
     settings_panel_after_render(ImGui::GetDrawData());
 
@@ -1170,6 +1174,107 @@ static void vk_check(VkResult r) {
     if (r < 0) LOG("[forge] ImGui Vulkan error %d\n", (int)r);
 }
 
+// Forge 2.0.0: map guest NVN textures to Vulkan descriptors used by ImGui::Image.
+#define USER_TEX_MAX 256
+#define USER_TEX_TAG 0x7E57000000000000ull
+#define USER_TEX_TAG_MASK 0xFFFF000000000000ull
+#define USER_TEX_FREE_AFTER 10
+struct UserTex {
+    bool live;
+    uint32_t tex;
+    bool has_view;
+    uint8_t view[0x28];
+    VkImageView vk;
+    VkImageView set_view;
+    VkDescriptorSet set;
+};
+static std::mutex g_user_tex_lock;
+static UserTex g_user_tex[USER_TEX_MAX];
+struct DeadUserTexSet { VkDescriptorSet set; uint64_t at; };
+static std::vector<DeadUserTexSet> g_dead_user_tex_sets;
+static uint64_t g_user_tex_draws;
+
+extern "C" uint64_t overlay_user_texture_add(uint32_t tex, const void *view) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (int i = 0; i < USER_TEX_MAX; i++) {
+        UserTex &u = g_user_tex[i];
+        if (u.live) continue;
+        u = UserTex{};
+        u.live = true;
+        u.tex = tex;
+        u.has_view = view != nullptr;
+        if (view) memcpy(u.view, view, sizeof u.view);
+        return USER_TEX_TAG | (uint64_t)(i + 1);
+    }
+    return 0;
+}
+
+static UserTex *user_tex_of(uint64_t id) {
+    if ((id & USER_TEX_TAG_MASK) != USER_TEX_TAG) return nullptr;
+    uint64_t i = (id & ~USER_TEX_TAG_MASK) - 1;
+    return i < USER_TEX_MAX && g_user_tex[i].live ? &g_user_tex[i] : nullptr;
+}
+
+extern "C" bool overlay_user_texture_remove(uint64_t id) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    UserTex *u = user_tex_of(id);
+    if (!u) return false;
+    u->live = false;
+    u->vk = VK_NULL_HANDLE;
+    if (u->set) g_dead_user_tex_sets.push_back({u->set, g_user_tex_draws});
+    u->set = VK_NULL_HANDLE;
+    u->set_view = VK_NULL_HANDLE;
+    return true;
+}
+
+extern "C" void overlay_user_textures_prepare(VkImageView (*view_of)(uint32_t tex, const void *view)) {
+    if (!view_of) return;
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (UserTex &u : g_user_tex)
+        if (u.live) u.vk = view_of(u.tex, u.has_view ? u.view : nullptr);
+}
+
+#ifndef MHGU_NULL_BACKEND
+static void user_tex_backend_reset(void) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (UserTex &u : g_user_tex) u.set = VK_NULL_HANDLE, u.set_view = VK_NULL_HANDLE;
+    g_dead_user_tex_sets.clear();  // the old descriptor pool was destroyed by ImGui_ImplVulkan_Shutdown
+}
+
+static void user_tex_sets(void) {
+    g_user_tex_draws++;
+    for (UserTex &u : g_user_tex) {
+        if (!u.live || !u.vk || u.vk == u.set_view) continue;
+        if (u.set) g_dead_user_tex_sets.push_back({u.set, g_user_tex_draws});
+        u.set = ImGui_ImplVulkan_AddTexture(u.vk, VK_IMAGE_LAYOUT_GENERAL);
+        u.set_view = u.set ? u.vk : VK_NULL_HANDLE;
+    }
+    size_t k = 0;
+    for (DeadUserTexSet &d : g_dead_user_tex_sets) {
+        if (g_user_tex_draws - d.at > USER_TEX_FREE_AFTER) ImGui_ImplVulkan_RemoveTexture(d.set);
+        else g_dead_user_tex_sets[k++] = d;
+    }
+    g_dead_user_tex_sets.resize(k);
+}
+
+static void overlay_render_with_user_textures(ImDrawData *dd, VkCommandBuffer cb) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    user_tex_sets();
+    struct Patched { ImDrawCmd *cmd; ImTextureID id; ImVec4 clip; };
+    std::vector<Patched> patched;
+    for (ImDrawList *list : dd->CmdLists)
+        for (ImDrawCmd &cmd : list->CmdBuffer) {
+            if (cmd.UserCallback || cmd.TexRef._TexData || (cmd.TexRef._TexID & USER_TEX_TAG_MASK) != USER_TEX_TAG) continue;
+            patched.push_back({&cmd, cmd.TexRef._TexID, cmd.ClipRect});
+            UserTex *u = user_tex_of(cmd.TexRef._TexID);
+            if (u && u->set && u->vk) cmd.TexRef._TexID = (ImTextureID)(uintptr_t)u->set;
+            else cmd.ClipRect = ImVec4(0, 0, 0, 0);
+        }
+    ImGui_ImplVulkan_RenderDrawData(dd, cb);
+    for (Patched &p : patched) p.cmd->TexRef._TexID = p.id, p.cmd->ClipRect = p.clip;
+}
+#endif
+
 void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
 #ifndef MHGU_NULL_BACKEND
     if (!g_enabled) return;
@@ -1179,6 +1284,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         if (g_pass) {
             g_ready = false;
             ImGui_ImplVulkan_Shutdown();
+            user_tex_backend_reset();
         }
         ImGui_ImplVulkan_InitInfo info = {};
         info.ApiVersion = VK_API_VERSION_1_2;
@@ -1217,7 +1323,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
     std::lock_guard<std::mutex> l(g_snap_lock);
     if (!g_snap.Valid || !g_snap.CmdListsCount) return;
     if (!t->turn) {
-        ImGui_ImplVulkan_RenderDrawData(&g_snap, cb);
+        overlay_render_with_user_textures(&g_snap, cb);
         return;
     }
     // The window image drawn turned for the panel (nvn/vulkan/device.c, MHGU_PERF_PREROTATE): a turned copy of the
@@ -1266,6 +1372,6 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         rot.Valid = true;
         rot_gen = g_snap_gen, rot_turn = t->turn;
     }
-    ImGui_ImplVulkan_RenderDrawData(&rot, cb);
+    overlay_render_with_user_textures(&rot, cb);
 #endif
 }

@@ -37,18 +37,16 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Ajustes -> Trucos / Mods: lo que el juego lee de las carpetas cheats/, mods/ y dlc/ de la app (Android/data, que en
- * Android 11 o más no se puede abrir con un explorador de archivos), copiado desde donde el jugador lo tenga:
- *   - trucos: archivos .txt en el formato de Atmosphere (runtime/cheats.c), a cheats/;
- *   - un mod: una carpeta con romfs/ o exefs/ (o los archivos de nativeNX), o un .zip de ella, a mods/<nombre>/
- *     (runtime/mods.c; su orden y si está activo, en la página Mods);
- *   - DLC: cada carpeta con un DLC.dlcp, a dlc/<id del título o número>/ (runtime/services/dlc.c).
- * Se lee al arrancar el juego: al cerrar, si algo cambió, se reinicia (como DriverActivity). La app ya tiene acceso a todos
- * los archivos (lo pide la pantalla de la carpeta del juego), así que el explorador es propio, con el estilo del juego.
+ * Ajustes -> Trucos / Mods / Shader: importa trucos, mods, DLC y shaders GLSL desde el almacenamiento del jugador.
+ * Los trucos, mods y DLC conservan sus carpetas y formatos de siempre. Los shaders GLSL se copian a shaders/ dentro de
+ * la carpeta privada de la app; active.txt guarda solo el nombre del shader seleccionado. Se compilan en el próximo
+ * inicio del renderer Vulkan como un pase de fragmento a pantalla completa.
+ * El navegador es propio, con el estilo del juego, porque Android 11 o más no permite abrir Android/data con un
+ * explorador de archivos normal. La app ya tiene el acceso necesario (lo pide la pantalla de la carpeta del juego).
  */
 public class ImportActivity extends Activity {
     public static final String KIND = "kind";
-    public static final int CHEATS = 0, MOD = 1, DLC = 2;
+    public static final int CHEATS = 0, MOD = 1, DLC = 2, SHADER = 3;
     private static final String TAG = "MHGU";
     private static final int WINE = Color.rgb(38, 18, 14), PANEL = Color.rgb(26, 12, 9), CREAM = Color.rgb(240, 228, 200);
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
@@ -63,7 +61,7 @@ public class ImportActivity extends Activity {
     private Dialog browser;
 
     private File home() { return AppHome.home(this); }
-    private String sub() { return kind == CHEATS ? "cheats" : kind == MOD ? "mods" : "dlc"; }
+    private String sub() { return kind == CHEATS ? "cheats" : kind == MOD ? "mods" : kind == SHADER ? "shaders" : "dlc"; }
 
     /** The game's folder (GameFolderActivity's choice), or null. */
     private File gameFolder() {
@@ -82,6 +80,11 @@ public class ImportActivity extends Activity {
      * there by hand with any file manager); the app's own folder if the game folder can't be written (an SD card).
      */
     private File target() {
+        if (kind == SHADER) {
+            File dir = new File(home(), "shaders");
+            if (!dir.isDirectory()) dir.mkdirs();
+            return dir;
+        }
         File game = gameFolder();
         if (game != null) {
             File in = new File(game, sub());
@@ -129,12 +132,13 @@ public class ImportActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         es = "es".equals(Locale.getDefault().getLanguage());
         kind = getIntent().getIntExtra(KIND, CHEATS);
+        if (kind < CHEATS || kind > SHADER) kind = CHEATS;
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(24), dp(14), dp(24), dp(16));
         box.setBackground(plate(WINE));
-        String[] titles = es ? new String[] {"TRUCOS", "MODS", "DLC"} : new String[] {"CHEATS", "MODS", "DLC"};
+        String[] titles = es ? new String[] {"TRUCOS", "MODS", "DLC", "SHADERS"} : new String[] {"CHEATS", "MODS", "DLC", "SHADERS"};
         TextView title = text(titles[kind], 20, GOLD, true);
         title.setGravity(Gravity.CENTER);
         box.addView(title);
@@ -145,14 +149,20 @@ public class ImportActivity extends Activity {
             "Una carpeta de mod con romfs o exefs adentro, o un .zip de esa carpeta. Después se ordenan y se activan en la "
                 + "página Mods. Los parches del código (exefs) funcionan, pero esa parte del juego corre más lenta.",
             "Tus propios DLC del juego: la carpeta de cada uno tiene un archivo DLC.dlcp. Elige una carpeta y se copian "
-                + "todos los que haya adentro. Después, en el juego: menú principal, Descarga. Es experimental."}
+                + "todos los que haya adentro. Después, en el juego: menú principal, Descarga. Es experimental.",
+            "Un shader de fragmento Vulkan GLSL de un solo pase (.glsl). Debe leer la imagen del juego con sampler2D t en set 0, binding 0, "
+                + "recibir las coordenadas UV en location 0 y escribir vec4 o en location 0. Se compila al iniciar el juego. "
+                + "No es un preset de ReShade ni un shader de varios pases."}
             : new String[] {
             "Cheat .txt files in Atmosphere's format, for version 1.4.0 (its build id is FB08F1D20FD1204F). Then turn them on "
                 + "one by one on the Cheats page. Those that change the game's code work, but that part of the game runs slower.",
             "A mod's folder with romfs or exefs in it, or a .zip of that folder. Then order and turn them on on the Mods page. "
                 + "Code patches (exefs) work, but that part of the game runs slower.",
             "Your own DLC of the game: each one's folder holds a DLC.dlcp file. Choose a folder and every one in it is copied. "
-                + "Then, in the game: main menu, Download. It is experimental."};
+                + "Then, in the game: main menu, Download. It is experimental.",
+            "A single-pass Vulkan GLSL fragment shader (.glsl). It must sample the game image from set 0, binding 0 as sampler2D t, "
+                + "read the fullscreen UV input at location 0, and write vec4 o at location 0. It is compiled when the game starts. "
+                + "This is not a ReShade preset or a multi-pass shader."};
         TextView body = text(bodies[kind], 14, CREAM, false);
         body.setPadding(0, dp(10), 0, dp(6));
         body.setLineSpacing(dp(1), 1);
@@ -174,8 +184,8 @@ public class ImportActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(12), 0, 0);
-        String[] adds = es ? new String[] {"Agregar trucos", "Agregar un mod", "Agregar DLC"}
-                           : new String[] {"Add cheats", "Add a mod", "Add DLC"};
+        String[] adds = es ? new String[] {"Agregar trucos", "Agregar un mod", "Agregar DLC", "Agregar shader GLSL"}
+                           : new String[] {"Add cheats", "Add a mod", "Add DLC", "Add GLSL shader"};
         add = button(adds[kind], true, BRONZE);
         add.setOnClickListener(v -> openBrowser(null));
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
@@ -210,6 +220,7 @@ public class ImportActivity extends Activity {
 
     /** What is installed: each with its Remove. */
     private void refresh() {
+        if (kind == SHADER) { refreshShaders(); return; }
         list.removeAllViews();
         File[] all = target().listFiles(f -> !f.getName().startsWith("_") && !f.getName().startsWith(".")
                 && (kind == CHEATS ? f.isFile() && f.getName().toLowerCase(Locale.ROOT).endsWith(".txt") : f.isDirectory()));
@@ -232,6 +243,106 @@ public class ImportActivity extends Activity {
                 delete(f);
                 changed();
                 refresh();
+            });
+            row.addView(remove, new LinearLayout.LayoutParams(dp(92), dp(42)));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, dp(3), 0, dp(3));
+            list.addView(row, lp);
+        }
+    }
+
+    /** Imported shaders stay inactive until Use is pressed. The marker contains only a basename, never a path. */
+    private String activeShaderName() {
+        File marker = new File(target(), "active.txt");
+        try (FileInputStream in = new FileInputStream(marker)) {
+            byte[] b = new byte[256];
+            int n = in.read(b);
+            String name = n > 0 ? new String(b, 0, n, "UTF-8").trim() : "";
+            if (name.isEmpty() || name.indexOf('/') >= 0 || name.indexOf((char) 92) >= 0
+                    || !name.toLowerCase(Locale.ROOT).endsWith(".glsl")) return "";
+            return name;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void writeActiveShader(String name) throws IOException {
+        File dir = target();
+        File marker = new File(dir, "active.txt");
+        if (name == null || name.isEmpty()) {
+            if (marker.exists() && !marker.delete()) throw new IOException("can't clear active shader");
+            return;
+        }
+        if (name.indexOf('/') >= 0 || name.indexOf((char) 92) >= 0 || !name.toLowerCase(Locale.ROOT).endsWith(".glsl"))
+            throw new IOException("invalid shader filename");
+        File tmp = new File(dir, "active.txt.tmp");
+        try (OutputStream out = new FileOutputStream(tmp)) { out.write(name.getBytes("UTF-8")); }
+        if (marker.exists() && !marker.delete()) { tmp.delete(); throw new IOException("can't replace active shader"); }
+        if (!tmp.renameTo(marker)) { tmp.delete(); throw new IOException("can't write active shader"); }
+    }
+
+    private void refreshShaders() {
+        list.removeAllViews();
+        String active = activeShaderName();
+        LinearLayout current = new LinearLayout(this);
+        current.setGravity(Gravity.CENTER_VERTICAL);
+        TextView state = text(active.isEmpty() ? (es ? "Shader activo: ninguno" : "Active shader: none")
+                                                : (es ? "Activo: " : "Active: ") + active, 13, GOLD, true);
+        state.setSingleLine(true);
+        current.addView(state, new LinearLayout.LayoutParams(0, dp(42), 1));
+        if (!active.isEmpty()) {
+            Button disable = button(es ? "Desactivar" : "Disable", false, BRONZE);
+            disable.setOnClickListener(v -> {
+                if (busy) return;
+                try {
+                    writeActiveShader(null);
+                    changed();
+                    refreshShaders();
+                    say(es ? "Shader desactivado. Reinicia el juego." : "Shader disabled. Restart the game.", false);
+                } catch (IOException e) { say(e.getMessage(), true); }
+            });
+            current.addView(disable, new LinearLayout.LayoutParams(dp(112), dp(42)));
+        }
+        list.addView(current);
+
+        File[] all = target().listFiles(f -> f.isFile() && f.getName().toLowerCase(Locale.ROOT).endsWith(".glsl"));
+        if (all == null || all.length == 0) {
+            TextView none = text(es ? "(todavía no hay shaders GLSL)" : "(no GLSL shaders imported yet)", 13, CREAM, false);
+            none.setGravity(Gravity.CENTER);
+            none.setPadding(0, dp(8), 0, dp(8));
+            list.addView(none);
+            return;
+        }
+        Arrays.sort(all);
+        for (File f : all) {
+            boolean isActive = f.getName().equals(active);
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView name = text((isActive ? "◆  " : "◇  ") + f.getName(), 14, isActive ? GOLD : CREAM, isActive);
+            name.setSingleLine(true);
+            row.addView(name, new LinearLayout.LayoutParams(0, dp(42), 1));
+            Button use = button(isActive ? (es ? "Activo" : "Active") : (es ? "Usar" : "Use"), isActive, BRONZE);
+            use.setEnabled(!isActive && !busy);
+            use.setOnClickListener(v -> {
+                if (busy) return;
+                try {
+                    writeActiveShader(f.getName());
+                    changed();
+                    refreshShaders();
+                    say((es ? "Seleccionado: " : "Selected: ") + f.getName()
+                            + (es ? ". Reinicia el juego para aplicarlo." : ". Restart the game to apply it."), false);
+                } catch (IOException e) { say(e.getMessage(), true); }
+            });
+            row.addView(use, new LinearLayout.LayoutParams(dp(88), dp(42)));
+            Button remove = button(es ? "Quitar" : "Remove", false, BRONZE);
+            remove.setEnabled(!busy);
+            remove.setOnClickListener(v -> {
+                if (busy) return;
+                try {
+                    if (f.getName().equals(activeShaderName())) { writeActiveShader(null); changed(); }
+                    delete(f);
+                    refreshShaders();
+                } catch (Exception e) { say(e.getMessage(), true); }
             });
             row.addView(remove, new LinearLayout.LayoutParams(dp(92), dp(42)));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -279,7 +390,7 @@ public class ImportActivity extends Activity {
 
     private boolean takes(File f) {
         String n = f.getName().toLowerCase(Locale.ROOT);
-        return kind == CHEATS ? n.endsWith(".txt") : kind == MOD ? n.endsWith(".zip") : n.equals("dlc.dlcp");
+        return kind == CHEATS ? n.endsWith(".txt") : kind == MOD ? n.endsWith(".zip") : kind == SHADER ? n.endsWith(".glsl") : n.equals("dlc.dlcp");
     }
 
     private LinearLayout.LayoutParams rowParams() {
@@ -296,8 +407,8 @@ public class ImportActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(plate(PANEL));
         box.setPadding(dp(12), dp(12), dp(12), dp(12));
-        String[] heads = es ? new String[] {"ELIGE UN ARCHIVO DE TRUCOS", "ELIGE LA CARPETA DEL MOD O SU .ZIP", "ELIGE LA CARPETA DE TUS DLC"}
-                            : new String[] {"CHOOSE A CHEAT FILE", "CHOOSE THE MOD'S FOLDER OR ITS .ZIP", "CHOOSE YOUR DLC'S FOLDER"};
+        String[] heads = es ? new String[] {"ELIGE UN ARCHIVO DE TRUCOS", "ELIGE LA CARPETA DEL MOD O SU .ZIP", "ELIGE LA CARPETA DE TUS DLC", "ELIGE UN SHADER GLSL"}
+                            : new String[] {"CHOOSE A CHEAT FILE", "CHOOSE THE MOD'S FOLDER OR ITS .ZIP", "CHOOSE YOUR DLC'S FOLDER", "CHOOSE A GLSL SHADER"};
         TextView title = text(heads[kind], 16, GOLD, true);
         title.setGravity(Gravity.CENTER);
         box.addView(title);
@@ -355,7 +466,7 @@ public class ImportActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(8), 0, 0);
-        if (kind != CHEATS) {  // (a folder: the mod itself, or where the DLC are)
+        if (kind == MOD || kind == DLC) {  // (a folder: the mod itself, or where the DLC are)
             Button use = button(es ? "Usar esta carpeta" : "Use this folder", true, BRONZE);
             use.setOnClickListener(v -> { browser.dismiss(); start(here); });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44));
@@ -390,7 +501,7 @@ public class ImportActivity extends Activity {
         new Thread(() -> {
             String done, error = null;
             try {
-                done = kind == CHEATS ? importCheats(from) : kind == MOD ? importMod(from) : importDlc(from);
+                done = kind == CHEATS ? importCheats(from) : kind == MOD ? importMod(from) : kind == DLC ? importDlc(from) : importShader(from);
             } catch (Exception e) {
                 Log.e(TAG, "import: " + e);
                 done = null;
@@ -401,8 +512,17 @@ public class ImportActivity extends Activity {
                 busy = false;
                 add.setEnabled(true);
                 if (ok != null) {
-                    changed();
-                    say((es ? "Listo: " : "Done: ") + ok + (es ? ". Se aplica al reiniciar el juego." : ". It applies when the game restarts."), false);
+                    if (kind == SHADER) {
+                        if (ok.equals(activeShaderName())) {
+                            changed();
+                            say((es ? "Shader activo actualizado: " : "Updated active shader: ") + ok + (es ? ". Reinicia el juego para aplicarlo." : ". Restart the game to apply it."), false);
+                        } else {
+                            say((es ? "Importado: " : "Imported: ") + ok + (es ? ". Pulsa Usar para activarlo." : ". Tap Use to activate it."), false);
+                        }
+                    } else {
+                        changed();
+                        say((es ? "Listo: " : "Done: ") + ok + (es ? ". Se aplica al reiniciar el juego." : ". It applies when the game restarts."), false);
+                    }
                 } else {
                     say((es ? "No se pudo: " : "It couldn't be done: ") + why, true);
                 }
@@ -476,6 +596,16 @@ public class ImportActivity extends Activity {
         try (OutputStream o = new FileOutputStream(list, true)) {
             o.write(("\n" + off).getBytes("UTF-8"));
         }
+        return name;
+    }
+
+    private String importShader(File from) throws IOException {
+        String name = safeName(from.getName());
+        if (!name.toLowerCase(Locale.ROOT).endsWith(".glsl")) throw new IOException("choose a .glsl file");
+        if (!from.isFile() || from.length() <= 0 || from.length() > (2L << 20))
+            throw new IOException("GLSL file must be between 1 byte and 2 MB");
+        total = from.length();
+        copyFile(from, new File(target(), name));
         return name;
     }
 

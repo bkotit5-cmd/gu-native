@@ -81,7 +81,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Graphics & Audio", "Gráficos y audio"},
         {"Controls", "Controles"},
         {"Multiplayer", "Multijugador"},
-        {"Gameplay", "Juego"},
+        {"Shader", "Shader"},
         {"Audio and readout", "Audio e indicadores"},
         {"FPS counter", "Contador de FPS"},
         {"Show the touch controls", "Mostrar los controles táctiles"},
