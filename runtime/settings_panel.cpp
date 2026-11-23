@@ -2513,6 +2513,23 @@ void cache_clear_row(std::vector<Row> &r) {
         "primeras zonas pueden tironear o mostrar modelos tarde hasta que estén armados. Un segundo toque, antes de que "
         "el juego vuelva a empezar, conserva la caché.");
 }
+// User GLSL shaders: a single fullscreen fragment pass over the resolved game image.
+void user_shader_rows(std::vector<Row> &r) {
+#ifdef __ANDROID__
+    action(r, "shader.glsl", en_es("Load GLSL shader", "Cargar shader GLSL"), []() { ui_request_activity("showShaders"); });
+#else
+    action(r, "shader.glsl", en_es("Load GLSL shader", "Cargar shader GLSL"), []() { pc_import_shader(); });
+#endif
+    r.back().help = en_es(
+        "Loads a custom Vulkan GLSL fragment shader from a .glsl file. It runs as a fullscreen post-process after the game is drawn. "
+        "Use the supplied interface: set 0 binding 0 sampler2D t, location 0 vec2 uv input and location 0 vec4 o output. "
+        "Single-pass shaders only; custom shaders replace the Colour and PS1 presentation filters and are bypassed for HDR output.",
+        "Carga un shader de fragmento Vulkan GLSL desde un archivo .glsl. Se ejecuta como postproceso a pantalla completa después "
+        "del juego. Usa la interfaz indicada: sampler2D t en set 0 binding 0, entrada vec2 uv en location 0 y salida vec4 o "
+        "en location 0. Solo un pase; reemplaza los filtros de Color y PS1 y no se aplica a la salida HDR.");
+}
+MENU_ENTRY("shader", 10, user_shader_rows);
+
 // [Performance] Effects (runtime/hle/effects.c): the game's particle effects, drawn or not, at once
 void effects_row(std::vector<Row> &r) {
     Config &c = s.draft;
