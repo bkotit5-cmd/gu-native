@@ -955,6 +955,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(number_colour);
     SAME(monster_bars);
     SAME(ps1_filter);
+    SAME(text_outline);
+    SAME(hud_shrink);
     SAME(colour_hue);  // (Graphics & Audio > Colour)
     SAME(colour_temperature);
     SAME(colour_tint);
@@ -3402,6 +3404,18 @@ void rows_graphics_screen_70(std::vector<Row> &r) {
 }
 void reset_graphics_screen_70() { s.draft.ui_anchor = config_defaults().ui_anchor; }
 MENU_ENTRY("graphics/screen", 70, rows_graphics_screen_70, reset_graphics_screen_70);
+void rows_graphics_screen_75(std::vector<Row> &r) {
+    const int shrink = std::clamp(s.draft.hud_shrink, 0, 40) / 5 * 5;
+    char value[16];
+    snprintf(value, sizeof value, "%d%%", 100 - shrink);
+    Row row;
+    row.id = "hud_size", row.title = tr("HUD size"), row.value = value, row.key = ini("HUDSize");
+    row.number = true;
+    row.adjust = [shrink](int d) { s.draft.hud_shrink = std::clamp(shrink - d * 5, 0, 40); };
+    r.push_back(std::move(row));
+}
+void reset_graphics_screen_75() { s.draft.hud_shrink = config_defaults().hud_shrink; }
+MENU_ENTRY("graphics/screen", 75, rows_graphics_screen_75, reset_graphics_screen_75);
 #ifndef __ANDROID__  // (a desktop's, with the mouse: on a phone the touch layout editor moves them)
 void rows_graphics_screen_80(std::vector<Row> &r) {
     action(r, "hud.edit", tr("Move the HUD"), []() {
@@ -3417,6 +3431,12 @@ void rows_graphics_screen_90(std::vector<Row> &r) {
 }
 void reset_graphics_screen_90() { s.draft.fill_screen = config_defaults().fill_screen; }
 MENU_ENTRY("graphics/screen", 90, rows_graphics_screen_90, reset_graphics_screen_90);
+void rows_graphics_screen_92(std::vector<Row> &r) {
+    add_bool(r, "textoutline", tr("Text outline"), &s.draft.text_outline, ini("TextOutline"));
+    r.back().help = tr("Adds a dark outline around dialogue and help-box letters in quests, making them easier to read over bright backgrounds.");
+}
+void reset_graphics_screen_92() { s.draft.text_outline = config_defaults().text_outline; }
+MENU_ENTRY("graphics/screen", 92, rows_graphics_screen_92, reset_graphics_screen_92);
 // The hunting aids (1.0.1, the owner's: "everything off by default, so whoever wants it turns it on"; MH4U for Android has
 // the first two with the same names and texts): runtime/hunt_aids.h, hle/huntaids.c, hunt_overlay.cpp
 void hunt_aids_rows(std::vector<Row> &r) {
@@ -6115,7 +6135,8 @@ void report(bool *open) {
 #endif
     capture_wheel = is_capturing && s.capture_bind >= 0;  // (the capture view doesn't scroll)
     textinput_menu_keyboard(*open && s.view == View::Keyboard && s.keyboard.phone);  // (its key asked for it: textinput.c)
-    config_colour_preview(*open ? &s.draft : nullptr);  // (Graphics & Audio > Colour: the picture follows the draft now)
+    config_colour_preview(*open ? &s.draft : nullptr);
+    if (config_hud_preview(*open ? &s.draft : nullptr)) touch_hud_step();  // (Graphics & Audio > Colour: the picture follows the draft now)
     if (!*open)
         s.editing = false;
 }
@@ -6690,7 +6711,8 @@ void settings_panel_before_frame(bool open) {
     }
 }
 void settings_panel_idle(void) {
-    config_colour_preview(nullptr);  // (closed: the saved colour)
+    config_colour_preview(nullptr);
+    if (config_hud_preview(nullptr)) touch_hud_step();  // (closed: the saved colour)
     s.editing = false;
     textinput_menu_keyboard(false);
     is_dirty = false;
