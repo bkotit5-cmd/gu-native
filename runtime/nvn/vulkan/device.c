@@ -1828,7 +1828,7 @@ static VkImageView user_tex_view(uint32_t tex, const void *view) {
     NvnTexture *t = HOST(NvnTexture, tex);
     if (!t) return VK_NULL_HANDLE;
     vk_ms_resolve(vk_tex(t, false));
-    return vk_view(t, (const NvnTextureView *)view, view != nullptr, false, TEXTYPE_2D);
+    return vk_view(t, (const NvnTextureView *)view, view != NULL, false, TEXTYPE_2D);
 }
 
 void backend_present(NvnTexture *t) {
