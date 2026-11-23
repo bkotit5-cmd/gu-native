@@ -1880,7 +1880,7 @@ static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out fr
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
 static bool ui_scissor_mid;
-static bool ui_dialogue_piece;  // dialogue/help panel's text draw for the optional outline    // wider than 16:9: the draw being set up is a piece kept in the middle 16:9 (the Meownster
+static bool ui_dialogue_piece;  // the bottom-left dialogue/help panel's text draw, for TextOutline
                                // Hunters' map), and its scissor narrows about the middle with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
 static bool ui_window_pass;  // and one of a menu's windows (not the chat's log or the Quest Complete stamp, drawn there too)
