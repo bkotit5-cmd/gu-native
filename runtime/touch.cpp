@@ -624,7 +624,7 @@ void parse_layout(const std::string &text, Layout *l, EditPanel *ep) {
         if (ep && !strcmp(key, "editor_panel") && (usual || placed) && s >= EPANEL_MIN && s <= 1.0f)
             ep->x = usual ? -1.0f : x, ep->y = usual ? -1.0f : y, ep->k = s;
     }
-    if (l->kind != KIND_EMU) l->off = 0;  // (the port's own layout hides by the settings' Show*)
+    if (l->kind != KIND_EMU) l->off = CtlBits();  // (the port's own layout hides by the settings' Show*)
 }
 bool load_layout_file(const char *path, Layout *l, EditPanel *ep) {
     std::string text;
@@ -1475,6 +1475,17 @@ struct State {
 };
 std::mutex g_lock;
 State g_s;
+void map_toggle(State &s) {
+    int prof = g_hud_prof_now;
+    if (prof < 0 || prof >= HUD_PROFILES) prof = config_live_touch_hud() ? HUD_TOUCH : HUD_PLAIN;
+    bool hide = !s.layout.hud[prof][HP_MAP].hidden;
+    s.layout.hud[prof][HP_MAP].hidden = hide;
+    s.saved.hud[prof][HP_MAP].hidden = hide;
+    publish_hud(s.layout);
+    save_layout(s.layout, s.epanel);
+    rt_logf("[touch] the map's button: the minimap %s\n", hide ? "hidden" : "shown");
+}
+
 std::atomic<bool> g_lock_follow;  // (touch_lock_buttons -> the hunt camera: follow the monster now)
 std::atomic<bool> g_lock_shots;   // (the lock-on is on, in a hunt: hle/mousecam.c turns a bow's or a gun's shots)
 std::atomic<bool> g_lock_mark;    // (the lock-on is on, no menu of the game's open: its padlock shows, the controls
@@ -4211,6 +4222,15 @@ void icon(ImDrawList *dl, Icon ic, ImVec2 c, float r, ImU32 col, ImU32 deep) {
                         ImVec2(c.x + cosf(a) * .95f * s, c.y + sinf(a) * .95f * s), col, .1f * s);
         }
         padlock(dl, ImVec2(c.x, c.y - .06f * s), .62f * s, true, col, deep);
+        break;
+    }
+    case I_MAPTOG: {
+        ImVec2 m[6] = {P(c, s, -.7f, -.45f), P(c, s, -.24f, -.6f), P(c, s, .24f, -.45f), P(c, s, .7f, -.6f),
+                       P(c, s, .7f, .5f), P(c, s, -.7f, .62f)};
+        dl->AddConvexPolyFilled(m, 6, col);
+        dl->AddLine(P(c, s, -.24f, -.6f), P(c, s, .24f, -.45f), deep, .07f * s);
+        dl->AddLine(P(c, s, .24f, -.45f), P(c, s, .24f, .62f), deep, .07f * s);
+        dl->AddCircleFilled(P(c, s, .45f, -.05f), .1f * s, RED);
         break;
     }
     case I_CAMERA: {  // centre the camera: a camera
