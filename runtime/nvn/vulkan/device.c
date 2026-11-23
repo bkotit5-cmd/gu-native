@@ -1824,7 +1824,7 @@ static void present_made(TexBackend *real, double a) {
 
 // Forge 2.0.0: resolve a plugin's NVN texture and make the sampled Vulkan view used by ImGui.
 static VkImageView user_tex_view(uint32_t tex, const void *view) {
-    if (!tex || !kernel_mapped(tex, sizeof(NvnTexture))) return VK_NULL_HANDLE;
+    if (!tex || !kernel_mapped(tex, 8)) return VK_NULL_HANDLE;
     NvnTexture *t = HOST(NvnTexture, tex);
     if (!t) return VK_NULL_HANDLE;
     vk_ms_resolve(vk_tex(t, false));
