@@ -111,6 +111,22 @@ namespace {
 
 const float PI = 3.14159265f;
 #define B(x) (1ull << (x))
+// Controls and their editor/latch masks can exceed one word.
+struct CtlBits {
+    uint64_t w[2]{};
+    explicit operator bool() const { return (w[0] | w[1]) != 0; }
+    uint64_t operator>>(int c) const { return c >= 0 && c < 128 ? w[c >> 6] >> (c & 63) : 0; }
+    CtlBits operator~() const { return {{~w[0], ~w[1]}}; }
+    CtlBits operator&(const CtlBits &o) const { return {{w[0] & o.w[0], w[1] & o.w[1]}}; }
+    CtlBits &operator|=(const CtlBits &o) { w[0] |= o.w[0]; w[1] |= o.w[1]; return *this; }
+    CtlBits &operator&=(const CtlBits &o) { w[0] &= o.w[0]; w[1] &= o.w[1]; return *this; }
+    CtlBits &operator^=(const CtlBits &o) { w[0] ^= o.w[0]; w[1] ^= o.w[1]; return *this; }
+};
+CtlBits ctl_bit(int c) {
+    CtlBits b{};
+    if (c >= 0 && c < 128) b.w[c >> 6] = 1ull << (c & 63);
+    return b;
+}
 
 // ------------------------------------------------------------------ the controls and their default places
 enum Ctl {
@@ -120,7 +136,7 @@ enum Ctl {
     C_MPAD,                                                                                // (the menu pad, in menus)
     C_ITEML, C_ITEMR,                                                                      // (the item bar's arrows)
     C_RUNLOCK,                                                                             // (the sprint lock's circle)
-    C_LOCKON,                                                                              // (the port's Lock-on button)
+    C_LOCKON, C_MAPTOG,                                                                    // (Lock-on and minimap toggle buttons)
     // the emulator-style layout's (a profile of that kind, Layout.kind: every one presses its button of the game's and
     // nothing else, as an emulator's pad on the screen; the stick, the settings and Lock-on buttons, the item bar's
     // arrows and the combined buttons are the same controls in both kinds)
@@ -134,7 +150,7 @@ enum Ctl {
 const int C_LAID = C_STICK + 1;
 enum Icon { I_ATTACK, I_DODGE, I_SHIELD, I_BURST, I_TARGET_SELECT, I_CAMERA, I_MENU, I_MAP, I_GEAR, I_SHEATHE, I_RUN, I_STICK, I_DPAD,
             I_LETTER, I_MINUS, I_COMBO, I_SHOT, I_BOW, I_RELOAD, I_SCOPE, I_CROUCH, I_COATING, I_MELEE, I_GATHER, I_UP, I_DOWN,
-            I_LEFT, I_RIGHT, I_LOCKON };
+            I_LEFT, I_RIGHT, I_LOCKON, I_MAPTOG };
 // The menu pad (C_MPAD), in its base's radius: a thumb within MPAD_GRAB is its, before anything else (a tap on its
 // edge is a step that way, never a tab); a direction comes on past MPAD_ON and stays down to MPAD_OFF
 const float MPAD_GRAB = 1.35f, MPAD_ON = .35f, MPAD_OFF = .25f;
@@ -217,6 +233,7 @@ const Def DEFS[C_COUNT] = {
     // tap turns the lock-on (lock_set). On the right thumb's arc above Y and left of L, as far from both as they are from
     // each other (the MH4U port's place, from its arc). Hunts only: in a town it is in the editor alone
     {"lock_on", "Lock-on", I_LOCKON, "", 0, true, .43f, .58f, .045f},
+    {"map_toggle", "Map: show / hide", I_MAPTOG, "", 0, false, .065f, .31f, .046f},
     // the emulator-style layout: A, B, X and Y in a diamond under the right thumb, the d-pad below the stick on the left,
     // the shoulders by the screen's edges (as tabs, the inner pair above and inward), Minus and Plus inward of them, the
     // sticks' clicks by the stick and below the diamond (the place of an emulator's right stick: a drag anywhere turns
@@ -253,7 +270,7 @@ std::atomic<int> g_style{STYLE_PILL};                            // (Layout.styl
 // ten profiles holds either (the profiles, below)
 enum { KIND_OURS, KIND_EMU, KIND_COUNT };
 std::atomic<int> g_kind{KIND_OURS};   // (Layout.kind, for every thread)
-std::atomic<uint64_t> g_off{0};       // (Layout.off: the emulator-style controls hidden in its editor, a bit each)
+std::atomic<uint64_t> g_off[2]{};    // (the two words of Layout.off: emulator-style controls hidden in its editor)
 bool emu_ctl(int i) { return i >= C_EA && i <= C_ER3; }
 std::atomic<int> g_ranged{0};     // WEAPON_* of the hunter while the layout for it applies (touch_input), else 0
 std::atomic<int> g_bow_type{0};   // the game's Bow Controls: 0 X draws, 1 R draws
@@ -291,6 +308,7 @@ int show_setting(int i) {  // the [Touch] Show* a control follows (the settings 
     case C_ITEML: case C_ITEMR: return TB_ITEM_ARROWS;
     case C_RUNLOCK: return TB_STICK_RUN;
     case C_LOCKON: return TB_LOCKON;
+    case C_MAPTOG: return TB_MAP_BUTTON;
     default: return -1;
     }
 }
@@ -315,19 +333,24 @@ bool lockon_here(bool menu) {
     return config_live_lock_on() && g_in_quest.load() && plat_now_ns() - g_town_ns >= 500 * 1000000ull &&
            !(menu && g_menu_town.load());
 }
+bool map_here(bool menu) {
+    return config_live_touch_show(TB_MAP_BUTTON) && g_in_quest.load() &&
+           plat_now_ns() - g_town_ns >= 500 * 1000000ull && !(menu && g_menu_town.load());
+}
 // A control the emulator-style layout's editor can hide (Layout.off): any of its own but the settings button, the way back
 // to the settings ([Touch] Show* hide the port's own layout's, in the settings: its editor has no Hide for those)
 bool hideable(int i) {
-    return g_kind.load() == KIND_EMU && i != C_SETTINGS && (emu_ctl(i) || i == C_STICK || i == C_LOCKON || is_combo(i));
+    return g_kind.load() == KIND_EMU && i != C_SETTINGS && (emu_ctl(i) || i == C_STICK || i == C_LOCKON || i == C_MAPTOG || is_combo(i));
 }
 // The emulator-style layout: its own buttons, the stick, the settings and Lock-on buttons, the combined buttons, each but
 // the settings button unless its editor hid it; in a menu of the game's nothing changes (its d-pad is always there: no
 // menu pad, no layout for bows and bowguns)
 bool emu_mode(int i, bool menu) {
-    if (i != C_SETTINGS && (g_off.load() >> i & 1)) return false;
+    if (i != C_SETTINGS && (g_off[i >> 6].load() >> (i & 63) & 1)) return false;
     if (emu_ctl(i) || i == C_SETTINGS || i == C_STICK) return true;
     if (is_combo(i)) return config_live_touch_combo(i - C_COMBO) != 0;
     if (i == C_LOCKON) return lockon_here(menu) && config_live_touch_show(TB_LOCKON);
+    if (i == C_MAPTOG) return map_here(menu);
     return false;
 }
 bool in_mode(int i, bool menu) {
@@ -339,6 +362,7 @@ bool in_mode(int i, bool menu) {
     if (i == C_ITEML || i == C_ITEMR) return false;  // (drawn and pressed with the item bar, where it shows: touch_draw)
     if (i == C_RUNLOCK) return false;                // (drawn and armed with the stick: control, on_lock_circle)
     if (i == C_LOCKON && !lockon_here(menu)) return false;
+    if (i == C_MAPTOG && !map_here(menu)) return false;
     // a menu of the game's open: the menu pad besides, nothing else changes (Plus shows whatever ShowPlus says: the
     // game's menus use it, as the way out of the pause menu)
     if (i == C_MPAD) return menu && mpad_shown();
@@ -368,6 +392,7 @@ bool in_editor(int i) {
         if (i == C_ITEML || i == C_ITEMR) return config_live_touch_show(TB_ITEM_ARROWS) != 0;
         if (i == C_RUNLOCK) return config_live_touch_show(TB_STICK_RUN) != 0;
         if (i == C_LOCKON) return config_live_lock_on() && config_live_touch_show(TB_LOCKON);
+        if (i == C_MAPTOG) return config_live_touch_show(TB_MAP_BUTTON) != 0;
         return is_combo(i) && config_live_touch_combo(i - C_COMBO) != 0;
     }
     if (i == C_MPAD) return config_live_touch_show(TB_MENU_PAD);
@@ -446,8 +471,8 @@ struct Layout {
     int kind;                                // KIND_*: layout_kind in the file (none: the port's own)
     int profile;                             // the profile it is, 1..PROFILES_N (profile in touch_layout.txt; none: 1)
     bool profile_line;                       // (the file named it: one without was made before the profiles)
-    uint64_t off;                            // the emulator-style layout's controls hidden in its editor (hidden <key>)
-    uint64_t hold;                           // controls that stay pressed: a tap presses, the next lets go (hold <key>)
+    CtlBits off;                              // the emulator-style layout's controls hidden in its editor (hidden <key>)
+    CtlBits hold;                             // controls that stay pressed: a tap presses, the next lets go (hold <key>)
     float fps_x, fps_y;                      // the FPS counter's middle, in the screen's width and height; < 0 its own
                                              // place, at the top (fps_counter in the file)
     float bars_x, bars_y, bars_k;            // the monster health bars' (1.0.1, [Hunting Aids] MonsterHealthBars,
@@ -498,7 +523,7 @@ const float BARS_K_MIN = .5f, BARS_K_MAX = 2.0f;  // (MH4U's: half to twice the 
 std::atomic<float> g_fps_x{-1.0f}, g_fps_y{-1.0f};  // (Layout.fps_x / fps_y, for the game thread: touch_fps_place)
 std::atomic<float> g_bars_x{-1.0f}, g_bars_y{-1.0f}, g_bars_k{1.0f};  // (Layout.bars_*: touch_bars_place)
 void publish_hud(const Layout &l) {  // (to the render thread; the kind and what it hides, the FPS counter's place, to all)
-    g_kind = l.kind, g_off = l.off, g_fps_x = l.fps_x, g_fps_y = l.fps_y;
+    g_kind = l.kind, g_off[0] = l.off.w[0], g_off[1] = l.off.w[1], g_fps_x = l.fps_x, g_fps_y = l.fps_y;
     g_bars_x = l.bars_x, g_bars_y = l.bars_y, g_bars_k = l.bars_k;
     for (int p = 0; p < HUD_PROFILES; p++)
         for (int k = 0; k < HP_COUNT; k++) {
@@ -545,8 +570,8 @@ void parse_layout(const std::string &text, Layout *l, EditPanel *ep) {
         // (the lines of 1.0's profiles with a control's key as their word: a file read by an older version skips them)
         if (sscanf(line, "%31s %63s", key, name) == 2) {
             int c = ctl_by_key(name);
-            if (!strcmp(key, "hidden") && c >= 0) { l->off |= 1ull << c; continue; }
-            if (!strcmp(key, "hold") && c >= 0) { l->hold |= 1ull << c; continue; }
+            if (!strcmp(key, "hidden") && c >= 0) { l->off |= ctl_bit(c); continue; }
+            if (!strcmp(key, "hold") && c >= 0) { l->hold |= ctl_bit(c); continue; }
             if (!strcmp(key, "bare")) continue;  // (1.0.1's first test builds: a picture without the button's frame.
                                                  // Every picture is drawn alone now: the line is read and left out)
             if (!strcmp(key, "image") && c >= 0) {  // (image <key> <file>: the name, to the line's end)
@@ -1418,7 +1443,7 @@ struct State {
     uint64_t rep_ns;
     Rect rep_at;
     // the buttons held by a tap (Layout.hold): those down now, a bit each, and what each presses (as its tap had it)
-    uint64_t latched;
+    CtlBits latched;
     uint64_t latch_btn[C_COUNT];
     int open_slot;                  // the profile in use as the editor opened (Layout.profile: the one it edits)
     // the profiles' window over the editor (its Profile button): the slot picked, an action asked to be tapped again
@@ -1723,7 +1748,7 @@ void recompute_held(State &s) {  // (the menu pad's go by s.pad_held: touch_inpu
 }
 // The buttons a tap held down, let go (why: for the log): the controls hidden or edited, the app in the background, a
 // profile changed; one alone where it is no longer on the screen (touch_input)
-void unlatch(State &s, uint64_t which, const char *why) {
+void unlatch(State &s, CtlBits which, const char *why) {
     if (!(s.latched & which)) return;
     for (int i = 0; i < C_COUNT; i++)
         if (which >> i & 1) s.latch_btn[i] = 0;
@@ -1738,7 +1763,7 @@ void drop_fingers(State &s) {
     for (Pulse &p : s.pulse) p.until = 0;
     s.stick_on = false, s.held = s.pad_held = s.tapped = 0, s.stick_part = 0, s.pinch = false;
     run_end(s, "every finger let go of");
-    unlatch(s, ~0ull, "every finger let go of");
+    unlatch(s, ~CtlBits(), "every finger let go of");
     s.bar_open = false;
 }
 
@@ -1854,7 +1879,7 @@ const char *T(const char *english) { return settings_text(g_language, english); 
 // port's the same
 bool holdable(int i) {
     if (i < 0 || i >= C_LAID) return false;
-    return !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_SETTINGS || i == C_LOCKON ||
+    return !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_SETTINGS || i == C_LOCKON || i == C_MAPTOG ||
              i == C_ITEML || i == C_ITEMR || i == C_RUNLOCK || i == C_AMMO_UP || i == C_AMMO_DOWN || i == C_RAIM);
 }
 // A picture of the player's (Layout.image) can be on every control the editor places (1.0.1, the owner's call: the round
@@ -2342,7 +2367,7 @@ void edit_button(State &s, int i) {
             s.layout.hud[s.edit_prof][part].hidden = !s.layout.hud[s.edit_prof][part].hidden;
             publish_hud(s.layout);
         } else if (c >= 0 && hideable(c)) {
-            s.layout.off ^= 1ull << c;
+            s.layout.off ^= ctl_bit(c);
             publish_hud(s.layout);
         }
         break;
@@ -2355,7 +2380,7 @@ void edit_button(State &s, int i) {
         break;
     case E_HOLD:  // (a tap holds it down, the next lets it go: S13)
         if (holdable(c)) {
-            s.layout.hold ^= 1ull << c;
+            s.layout.hold ^= ctl_bit(c);
             rt_logf("[touch] layout editor: %s %s by a tap\n", DEFS[c].key, s.layout.hold >> c & 1 ? "held" : "no longer held");
         }
         break;
@@ -2867,14 +2892,15 @@ extern "C" bool touch_event(const SDL_Event *e) {
             if ((c == C_AMMO_UP || c == C_AMMO_DOWN) && !s.menu)
                 ammo_step(s, c == C_AMMO_UP ? 1 : -1), f->repeat_ns = now + 550 * MS;  // (held: more steps, touch_input)
             if (c == C_LOCKON) lock_set(s, !s.lock, "the Lock-on button");  // (as it lands; lit while held, presses nothing)
+            if (c == C_MAPTOG) map_toggle(s);
             // (a button a tap holds down, Layout.hold: this tap holds it, what it presses now staying pressed after the
             // finger lifts, lit; the next tap lets it go, and presses nothing more)
             if ((s.layout.hold >> c & 1) && holdable(c)) {
                 if (s.latched >> c & 1) {
-                    unlatch(s, 1ull << c, DEFS[c].key);
+                    unlatch(s, ctl_bit(c), DEFS[c].key);
                     f->done = true;
                 } else {
-                    s.latched |= 1ull << c, s.latch_btn[c] = finger_buttons(*f);
+                    s.latched |= ctl_bit(c), s.latch_btn[c] = finger_buttons(*f);
                     rt_logf("[touch] %s held by a tap (%llx)\n", DEFS[c].key, (unsigned long long)s.latch_btn[c]);
                 }
             }
@@ -3290,7 +3316,7 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
     // again now and then, for the pictures being added)
     if (s.latched && (!visible || s.edit)) unlatch(s, s.latched, !visible ? "the controls hidden" : "the editor"), recompute_held(s);
     for (int i = 0; i < C_COUNT && s.latched; i++)
-        if ((s.latched >> i & 1) && (!in_mode(i, s.menu) || !(s.layout.hold >> i & 1))) unlatch(s, 1ull << i, DEFS[i].key), recompute_held(s);
+        if ((s.latched >> i & 1) && (!in_mode(i, s.menu) || !(s.layout.hold >> i & 1))) unlatch(s, ctl_bit(i), DEFS[i].key), recompute_held(s);
     if (s.edit && s.img_open && now - s.img_scan_ns > 1500 * MS) img_scan(s);
     // A long press on the item bar holds it open, its neighbouring items shown as while L is held, with nothing pressed
     // (L would turn the camera): a swipe meanwhile turns it, lifting closes it and uses no item (#109, as the MH4U port's)
@@ -5681,10 +5707,11 @@ struct DrawKey {
     float w, h;
     int flags, ranged, bow_type, style, edit_set, config_gen, nrows;
     float pad_a, mpad_out, rows[3][2], parts[3][5];  // (parts: the target camera's, the item bar's, the arts' zone_rect)
-    uint64_t camera, modes;
+    uint64_t camera;
+    CtlBits modes;
     char target[8];
 };
-static_assert(C_COUNT <= 64, "DrawKey.modes: a bit per control");
+static_assert(C_COUNT <= 128, "DrawKey.modes: a bit per control");
 bool g_reuse_on;      // (touch_reuse_begin: the overlay reuses frames, touch_draw keeps the key of each)
 DrawKey g_drawn;      // (game thread) the key of the frame touch_draw drew last...
 bool g_drawn_ok;      // ...and whether it may stand for another
@@ -5721,7 +5748,7 @@ bool draw_key(float w, float h, DrawKey *k) {
     k->camera = camera_buttons();
     snprintf(k->target, sizeof k->target, "%s", target_letter());
     for (int i = 0; i < C_COUNT; i++)
-        if (in_mode(i, s.menu)) k->modes |= 1ull << i;
+        if (in_mode(i, s.menu)) k->modes |= ctl_bit(i);
     Zones z = zones();
     const int parts[3] = {HP_TARGET, HP_ITEMS, HP_ARTS};
     for (int i = 0; i < 3; i++) {
