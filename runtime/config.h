@@ -25,7 +25,8 @@ enum {
     BIND_A, BIND_B, BIND_X, BIND_Y, BIND_L, BIND_R, BIND_ZL, BIND_ZR, BIND_PLUS, BIND_MINUS,
     BIND_DPAD_UP, BIND_DPAD_DOWN, BIND_DPAD_LEFT, BIND_DPAD_RIGHT, BIND_LSTICK, BIND_RSTICK,
     BIND_ITEM_LEFT, BIND_ITEM_RIGHT,
-    BIND_COMBO1, BIND_COMBO2, BIND_COMBO3, BIND_COMBO4, BIND_COMBO5, BIND_COMBO6, BINDS
+    BIND_COMBO1, BIND_COMBO2, BIND_COMBO3, BIND_COMBO4, BIND_COMBO5, BIND_COMBO6,
+    BIND_COMBO7, BIND_COMBO8, BIND_COMBO9, BIND_COMBO10, BIND_COMBO11, BIND_COMBO12, BIND_COMBO13, BIND_COMBO14, BIND_COMBO15, BINDS
 };
 #define BIND_KEYS 2
 #define KEY_MOUSE 0x1000
@@ -56,7 +57,7 @@ enum { TB_ATTACKS, TB_DODGE, TB_GUARD, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD, T
 // pad's L and R and the Hunter Arts' taps with a controller as up to 0.1.9.3, the D-pad in menus off: the menu pad takes
 // its place, as then; the long press that hides the controls on, and a slide between buttons off)
 #define TOUCH_SHOW_DEFAULT {1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0}
-#define TOUCH_COMBOS 6
+#define TOUCH_COMBOS 15
 // a controller's buttons a combined button can be on (the less used ones)
 enum { PADB_NONE, PADB_L3, PADB_R3, PADB_MINUS, PADB_GUIDE, PADB_MISC, PADB_PADDLE1, PADB_PADDLE2, PADB_PADDLE3, PADB_PADDLE4,
        PADB_TOUCHPAD, PADB_COUNT };
