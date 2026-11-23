@@ -10,6 +10,12 @@ extern "C" {
 #endif
 struct Cpu;
 
+// Forge 2.0.0 NVN rendering callbacks, called from runtime/nvn/objects.c.
+void forge_nvn_device(uint32_t device);
+void forge_nvn_window_textures(uint32_t textures, int n);
+void forge_nvn_present(struct Cpu *c, uint32_t queue, uint32_t window, int index);
+
+
 // forge.c
 // printf with the guest's arguments: variadic ones from core register reg (4: none left) on, then the stack at stk
 void forge_format(char *out, size_t n, const char *fmt, struct Cpu *c, int reg, uint32_t stk);
