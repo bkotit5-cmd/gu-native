@@ -4,7 +4,7 @@ A native Android and Windows PC port of **Monster Hunter Generations Ultimate (M
 
 This repository is a feature fork/integration of [KHORNE's gu-native](https://github.com/khorne-hub/gu-native), itself based on [MHGURecomp](https://github.com/MHGU-Recomp/MHGURecomp). It contains app/runtime changes and must be used with your own legally obtained game files.
 
-> **Game version:** the runtime and the weapon-tree integration are built around MHGU **version 1.4.0**. Cheat files must match build ID `FB08F1D20FD1204F`.
+> **Game version:** the runtime targets MHGU **version 1.4.0**. Cheat files must match build ID `FB08F1D20FD1204F`.
 >
 > **No game assets are included.** This repository does not provide the game, ROMs, keys, or copyrighted game files.
 
@@ -51,12 +51,6 @@ The app provides **15 configurable combined-button slots**. Each slot can trigge
 ### Map Button
 
 A touch button can show or hide the in-game minimap during a hunt. Its visibility is configurable, and its position can be adjusted in the touch-layout editor.
-
-### Weapon Tree
-
-The Weapon Tree overlay provides a read-only view of weapon progression and smithy information, including weapon classes, branches, levels, elements, materials/recipes and relevant equipment information. It is designed to appear while using the Smithy and can also be opened from its touch control.
-
-**Compatibility note:** this integration reads MHGU's Smithy and equipment structures using addresses and offsets identified for game version 1.4.0. It is a version-specific reader, not a general-purpose weapon database or editor. It displays game data; it is not intended to modify equipment or inventory. Do not assume it is compatible with a different game executable/version.
 
 ### HUD Size and Text Outline
 
@@ -150,8 +144,7 @@ Keep independent backups of important saves before changing game files, importin
 
 ## Compatibility and safety notes
 
-- **Game build:** the runtime targets MHGU 1.4.0. Cheat compatibility and the Weapon Tree memory reader are version-specific.
-- **Weapon Tree:** it reads fixed game structures. Treat it as experimental on any build other than the exact supported game version.
+- **Game build:** the runtime targets MHGU 1.4.0. Cheat compatibility is version-specific.
 - **Forge and native plugins:** baseline support only; individual plugins are not guaranteed to work.
 - **Custom shaders:** use shaders from trusted sources. A fallback handles shader compilation or pipeline errors, but it cannot guarantee that every GPU driver will behave correctly with arbitrary shader code.
 - **GPU texture formats:** when a GPU lacks support for formats such as BCn or ASTC, the renderer can decode those textures on the CPU. This preserves a compatibility path but can increase CPU work, memory use and texture-upload time on affected devices.

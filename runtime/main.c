@@ -18,7 +18,6 @@
 #include "app_actions.h"
 #include "net/discord.h"
 #include "savefolder.h"
-#include "weapon_tree.h"
 #include "cache_clear.h"
 #include "diag.h"
 #include "romfs.h"
@@ -77,7 +76,6 @@ static void boot(const char *root) {
     dispatch_init();
     mods_patch_code();  // (the mods' patches of the game's code: runtime/mods.c)
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
-    weapontree_init();  // (Smithy weapon-tree UI and Smithy data hook: runtime/weapon_tree_ui.cpp)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)
     gather_init();   // ([Gathering] GatherAll: runtime/hle/gather.c)

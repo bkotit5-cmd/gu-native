@@ -45,7 +45,6 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "settings_locale.h"
 #include "settings_panel.h"
 #include "verify.h"
-#include "weapon_tree.h"
 
 #define LOG(...) rt_logf(__VA_ARGS__)  // (Windows: queued, the log's own thread writes it)
 
@@ -863,7 +862,6 @@ void overlay_frame(void *cpu) {
     // is in the background, its clock held: runtime/hle/vi.c)
     vi_pause_game();
     huntaids_frame();  // (the hunting aids' step, after the game's update: runtime/hle/huntaids.c)
-    weapontree_frame();  // update the Smithy weapon-tree snapshot when its hook has data
     frame_once(cpu);
 #ifdef __ANDROID__
     // (the settings menu open, playing alone: the game waits here, as on the console's HOME menu - gu-native #94. The menu
@@ -930,8 +928,7 @@ static void frame_once(void *cpu) {
     if (stats) perfstats_tick();  // (every frame, built or its copy drawn again: the longest gap is between the game's frames)
     bool hunt = huntaids_any();  // (the hunting aids' numbers or bars: runtime/hunt_overlay.cpp)
     bool fading = settings_panel_fading();  // (the settings menu closed a moment ago: fading out, taking no input)
-    bool tree = weapon_tree_drawing();
-    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !hunt && !credits && !fading && !tree) {  // (nothing to draw)
+    if (!open && !free_render && !notice && !plate && !chat && !chat_over && !touch && !stats && !hunt && !credits && !fading) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear(), g_snap_seq++;
         apply_input(io);  // (keep the queue short)
@@ -1086,9 +1083,8 @@ static void frame_once(void *cpu) {
     if (chat && !g_modal_open) draw_chat(line, now, scale);
     if (stats) perfstats_draw((float)w, (float)h);  // (under the touch controls, on the same background list)
     hunt_overlay_draw((float)w, (float)h);  // (the hunting aids' numbers and bars: after the plate, under the controls)
-    if (touch && !weapon_tree_is_open()) touch_draw((float)w, (float)h);  // tree owns touch while open
+    if (touch) touch_draw((float)w, (float)h);
     if (chat_over) chat_port_draw((float)w, (float)h);  // (over them: the chat button, the last lines)
-    if (tree && !g_settings_open) weapon_tree_draw((float)w, (float)h);
     ImGui::Render();
     settings_panel_after_render(ImGui::GetDrawData());
 
