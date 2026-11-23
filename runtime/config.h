@@ -222,6 +222,8 @@ typedef struct {
                               // 15-bit colour with a 4x4 ordered dither under the HUD (ps1.c, exec.c vk_ps1_dither), and
                               // over the game's picture, never the overlay, faint scanlines that flicker as an interlaced
                               // screen's (exec.c vk_present_draw, shaders.c present.color)
+    int text_outline;          // [Graphics] TextOutline: dark outline around quest dialogue/help text
+    int hud_shrink;            // [Display] HUDSize: 0..40, 100 minus this value
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
@@ -391,7 +393,12 @@ int config_live_reverb(void);           // [Audio] Reverb
 int config_live_send_all_rewards(void); // [Quest Rewards] SendAllRewards (runtime/hle/rewards.c)
 int config_live_gather_all(void);       // [Gathering] GatherAll (runtime/hle/gather.c)
 int config_live_ps1_filter(void);       // [Graphics] PS1Filter (nvn/vulkan/exec.c, ps1.c, fsr.c)
-void config_ps1_test(int on);           // (tests: MHGU_CONTROL "ps1 0|1") as if saved, until the next save
+void config_ps1_test(int on);
+int config_live_text_outline(void);      // [Graphics] TextOutline (nvn/vulkan/exec.c)
+void config_text_outline_test(int on);
+int config_live_hud_shrink(void);        // [Display] HUDSize (runtime/hud_parts.h, nvn/vulkan/exec.c)
+bool config_hud_preview(const Config *draft);
+void config_hud_test(int shrink);           // (tests: MHGU_CONTROL "ps1 0|1") as if saved, until the next save
 // [Colour] (runtime/colour_filter.h ColourAdjust; the window image's pass, nvn/vulkan/exec.c): the saved values, or while
 // the settings menu is open the ones being adjusted there (config_colour_preview), so the picture shows them at once
 struct ColourAdjust;
