@@ -1174,6 +1174,101 @@ static void vk_check(VkResult r) {
     if (r < 0) LOG("[forge] ImGui Vulkan error %d\n", (int)r);
 }
 
+// Forge 2.0.0: map guest NVN textures to Vulkan descriptors used by ImGui::Image.
+#define USER_TEX_MAX 256
+#define USER_TEX_TAG 0x7E57000000000000ull
+#define USER_TEX_TAG_MASK 0xFFFF000000000000ull
+#define USER_TEX_FREE_AFTER 10
+struct UserTex {
+    bool live;
+    uint32_t tex;
+    bool has_view;
+    uint8_t view[0x28];
+    VkImageView vk;
+    VkImageView set_view;
+    VkDescriptorSet set;
+};
+static std::mutex g_user_tex_lock;
+static UserTex g_user_tex[USER_TEX_MAX];
+struct DeadUserTexSet { VkDescriptorSet set; uint64_t at; };
+static std::vector<DeadUserTexSet> g_dead_user_tex_sets;
+static uint64_t g_user_tex_draws;
+
+extern "C" uint64_t overlay_user_texture_add(uint32_t tex, const void *view) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (int i = 0; i < USER_TEX_MAX; i++) {
+        UserTex &u = g_user_tex[i];
+        if (u.live) continue;
+        u = UserTex{};
+        u.live = true;
+        u.tex = tex;
+        u.has_view = view != nullptr;
+        if (view) memcpy(u.view, view, sizeof u.view);
+        return USER_TEX_TAG | (uint64_t)(i + 1);
+    }
+    return 0;
+}
+
+static UserTex *user_tex_of(uint64_t id) {
+    if ((id & USER_TEX_TAG_MASK) != USER_TEX_TAG) return nullptr;
+    uint64_t i = (id & ~USER_TEX_TAG_MASK) - 1;
+    return i < USER_TEX_MAX && g_user_tex[i].live ? &g_user_tex[i] : nullptr;
+}
+
+extern "C" bool overlay_user_texture_remove(uint64_t id) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    UserTex *u = user_tex_of(id);
+    if (!u) return false;
+    u->live = false;
+    u->vk = VK_NULL_HANDLE;
+    if (u->set) g_dead_user_tex_sets.push_back({u->set, g_user_tex_draws});
+    u->set = VK_NULL_HANDLE;
+    u->set_view = VK_NULL_HANDLE;
+    return true;
+}
+
+extern "C" void overlay_user_textures_prepare(VkImageView (*view_of)(uint32_t tex, const void *view)) {
+    if (!view_of) return;
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (UserTex &u : g_user_tex)
+        if (u.live) u.vk = view_of(u.tex, u.has_view ? u.view : nullptr);
+}
+
+#ifndef MHGU_NULL_BACKEND
+static void user_tex_sets(void) {
+    g_user_tex_draws++;
+    for (UserTex &u : g_user_tex) {
+        if (!u.live || !u.vk || u.vk == u.set_view) continue;
+        if (u.set) g_dead_user_tex_sets.push_back({u.set, g_user_tex_draws});
+        u.set = ImGui_ImplVulkan_AddTexture(VK_NULL_HANDLE, u.vk, VK_IMAGE_LAYOUT_GENERAL);
+        u.set_view = u.set ? u.vk : VK_NULL_HANDLE;
+    }
+    size_t k = 0;
+    for (DeadUserTexSet &d : g_dead_user_tex_sets) {
+        if (g_user_tex_draws - d.at > USER_TEX_FREE_AFTER) ImGui_ImplVulkan_RemoveTexture(d.set);
+        else g_dead_user_tex_sets[k++] = d;
+    }
+    g_dead_user_tex_sets.resize(k);
+}
+
+static void overlay_render_with_user_textures(ImDrawData *dd, VkCommandBuffer cb) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    user_tex_sets();
+    struct Patched { ImDrawCmd *cmd; ImTextureID id; ImVec4 clip; };
+    std::vector<Patched> patched;
+    for (ImDrawList *list : dd->CmdLists)
+        for (ImDrawCmd &cmd : list->CmdBuffer) {
+            if (cmd.UserCallback || cmd.TexRef._TexData || (cmd.TexRef._TexID & USER_TEX_TAG_MASK) != USER_TEX_TAG) continue;
+            patched.push_back({&cmd, cmd.TexRef._TexID, cmd.ClipRect});
+            UserTex *u = user_tex_of(cmd.TexRef._TexID);
+            if (u && u->set && u->vk) cmd.TexRef._TexID = (ImTextureID)(uintptr_t)u->set;
+            else cmd.ClipRect = ImVec4(0, 0, 0, 0);
+        }
+    ImGui_ImplVulkan_RenderDrawData(dd, cb);
+    for (Patched &p : patched) p.cmd->TexRef._TexID = p.id, p.cmd->ClipRect = p.clip;
+}
+#endif
+
 void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
 #ifndef MHGU_NULL_BACKEND
     if (!g_enabled) return;
@@ -1221,7 +1316,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
     std::lock_guard<std::mutex> l(g_snap_lock);
     if (!g_snap.Valid || !g_snap.CmdListsCount) return;
     if (!t->turn) {
-        ImGui_ImplVulkan_RenderDrawData(&g_snap, cb);
+        overlay_render_with_user_textures(&g_snap, cb);
         return;
     }
     // The window image drawn turned for the panel (nvn/vulkan/device.c, MHGU_PERF_PREROTATE): a turned copy of the
@@ -1270,6 +1365,6 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         rot.Valid = true;
         rot_gen = g_snap_gen, rot_turn = t->turn;
     }
-    ImGui_ImplVulkan_RenderDrawData(&rot, cb);
+    overlay_render_with_user_textures(&rot, cb);
 #endif
 }
