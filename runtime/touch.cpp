@@ -93,6 +93,7 @@ bool plat_path_from_utf8(const char *utf8, char *out, size_t size);  // (platfor
 #include "settings_panel.h"  // (SETTINGS_VIEW_GAME_TEXT: the keyboard plate's)
 #include "textinput.h"
 #include "touch.h"
+#include "weapon_tree.h"
 
 volatile int g_touch_hud;
 // (runtime/hud_parts.h: the HUD's parts in both arrangements, for the render thread; sizes and opacities start at 1, so
@@ -145,12 +146,14 @@ enum Ctl {
     C_ML, C_MR,          // (the menu pad's: its page tabs above it, as a controller's shoulders, placed from it;
     C_MZL, C_MZR,        // the other pair above them, when [Touch] ShowMenuZL / ZR say so; Minus below it, with the
     C_MMINUS,            // hunt's own Minus hidden)
+    C_TREE,               // weapon-tree touch button, appended to preserve existing layout IDs
     C_COUNT
 };
 const int C_LAID = C_STICK + 1;
+bool laid(int i) { return (i >= 0 && i < C_LAID) || i == C_TREE; }
 enum Icon { I_ATTACK, I_DODGE, I_SHIELD, I_BURST, I_TARGET_SELECT, I_CAMERA, I_MENU, I_MAP, I_GEAR, I_SHEATHE, I_RUN, I_STICK, I_DPAD,
             I_LETTER, I_MINUS, I_COMBO, I_SHOT, I_BOW, I_RELOAD, I_SCOPE, I_CROUCH, I_COATING, I_MELEE, I_GATHER, I_UP, I_DOWN,
-            I_LEFT, I_RIGHT, I_LOCKON, I_MAPTOG };
+            I_LEFT, I_RIGHT, I_LOCKON, I_MAPTOG, I_TREE };
 // The menu pad (C_MPAD), in its base's radius: a thumb within MPAD_GRAB is its, before anything else (a tap on its
 // edge is a step that way, never a tab); a direction comes on past MPAD_ON and stays down to MPAD_OFF
 const float MPAD_GRAB = 1.35f, MPAD_ON = .35f, MPAD_OFF = .25f;
@@ -259,6 +262,7 @@ const Def DEFS[C_COUNT] = {
     {"mzl", "ZL", I_LETTER, "ZL", B(BTN_ZL), true, 0, 0, .040f},  // (sections and more information: the item box, the smithy)
     {"mzr", "ZR", I_LETTER, "ZR", B(BTN_ZR), true, 0, 0, .040f},
     {"mminus", "Minus  -", I_MINUS, "-", B(BTN_MINUS), true, 0, 0, .030f},  // (the item box: its other sections)
+    {"weapon_tree", "Weapon tree", I_TREE, "", 0, false, .065f, .19f, .046f},
 };
 // which layout a control belongs to: the hunt's (the pill, B, the map, the stick), the menus' (the d-pad, the diamond,
 // Minus), or both
@@ -309,6 +313,7 @@ int show_setting(int i) {  // the [Touch] Show* a control follows (the settings 
     case C_RUNLOCK: return TB_STICK_RUN;
     case C_LOCKON: return TB_LOCKON;
     case C_MAPTOG: return TB_MAP_BUTTON;
+    case C_TREE: return TB_WEAPON_TREE;
     default: return -1;
     }
 }
@@ -337,10 +342,14 @@ bool map_here(bool menu) {
     return config_live_touch_show(TB_MAP_BUTTON) && g_in_quest.load() &&
            plat_now_ns() - g_town_ns >= 500 * 1000000ull && !(menu && g_menu_town.load());
 }
+bool tree_here() {
+    if (!weapon_tree_available() || !config_live_touch_show(TB_WEAPON_TREE)) return false;
+    return g_kind.load() != KIND_EMU || !(g_off[C_TREE >> 6].load() >> (C_TREE & 63) & 1);
+}
 // A control the emulator-style layout's editor can hide (Layout.off): any of its own but the settings button, the way back
 // to the settings ([Touch] Show* hide the port's own layout's, in the settings: its editor has no Hide for those)
 bool hideable(int i) {
-    return g_kind.load() == KIND_EMU && i != C_SETTINGS && (emu_ctl(i) || i == C_STICK || i == C_LOCKON || i == C_MAPTOG || is_combo(i));
+    return g_kind.load() == KIND_EMU && i != C_SETTINGS && (emu_ctl(i) || i == C_STICK || i == C_LOCKON || i == C_MAPTOG || i == C_TREE || is_combo(i));
 }
 // The emulator-style layout: its own buttons, the stick, the settings and Lock-on buttons, the combined buttons, each but
 // the settings button unless its editor hid it; in a menu of the game's nothing changes (its d-pad is always there: no
@@ -351,9 +360,11 @@ bool emu_mode(int i, bool menu) {
     if (is_combo(i)) return config_live_touch_combo(i - C_COMBO) != 0;
     if (i == C_LOCKON) return lockon_here(menu) && config_live_touch_show(TB_LOCKON);
     if (i == C_MAPTOG) return map_here(menu);
+    if (i == C_TREE) return tree_here();
     return false;
 }
 bool in_mode(int i, bool menu) {
+    if (i == C_TREE) return tree_here();
     if (g_kind.load() == KIND_EMU) return emu_mode(i, menu);
     if (emu_ctl(i)) return false;  // (the emulator-style layout's alone)
     // (the run button: with StickRun Off, in a hunt and in towns, either layout, never in a menu - R turns its pages;
@@ -387,6 +398,7 @@ bool in_mode(int i, bool menu) {
 // in the layout editor: what shows in a hunt or in a menu (Plus with ShowPlus off too, and the menu pad: placed there,
 // whether a menu is open or not; its tabs and Minus go with it)
 bool in_editor(int i) {
+    if (i == C_TREE) return config_live_touch_show(TB_WEAPON_TREE) != 0;
     if (g_kind.load() == KIND_EMU) {  // (the emulator-style layout's: the hidden ones too, faded, for its Show)
         if (emu_ctl(i) || i == C_STICK || i == C_SETTINGS) return true;
         if (i == C_ITEML || i == C_ITEMR) return config_live_touch_show(TB_ITEM_ARROWS) != 0;
@@ -535,8 +547,8 @@ void publish_hud(const Layout &l) {  // (to the render thread; the kind and what
 const char *LAYOUT_FILE = "touch_layout.txt";  // (the working folder: the app's, beside mhgurecomp.ini)
 // A control by its key in the file (C_LAID: the laid-out ones); -1 none
 int ctl_by_key(const char *key) {
-    for (int i = 0; i < C_LAID; i++)
-        if (!strcmp(key, DEFS[i].key)) return i;
+    for (int i = 0; i < C_COUNT; i++)
+        if (laid(i) && !strcmp(key, DEFS[i].key)) return i;
     return -1;
 }
 // A file's text, whole (false: it can't be read)
@@ -606,8 +618,8 @@ void parse_layout(const std::string &text, Layout *l, EditPanel *ep) {
         // with the touch controls, pc_hud_<key> dx dy size without)
         int n = sscanf(line, "%31s %f %f %f %f %d", key, &x, &y, &s, &alpha, &hidden);
         if (n < 4) continue;
-        for (int i = 0; i < C_LAID; i++)
-            if (!strcmp(key, DEFS[i].key) && x > 0 && x < 4 && y > 0 && y < 1 && s >= .4f && s <= 2.5f)
+        for (int i = 0; i < C_COUNT; i++)
+            if (laid(i) && !strcmp(key, DEFS[i].key) && x > 0 && x < 4 && y > 0 && y < 1 && s >= .4f && s <= 2.5f)
                 l->x[i] = x, l->y[i] = y, l->scale[i] = s;
         for (int p = 0; p < HUD_PROFILES; p++)
             for (int k = 0; k < HP_COUNT; k++) {
@@ -640,7 +652,7 @@ bool save_layout_file(const char *path, const Layout &l, const EditPanel *ep) {
     FILE *f = fopen(path, "w");
     if (!f) { rt_logf("[touch] could not save %s\n", path); return false; }
     fprintf(f, "# touch controls: name, centre (screen heights from its edge and the bottom), size\n");
-    for (int i = 0; i < C_LAID; i++) fprintf(f, "%s %.4f %.4f %.3f\n", DEFS[i].key, l.x[i], l.y[i], l.scale[i]);
+    for (int i = 0; i < C_COUNT; i++) if (laid(i)) fprintf(f, "%s %.4f %.4f %.3f\n", DEFS[i].key, l.x[i], l.y[i], l.scale[i]);
     fprintf(f, "# the game's HUD parts with the touch controls: name, offset from their place (the game's 1280x720 units), size, "
                "opacity, hidden\n");
     for (int k = 0; k < HP_COUNT; k++) {
@@ -660,7 +672,8 @@ bool save_layout_file(const char *path, const Layout &l, const EditPanel *ep) {
     fprintf(f, "monster_bars %.4f %.4f %.2f\n", l.bars_x, l.bars_y, l.bars_k);
     fprintf(f, "# controls hidden (emulator-style), held by a tap (hold), with the player's own picture (image <key> <file>;\n"
                "# the stick's knob: image_knob <file>)\n");
-    for (int i = 0; i < C_LAID; i++) {
+    for (int i = 0; i < C_COUNT; i++) {
+        if (!laid(i)) continue;
         if (l.kind == KIND_EMU && (l.off >> i & 1)) fprintf(f, "hidden %s\n", DEFS[i].key);
         if (l.hold >> i & 1) fprintf(f, "hold %s\n", DEFS[i].key);
         if (l.image[i][0]) fprintf(f, "image %s %s\n", DEFS[i].key, l.image[i]);
@@ -1498,6 +1511,8 @@ std::atomic<uint64_t> g_assist_until;  // (a locked shot holds R for its aim unt
 // game thread's touch_draw waits on that lock); the SDL main thread's alone
 bool g_tap_due;
 void tap_due(void) { g_tap_due = true; }
+bool g_tree_tap;
+struct TreeAfterUnlock { ~TreeAfterUnlock(); };
 struct TapAfterUnlock {
     ~TapAfterUnlock() {
         if (g_tap_due) g_tap_due = false, haptics_tap();
@@ -1889,14 +1904,14 @@ const char *T(const char *english) { return settings_text(g_language, english); 
 // and Lock-on buttons, nor the aim (its tap is the scope or a bow's aiming mode, which stay by themselves). The MH4U
 // port's the same
 bool holdable(int i) {
-    if (i < 0 || i >= C_LAID) return false;
+    if (!laid(i)) return false;
     return !(i == C_ATTACK || i == C_CORNER || i == C_STICK || is_dpad(i) || i == C_MPAD || i == C_SETTINGS || i == C_LOCKON || i == C_MAPTOG ||
              i == C_ITEML || i == C_ITEMR || i == C_RUNLOCK || i == C_AMMO_UP || i == C_AMMO_DOWN || i == C_RAIM);
 }
 // A picture of the player's (Layout.image) can be on every control the editor places (1.0.1, the owner's call: the round
 // buttons as in 1.0, and the stick - its base, and its knob apart -, both d-pads, the sprint lock's circle, the item bar's
 // arrows, the attacks' pill and corner band, the menu pad), drawn in place of the control's whole look (pic_only)
-bool image_ok(int i) { return i >= 0 && i < C_LAID; }
+bool image_ok(int i) { return laid(i); }
 
 // ---- the layout editor: the touch controls and the game's HUD. A panel in two rows: what is picked (smaller, bigger,
 // hide or show a part - or a control of the emulator-style layout -, back to its default, held by a tap, a picture of
@@ -2790,6 +2805,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
     if (e->type != SDL_EVENT_FINGER_DOWN && e->type != SDL_EVENT_FINGER_MOTION && e->type != SDL_EVENT_FINGER_UP &&
         e->type != SDL_EVENT_FINGER_CANCELED)
         return false;
+    TreeAfterUnlock tree_after;
     TapAfterUnlock tap_after;  // (declared first: it runs after the lock is released)
     std::lock_guard<std::mutex> l(g_lock);
     State &s = g_s;
@@ -2904,6 +2920,7 @@ extern "C" bool touch_event(const SDL_Event *e) {
                 ammo_step(s, c == C_AMMO_UP ? 1 : -1), f->repeat_ns = now + 550 * MS;  // (held: more steps, touch_input)
             if (c == C_LOCKON) lock_set(s, !s.lock, "the Lock-on button");  // (as it lands; lit while held, presses nothing)
             if (c == C_MAPTOG) map_toggle(s);
+            if (c == C_TREE) g_tree_tap = true, f->done = true;
             // (a button a tap holds down, Layout.hold: this tap holds it, what it presses now staying pressed after the
             // finger lifts, lit; the next tap lets it go, and presses nothing more)
             if ((s.layout.hold >> c & 1) && holdable(c)) {
@@ -3517,6 +3534,14 @@ extern "C" void touch_input(bool pad_connected, bool typing, uint64_t *buttons, 
 // held back after X, the locked run, the lock-on (its follow comes back LOCK_AFTER_TURN after a turn), a locked shot,
 // a Hunter Art on the right stick, the item bar held open, the editor. While any is on the window loop polls every 3 ms
 // as always
+TreeAfterUnlock::~TreeAfterUnlock() {
+    if (!g_tree_tap) return;
+    g_tree_tap = false;
+    tap_due();
+    weapon_tree_open(false);
+    if (weapon_tree_is_open()) touch_reset();
+}
+
 extern "C" bool touch_busy(void) {
     std::lock_guard<std::mutex> l(g_lock);
     const State &s = g_s;
@@ -4212,6 +4237,17 @@ void icon(ImDrawList *dl, Icon ic, ImVec2 c, float r, ImU32 col, ImU32 deep) {
         }
         for (int d = -1; d <= 1; d += 2)
             dl->AddTriangleFilled(P(c, s, .95f * d, 0), P(c, s, .68f * d, -.24f), P(c, s, .68f * d, .24f), col);
+        break;
+    }
+    case I_TREE: {
+        const float t = .11f * s;
+        dl->AddLine(P(c, s, -.62f, 0), P(c, s, -.08f, 0), col, t);
+        for (float y : {-.5f, 0.f, .5f}) {
+            dl->AddLine(P(c, s, -.08f, 0), P(c, s, -.08f, y), col, t);
+            dl->AddLine(P(c, s, -.08f, y), P(c, s, .5f, y), col, t);
+            dl->AddCircleFilled(P(c, s, .52f, y), .15f * s, col, 12);
+        }
+        dl->AddCircleFilled(P(c, s, -.62f, 0), .19f * s, col, 14);
         break;
     }
     case I_LOCKON: {  // the lock-on: a reticle with a padlock in its middle (the MH4U port's the same)
@@ -5095,7 +5131,7 @@ void dashed_rect(ImDrawList *dl, Rect r, ImU32 col, float t) {
 
 // A control drawn by the editor: the layout's, or one of the menu pad's tabs or its Minus, which go with it
 bool editor_shows(int i) {
-    if (i < C_LAID) return in_editor(i);
+    if (laid(i)) return in_editor(i);
     return of_mpad(i) && in_editor(C_MPAD) && mpad_member(i);
 }
 // The control's place, a thumb's slop more, touches a rectangle (a part's frame: the editor's warning)
@@ -5398,8 +5434,8 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
             dl->PathArcTo(g.c, reach, k * PI / 24, (k + 1) * PI / 24, 4), dl->PathStroke(fade(GOLD, .55f), ImDrawFlags_None, .003f * h);
         text_center(dl, font, .02f * h, ImVec2(g.c.x, std::max(g.c.y - reach - .02f * h, .02f * h)), fade(GOLD, .8f), T("Floating stick"), w);
     }
-    for (int i = 0; i < C_LAID && touch; i++) {
-        if (!in_editor(i)) continue;  // (the controls no longer there stay in the file's order only)
+    for (int i = 0; i < C_COUNT && touch; i++) {
+        if (!laid(i) || !in_editor(i)) continue;  // (the controls no longer there stay in the file's order only)
         bool hid = hideable(i) && (s.layout.off >> i & 1);  // (the emulator-style layout's, hidden: faded)
         control(dl, font, s.layout, i, w, h, s, hid ? .35f : 1.0f);
         if (i == C_MPAD)  // (its tabs and Minus with it, where it puts them)
@@ -5452,8 +5488,8 @@ void draw_editor(ImDrawList *dl, ImFont *font, const State &s, float w, float h)
         ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, t);
         float side = DEFS[i].right ? -1.0f : 1.0f, tx = g.c.x + side * (g.r * 1.3f + ts.x * .5f);
         bool beside = s.layout.x[i] < .12f && i != C_ATTACK && i != C_STICK && i != C_MPAD;
-        for (int j = 0; j < C_LAID && beside; j++) {  // (not over another control: then below or above it)
-            if (j == i || !in_editor(j)) continue;
+        for (int j = 0; j < C_COUNT && beside; j++) {  // (not over another control: then below or above it)
+            if (j == i || !laid(j) || !in_editor(j)) continue;
             Geo o = place(s.layout, j, w, h);
             if (j == C_CORNER) continue;
             if (j == C_ATTACK) {  // (a thin tilted capsule: the label's corners, edges and middle against its axis)
