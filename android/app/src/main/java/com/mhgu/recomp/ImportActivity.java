@@ -151,7 +151,10 @@ public class ImportActivity extends Activity {
             "Una carpeta de mod con romfs o exefs adentro, o un .zip de esa carpeta. Después se ordenan y se activan en la "
                 + "página Mods. Los parches del código (exefs) funcionan, pero esa parte del juego corre más lenta.",
             "Tus propios DLC del juego: la carpeta de cada uno tiene un archivo DLC.dlcp. Elige una carpeta y se copian "
-                + "todos los que haya adentro. Después, en el juego: menú principal, Descarga. Es experimental."}
+                + "todos los que haya adentro. Después, en el juego: menú principal, Descarga. Es experimental.",
+            "Un shader de fragmento Vulkan GLSL de un solo pase (.glsl). Debe leer la imagen del juego con sampler2D t en set 0, binding 0, "
+                + "recibir las coordenadas UV en location 0 y escribir vec4 o en location 0. Se compila al iniciar el juego. "
+                + "No es un preset de ReShade ni un shader de varios pases."}
             : new String[] {
             "Cheat .txt files in Atmosphere's format, for version 1.4.0 (its build id is FB08F1D20FD1204F). Then turn them on "
                 + "one by one on the Cheats page. Those that change the game's code work, but that part of the game runs slower.",
