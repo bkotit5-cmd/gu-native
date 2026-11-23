@@ -22,6 +22,7 @@
 
 #include "../../colour_filter.h"
 #include "../../overlay.h"
+#include "../../kernel.h"
 #include "fsr.h"
 #include "framegen.h"
 #include "fsr4.h"
@@ -1821,6 +1822,15 @@ static void present_made(TexBackend *real, double a) {
 #endif
 }
 
+// Forge 2.0.0: resolve a plugin's NVN texture and make the sampled Vulkan view used by ImGui.
+static VkImageView user_tex_view(uint32_t tex, const void *view) {
+    if (!tex || !kernel_mapped(tex, sizeof(NvnTexture))) return VK_NULL_HANDLE;
+    NvnTexture *t = HOST(NvnTexture, tex);
+    if (!t) return VK_NULL_HANDLE;
+    vk_ms_resolve(vk_tex(t, false));
+    return vk_view(t, (const NvnTextureView *)view, view != nullptr, false, TEXTYPE_2D);
+}
+
 void backend_present(NvnTexture *t) {
     extern void vi_frame_presented(void);
     vi_frame_presented();  // (the frame rate target back in place; MHGU_STEPLOG's count: runtime/hle/vi.c)
@@ -1834,6 +1844,7 @@ void backend_present(NvnTexture *t) {
     b->presented = true;
     vk_end_pass();
     vk_ms_resolve(b);
+    overlay_user_textures_prepare(user_tex_view);
 #ifdef __ANDROID__
     if (vk_framegen_enabled()) present_made(b, (double)t->width / t->height);  // FRAMEGEN: (framegen.c)
 #else
