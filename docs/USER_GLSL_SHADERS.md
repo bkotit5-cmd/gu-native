@@ -4,15 +4,15 @@ The Shader page can import and select a custom **single-pass Vulkan GLSL fragmen
 
 ## Loading one
 
-On Android, open **Settings → Shader → Load GLSL shader**, choose a GLSL file, then press **Use** beside it. Close the manager with **Restart the game** to apply it. Imported shaders live in the app's private shaders/ folder. On desktop, the Shader page opens a GLSL file picker and selects the chosen file; restart the app after importing.
+On Android, open **Settings → Shader → Load GLSL shader**, choose a GLSL file, then press **Use** beside it. Close the manager with **Restart the game** to apply it. Imported shaders live in the app's private `shaders/` folder. On desktop, the Shader page opens a GLSL file picker and selects the chosen file; restart the app after importing.
 
-The active shader is recorded as the filename in shaders/active.txt. Select **Disable** in the Shader manager to return to the built-in presentation shader.
+The active shader is recorded as the filename in `shaders/active.txt`. Select **Disable** in the Shader manager to return to the built-in presentation shader.
 
 ## Required GLSL interface
 
 Use Vulkan GLSL 450 and this interface:
 
-\`\`\`glsl
+```glsl
 #version 450
 layout(set = 0, binding = 0) uniform sampler2D t;
 layout(location = 0) in vec2 uv;
@@ -21,12 +21,12 @@ layout(location = 0) out vec4 o;
 void main() {
     o = texture(t, uv);
 }
-\`\`\`
+```
 
-- **t** is the resolved game image.
-- **uv** is the fullscreen texture coordinate.
-- **o** is the final colour for the pixel.
-- The entry point must be **main**.
+- `t` is the resolved game image.
+- `uv` is the fullscreen texture coordinate.
+- `o` is the final colour for the pixel.
+- The entry point must be `main`.
 
 The shader is compiled by the app's existing shaderc compiler for the active Vulkan 1.1/1.2 device. Source files are limited to 2 MB. Compilation or pipeline errors are written to the app log; the renderer falls back to the built-in presentation shader rather than intentionally terminating the game.
 
