@@ -35,10 +35,10 @@
 #include "overlay.h"
 #include "touch.h"
 
-#define FORGE_MAJOR 1
-#define FORGE_MINOR 5
-#define FORGE_PATCH 1
-#define FORGE_VERSION_STRING "1.5.1"
+#define FORGE_MAJOR 2
+#define FORGE_MINOR 0
+#define FORGE_PATCH 0
+#define FORGE_VERSION_STRING "2.0.0"
 
 // Main module offsets (from its text) Forge uses, MHGU 1.4.0
 #define OFF_APP_RUN     0xB8692Cu  // sApp::run
@@ -54,11 +54,14 @@ typedef struct {
     Module *m;
     uint32_t on_load, on_init, on_update;
     uint32_t on_imgui[3];  // forge_onImGuiInit, forge_onImGuiRender, forge_onImGuiFreeRender (FORGE_IMGUI_*)
+    uint32_t on_nvn_init, on_nvn_ready, on_nvn_render;  // Forge 2.0.0 rendering callbacks
+    bool nvn_started;
     uint32_t param;  // PluginInitParam: u16 major, minor, patch; char name[64]
     bool active;  // not rejected (a plugin without forge_onLoad is active too)
 } Plugin;
 static Plugin plugins[MAX_PLUGINS];
 static int nplugins;
+static volatile bool plugins_started;
 static uint32_t main_text;
 static int log_level = 1;  // Forge LogLevel: 0 debug, 1 info, 2 warn, 3 error (MHGU_FORGE_LOG)
 
@@ -1009,6 +1012,62 @@ HLE_FUNC("forge_input_isCtrlDown", f_ctrl) { RET(key(keys_now, SDL_SCANCODE_LCTR
 HLE_FUNC("forge_input_isAltDown", f_alt) { RET(key(keys_now, SDL_SCANCODE_LALT) || key(keys_now, SDL_SCANCODE_RALT)); }
 HLE_FUNC("forge_graphics_isMenuVisible", f_gfx_menu_visible) { RET(overlay_menu_open()); }
 
+static uint32_t nvn_device, swap_textures;
+static int swap_count;
+
+void forge_nvn_device(uint32_t device) {
+    nvn_device = device;
+}
+
+void forge_nvn_window_textures(uint32_t textures, int n) {
+    if (n < 0) n = 0;
+    if (n > 8) n = 8;
+    if (!swap_textures) swap_textures = hle_alloc(8 * 4);
+    if (!swap_textures) { swap_count = 0; return; }
+    if (n && !kernel_mapped(textures, 4u * (uint32_t)n)) { swap_count = 0; return; }
+    for (int i = 0; i < n; i++)
+        ST32(swap_textures + 4u * (uint32_t)i, LD32(textures + 4u * (uint32_t)i));
+    swap_count = n;
+}
+
+void forge_nvn_present(Cpu *c, uint32_t queue, uint32_t window, int index) {
+    if (!nplugins || !__atomic_load_n(&plugins_started, __ATOMIC_ACQUIRE)) return;
+    static uint32_t gpa;
+    if (!gpa) gpa = hle_register("nvnDeviceGetProcAddress", hle_lookup_impl("nvnDeviceGetProcAddress"));
+    bool fresh[MAX_PLUGINS] = {0};
+    for (int i = 0; i < nplugins; i++) {
+        Plugin *p = &plugins[i];
+        if (!p->active || p->nvn_started) continue;
+        p->nvn_started = fresh[i] = true;
+        if (p->on_nvn_init) gcall(c, p->on_nvn_init, gpa, nvn_device, queue, 0);
+    }
+    for (int i = 0; i < nplugins; i++)
+        if (fresh[i] && plugins[i].on_nvn_ready) gcall(c, plugins[i].on_nvn_ready, 0, 0, 0, 0);
+    for (int i = 0; i < nplugins; i++)
+        if (plugins[i].active && plugins[i].on_nvn_render)
+            gcall(c, plugins[i].on_nvn_render, window, (uint32_t)index, 0, 0);
+}
+
+HLE_FUNC("forge_graphics_isMenuOpen", f_gfx_menu_open) { RET(overlay_menu_open()); }
+
+HLE_FUNC("forge_graphics_registerTexture", f_gfx_register_texture) {
+    uint32_t tex = ARG(0), view = ARG(1);
+    if (view && !kernel_mapped(view, 0x28)) view = 0;
+    uint64_t id = tex && kernel_mapped(tex, 8) ? overlay_user_texture_add(tex, view ? G2H(view) : NULL) : 0;
+    if (!id) flog(3, "Insufficient number of texture descriptors to register texture");
+    RET64(id);
+}
+HLE_FUNC("forge_graphics_unregisterTexture", f_gfx_unregister_texture) {
+    uint64_t id = ARG64(0);
+    if (!overlay_user_texture_remove(id))
+        flog(2, "Attempted to unregister unknown texture 0x%llX", (unsigned long long)id);
+}
+HLE_FUNC("forge_graphics_getSwapChainTextures", f_gfx_swapchain) {
+    if (ARG(0) && kernel_mapped(ARG(0), 4)) ST32(ARG(0), (uint32_t)swap_count);
+    RET(swap_count ? swap_textures : 0);
+}
+
+
 // ------------------------------------------------------------------ sockets
 // forge_socket_*: Forge's thin wrappers of nn::socket (a Socket is {int fd}, returned in r0), on the port's own
 // nn::socket: the virtual network of runtime/net/vsock.c, which carries the game's local play and nothing else. Calls
@@ -1188,6 +1247,7 @@ static void app_run(Cpu *c) {
             gcall(c, p->on_init, 0, 0, 0, 0);
         }
     }
+    __atomic_store_n(&plugins_started, true, __ATOMIC_RELEASE);
     memcpy(c->r, args, sizeof args);
     fnhook_call_original(c, text_addr(OFF_APP_RUN));
 }
@@ -1455,6 +1515,9 @@ void forge_init(void) {
         p->on_imgui[FORGE_IMGUI_INIT] = loader_module_symbol(m, "forge_onImGuiInit");
         p->on_imgui[FORGE_IMGUI_RENDER] = loader_module_symbol(m, "forge_onImGuiRender");
         p->on_imgui[FORGE_IMGUI_FREE_RENDER] = loader_module_symbol(m, "forge_onImGuiFreeRender");
+        p->on_nvn_init = loader_module_symbol(m, "forge_onNvnInit");
+        p->on_nvn_ready = loader_module_symbol(m, "forge_onNvnReady");
+        p->on_nvn_render = loader_module_symbol(m, "forge_onNvnRender");
         interp_add_range(m->base + m->text_off, m->base + m->text_off + m->text_size);
         kernel_map_region(m->base + m->text_off, m->ro_off - m->text_off, 3, 5);
         kernel_map_region(m->base + m->ro_off, m->data_off - m->ro_off, 3, 1);
