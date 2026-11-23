@@ -37,14 +37,12 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Ajustes -> Trucos / Mods: lo que el juego lee de las carpetas cheats/, mods/ y dlc/ de la app (Android/data, que en
- * Android 11 o más no se puede abrir con un explorador de archivos), copiado desde donde el jugador lo tenga:
- *   - trucos: archivos .txt en el formato de Atmosphere (runtime/cheats.c), a cheats/;
- *   - un mod: una carpeta con romfs/ o exefs/ (o los archivos de nativeNX), o un .zip de ella, a mods/<nombre>/
- *     (runtime/mods.c; su orden y si está activo, en la página Mods);
- *   - DLC: cada carpeta con un DLC.dlcp, a dlc/<id del título o número>/ (runtime/services/dlc.c).
- * Se lee al arrancar el juego: al cerrar, si algo cambió, se reinicia (como DriverActivity). La app ya tiene acceso a todos
- * los archivos (lo pide la pantalla de la carpeta del juego), así que el explorador es propio, con el estilo del juego.
+ * Ajustes -> Trucos / Mods / Shader: importa trucos, mods, DLC y shaders GLSL desde el almacenamiento del jugador.
+ * Los trucos, mods y DLC conservan sus carpetas y formatos de siempre. Los shaders GLSL se copian a shaders/ dentro de
+ * la carpeta privada de la app; active.txt guarda solo el nombre del shader seleccionado. Se compilan en el próximo
+ * inicio del renderer Vulkan como un pase de fragmento a pantalla completa.
+ * El navegador es propio, con el estilo del juego, porque Android 11 o más no permite abrir Android/data con un
+ * explorador de archivos normal. La app ya tiene el acceso necesario (lo pide la pantalla de la carpeta del juego).
  */
 public class ImportActivity extends Activity {
     public static final String KIND = "kind";
