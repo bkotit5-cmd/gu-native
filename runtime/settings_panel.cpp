@@ -4094,20 +4094,20 @@ const char *const TB_TITLES[TB_COUNT] = {"Attacks (A / X)", "Evade (B)", "Guard 
                                          "Crouching fire / coating", "Ammo arrows", "Item bar arrows", "ZL in menus", "ZR in menus",
                                          "Menu pad", "Run with the stick", "Keep guarding while sliding", "Lock-on button", "Floating stick",
                                          "L and R in menus", "D-pad in menus", "Hunter Arts with a controller",
-                                         "Long press hides the controls", "Slide between buttons: both pressed"};
+                                         "Long press hides the controls", "Slide between buttons: both pressed", "Map button: show / hide minimap"};
 const char *const TB_KEYS[TB_COUNT] = {"ShowAttacks", "ShowDodge", "ShowGuard", "ShowSheathe", "ShowPlus", "ShowMinus", "ShowDpad",
                                        "ShowL", "ShowZL", "ShowZR", "ShowL3", "ShowR3", "ShowStick", "ShowRanged", "ShowFire",
                                        "ShowSecond", "ShowAim", "ShowRangedSpecial", "ShowAmmo", "ShowItemArrows", "ShowMenuZL",
                                        "ShowMenuZR", "ShowMenuPad", "StickRun", "GuardSlide", "ShowLockOn", "FloatingStick",
-                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController", "HoldToHide", "SlideBoth"};
+                                       "ShowMenuLR", "DpadInMenus", "ArtsWithController", "HoldToHide", "SlideBoth", "ShowMapButton"};
 // (their rows' order: each way of a button by it - keeping the guard by Guard, the run and the floating stick by the stick,
 // the D-pad in menus by the D-pad -, the menu pad before the tabs that go with it; the Hunter Arts' taps with a controller
 // last, a controller's way. The floating stick and the Arts' taps have rows of their own elsewhere: tb_elsewhere)
 const int TB_ORDER[TB_COUNT] = {TB_ATTACKS, TB_DODGE, TB_GUARD, TB_GUARD_SLIDE, TB_SLIDE_BOTH, TB_SHEATHE, TB_PLUS, TB_MINUS, TB_DPAD,
                                 TB_DPAD_MENUS, TB_L, TB_ZL, TB_LOCKON, TB_ZR, TB_L3, TB_R3, TB_STICK, TB_FLOAT_STICK, TB_STICK_RUN,
                                 TB_RANGED, TB_FIRE, TB_SECOND, TB_AIM, TB_RSPECIAL, TB_AMMO, TB_ITEM_ARROWS, TB_MENU_PAD, TB_MENU_LR,
-                                TB_MENU_ZL, TB_MENU_ZR, TB_ARTS_PAD, TB_HOLD_HIDE};
-static_assert(TB_COUNT == 32, "TB_ORDER: a place for each of the touch settings");
+                                TB_MENU_ZL, TB_MENU_ZR, TB_ARTS_PAD, TB_HOLD_HIDE, TB_MAP_BUTTON};
+static_assert(TB_COUNT == 33, "TB_ORDER: a place for each of the touch settings");
 int s_combo;  // the combined button being edited
 void touch_button_rows(std::vector<Row> &r) {
     Config &c = s.draft;
@@ -4130,6 +4130,8 @@ void touch_button_rows(std::vector<Row> &r) {
                 r.back().help = tr("The menu pad's L and R tabs above it, which turn the menus' pages (ZL and ZR when the game's options turn pages with them). Off: the menu pad without them.");
             if (i == TB_ARTS_PAD)
                 r.back().help = tr("With a controller connected (the touch controls hidden), a tap on a Hunter Art's panel performs it, with what your Control Type uses for it. Off: the panel takes no taps then.");
+            if (i == TB_MAP_BUTTON)
+                r.back().help = tr("On: a button in a hunt hides or shows the minimap. Move and resize it with Customize controls and HUD. Off: no map button.");
             if (i == TB_SLIDE_BOTH)  // (1.0.1, both platforms; the MH4U port's the same name and default)
                 r.back().help = tr("On: a thumb that slides from one button onto another keeps both pressed, as two fingers would: R onto B as onto X, Evade onto an attack, one attack onto the other, any of A, B, X, Y and the shoulder buttons onto another, the combined buttons too. Slid back onto the button it started on, that one alone again. Never in the game's menus. Off: the slides of 1.0.");
 #ifndef __ANDROID__  // (the default ini says nothing of these two; a phone's: PHONE_HELP)
