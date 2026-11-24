@@ -2536,26 +2536,6 @@ void cache_clear_row(std::vector<Row> &r) {
         "primeras zonas pueden tironear o mostrar modelos tarde hasta que estén armados. Un segundo toque, antes de que "
         "el juego vuelva a empezar, conserva la caché.");
 }
-static bool remove_user_shader_file(const std::string &name) {
-    if (!user_shader_filename(name)) return false;
-    if (active_user_shader_name() == name && !set_active_user_shader("")) {
-        LOG("[shader] could not disable shader before removal: %s\n", name.c_str());
-        return false;
-    }
-    std::error_code ec;
-    bool removed = std::filesystem::remove(user_shader_directory() / name, ec);
-    if (ec || !removed) {
-        LOG("[shader] could not remove %s: %s\n", name.c_str(), ec ? ec.message().c_str() : "file not found");
-        return false;
-    }
-    ec.clear();
-    std::filesystem::remove(user_shader_directory() / (name + ".params"), ec);
-    if (ec) LOG("[shader] could not remove parameters for %s: %s\n", name.c_str(), ec.message().c_str());
-    g_user_shader_files_ready = false;
-    LOG("[shader] removed from in-game menu: %s\n", name.c_str());
-    return true;
-}
-
 // Installed shaders are selected and managed in the in-game menu; Android imports a file through the system document picker.
 static std::filesystem::path user_shader_directory() {
     const char *home = std::getenv("MHGU_HOME");
@@ -2641,6 +2621,26 @@ static bool set_active_user_shader(const std::string &name) {
         std::remove(tmp.string().c_str());
         return false;
     }
+    return true;
+}
+
+static bool remove_user_shader_file(const std::string &name) {
+    if (!user_shader_filename(name)) return false;
+    if (active_user_shader_name() == name && !set_active_user_shader("")) {
+        LOG("[shader] could not disable shader before removal: %s\n", name.c_str());
+        return false;
+    }
+    std::error_code ec;
+    bool removed = std::filesystem::remove(user_shader_directory() / name, ec);
+    if (ec || !removed) {
+        LOG("[shader] could not remove %s: %s\n", name.c_str(), ec ? ec.message().c_str() : "file not found");
+        return false;
+    }
+    ec.clear();
+    std::filesystem::remove(user_shader_directory() / (name + ".params"), ec);
+    if (ec) LOG("[shader] could not remove parameters for %s: %s\n", name.c_str(), ec.message().c_str());
+    g_user_shader_files_ready = false;
+    LOG("[shader] removed from in-game menu: %s\n", name.c_str());
     return true;
 }
 
