@@ -7527,7 +7527,66 @@ static VkShaderModule user_shader;
 static uint64_t user_shader_file_key;
 static bool user_shader_key_valid;
 static TexBackend *user_depth_target;
+static NvnTexture *user_depth_colour, *user_depth_source;
 static uint32_t user_depth_level, user_depth_layer;
+static const char *user_depth_reason = "not_captured";
+
+// Report only changes, so an active shader does not flood the log every frame. The active attachment set
+// matters more than the largest depth image elsewhere in memory.
+static void user_depth_report(const char *state, const char *reason, TexBackend *presented) {
+    static const char *last_state, *last_reason;
+    static const NvnTexture *last_colour, *last_source;
+    static const TexBackend *last_depth, *last_presented;
+    static uint32_t last_cw, last_ch, last_sw, last_sh, last_pw, last_ph;
+    static char last_slots[384];
+
+    uint32_t cw = user_depth_colour ? user_depth_colour->width : 0;
+    uint32_t ch = user_depth_colour ? user_depth_colour->height : 0;
+    uint32_t sw = user_depth_source ? user_depth_source->width : 0;
+    uint32_t sh = user_depth_source ? user_depth_source->height : 0;
+    uint32_t pw = presented ? presented->width : 0;
+    uint32_t ph = presented ? presented->height : 0;
+    char slots[384] = {0};
+    size_t used = 0;
+    for (int i = 0; i < st.rt.ncolor && used < sizeof slots; i++) {
+        NvnTexture *t = st.rt.color[i];
+        if (!t) continue;
+        int n = snprintf(slots + used, sizeof slots - used, "%sc%d=%p:%ux%u:%#x",
+                         used ? " " : "", i, (void *)t, t->width, t->height, t->format);
+        if (n < 0 || (size_t)n >= sizeof slots - used) break;
+        used += (size_t)n;
+    }
+
+    bool same = last_state && last_reason && !strcmp(last_state, state) && !strcmp(last_reason, reason) &&
+                last_colour == user_depth_colour && last_source == user_depth_source && last_depth == user_depth_target &&
+                last_presented == presented && last_cw == cw && last_ch == ch && last_sw == sw && last_sh == sh &&
+                last_pw == pw && last_ph == ph && !strcmp(last_slots, slots);
+    if (same) return;
+
+    LOG("[shader] depthTex: %s reason=%s capture_color=%p %ux%u nvn_fmt=%#x "
+        "depth_source=%p %ux%u nvn_fmt=%#x depth_backend=%p",
+        state, reason, (void *)user_depth_colour, cw, ch, user_depth_colour ? user_depth_colour->format : 0,
+        (void *)user_depth_source, sw, sh, user_depth_source ? user_depth_source->format : 0,
+        (void *)user_depth_target);
+    if (user_depth_target) {
+        TexBackend *d = user_depth_target;
+        LOG(" vk_fmt=%d extent=%ux%u samples=%u aspect=%#x stand_in=%d ms=%p ms_dirty=%d ms_valid=%d",
+            d->format, d->width, d->height, d->samples, d->aspect, d->stand_in, (void *)d->ms,
+            d->ms_dirty, d->ms_valid);
+        if (d->ms) LOG(" ms_fmt=%d ms_samples=%u", d->ms->format, d->ms->samples);
+    }
+    LOG(" presented=%p %ux%u pass_scale=%.3f rt_colors=%d [%s]\n",
+        (void *)presented, pw, ph, pass_sx, st.rt.ncolor, slots);
+
+    last_state = state;
+    last_reason = reason;
+    last_colour = user_depth_colour;
+    last_source = user_depth_source;
+    last_depth = user_depth_target;
+    last_presented = presented;
+    last_cw = cw; last_ch = ch; last_sw = sw; last_sh = sh; last_pw = pw; last_ph = ph;
+    snprintf(last_slots, sizeof last_slots, "%s", slots);
+}
 
 static uint64_t user_shader_hash(uint64_t h, const void *data, size_t size) {
     const uint8_t *p = data;
@@ -7644,29 +7703,71 @@ void vk_present_shader_poll(void) {
 // Capture only the depth attachment paired with the game colour image being presented.
 void vk_present_depth_capture(NvnTexture *colour) {
     user_depth_target = NULL;
+    user_depth_colour = colour;
+    user_depth_source = NULL;
     user_depth_level = user_depth_layer = 0;
-    if (!colour || !st.rt.depth) return;
+    user_depth_reason = "no_color";
+    if (!colour) return;
+
+    if (!st.rt.depth) {
+        user_depth_reason = "no_depth_attachment";
+        return;
+    }
     bool paired = false;
     for (int i = 0; i < st.rt.ncolor; i++)
         if (st.rt.color[i] == colour) { paired = true; break; }
-    if (!paired) return;
+    if (!paired) {
+        user_depth_reason = "color_not_paired";
+        return;
+    }
 
     // begin_pass() maps both colour and depth through FSR's output-size stand-ins when pass_sx is scaled.
     NvnTexture *depth_texture = pass_sx != 1.0f ? vk_fsr_map(st.rt.depth, true) : st.rt.depth;
-    if (!depth_texture || !renderer_format_is_depth(depth_texture->format)) return;
+    user_depth_source = depth_texture;
+    if (!depth_texture) {
+        user_depth_reason = "depth_mapping_failed";
+        return;
+    }
+    if (!renderer_format_is_depth(depth_texture->format)) {
+        user_depth_reason = "invalid_depth_format";
+        return;
+    }
     TexBackend *depth = vk_tex(depth_texture, true);
-    if (!depth || !depth->image || depth->stand_in || !(depth->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) return;
+    user_depth_target = depth;
+    if (!depth) {
+        user_depth_reason = "depth_backend_missing";
+        return;
+    }
+    if (!depth->image) {
+        user_depth_reason = "depth_image_missing";
+        return;
+    }
+    if (depth->stand_in) {
+        user_depth_reason = "depth_standin";
+        return;
+    }
+    if (!(depth->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) {
+        user_depth_reason = "missing_depth_aspect";
+        return;
+    }
 
     user_depth_level = st.rt.has_dview && (st.rt.dview.setmask & 1) ? st.rt.dview.base_level : 0;
     user_depth_layer = st.rt.has_dview && (st.rt.dview.setmask & 2) ? st.rt.dview.min_layer : 0;
-    // vk_ms_resolve() resolves only mip 0 / layer 0. Never expose an unsupported or stale MSAA depth subview.
-    static int depth_warnings;
-    if (depth->ms && (user_depth_level || user_depth_layer || !depth_copy_ok(depth->ms->format))) {
-        if (depth_warnings++ < 4)
-            LOG("[shader] depth input unavailable for this multisample depth subview/format\n");
-        return;
+
+    // Only reject unsupported subviews when the multisampled companion is newer and must be resolved.
+    // A cached companion that is clean does not invalidate the already-resolved base image.
+    if (depth->ms && depth->ms_dirty) {
+        if (user_depth_level || user_depth_layer) {
+            user_depth_reason = "unsupported_msaa_subview";
+            return;
+        }
+        if (!depth_copy_ok(depth->ms->format)) {
+            user_depth_reason = "unsupported_msaa_format";
+            return;
+        }
     }
-    user_depth_target = depth;
+
+    user_depth_reason = "captured";
 }
 
 // Called after the guest pass ends and before the swapchain render pass begins.
@@ -7771,12 +7872,20 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     // the screen's size over it, fsr.c's plain scaling did that and this stays linear; FSR: never)
     const bool sharp = !g_fsr_on && g_scaled_3d && config_live_upscale_sharp();
     VkImageView depth_view = vk_dummy_view(TEXTYPE_2D);
+    bool has_depth_view = false;
     if (user_depth_target && user_depth_target->image && !user_depth_target->stand_in) {
         static const VkComponentMapping identity = {0};
         VkImageView v = vk_image_view(user_depth_target, VK_IMAGE_VIEW_TYPE_2D, user_depth_target->format,
                                       user_depth_level, 1, user_depth_layer, 1, identity, VK_IMAGE_ASPECT_DEPTH_BIT);
-        if (v) depth_view = v;
+        if (v) {
+            depth_view = v;
+            has_depth_view = true;
+        } else {
+            user_depth_reason = "depth_view_creation_failed";
+        }
     }
+    if (kind == 3)
+        user_depth_report(has_depth_view ? "BOUND" : "FALLBACK", has_depth_view ? "ok" : user_depth_reason, b);
     VkDescriptorImageInfo ii[2] = {
         {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
         {vk_default_sampler(false), depth_view, VK_IMAGE_LAYOUT_GENERAL}
