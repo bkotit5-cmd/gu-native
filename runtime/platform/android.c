@@ -60,6 +60,11 @@ JNIEXPORT void JNICALL Java_com_mhgu_recomp_ShaderImportActivity_nativeShaderFil
     diag_log_detail("[shader][detail] Android shader import completed; refresh request sent to the game thread\n");
 }
 
+JNIEXPORT void JNICALL Java_com_mhgu_recomp_LosslessDllImportActivity_nativeLosslessDllChanged(JNIEnv *env, jclass cls) {
+    (void)env, (void)cls;
+    diag_log_detail("[lossless][detail] User Lossless.dll imported into app-private storage; Vulkan/shader validation is deferred until Lossless FG initialization\\n");
+}
+
 // ---- guest address space
 static uint64_t g_lo, g_hi;
 #define COMMIT_CHUNK 0x10000ull
