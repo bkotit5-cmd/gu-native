@@ -373,6 +373,11 @@ public class GameActivity extends SDLActivity {
         SDLActivity activity = mSingleton;
         if (activity != null) activity.startActivity(new Intent(activity, ShaderImportActivity.class));
     }
+    /** Settings -> Graphics -> Advanced: import the player's own Lossless.dll. */
+    public static void showLosslessDllImport() {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, LosslessDllImportActivity.class));
+    }
     private static void startImport(int kind) {
         SDLActivity activity = mSingleton;
         if (activity != null) activity.startActivity(new Intent(activity, ImportActivity.class).putExtra(ImportActivity.KIND, kind));
