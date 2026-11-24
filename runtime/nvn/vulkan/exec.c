@@ -2614,7 +2614,7 @@ static void snapshots_invalidate(NvnTexture *t);
 static NvnTexture *mf_tex;        // the picture of the run of models open (NULL none)
 static uint64_t mf_frame;         // the frame it opened in
 static TexBackend mf_before, mf_after;
-static TexBackend user_hud_scene_copy, user_hud_mask;
+static TexBackend user_hud_mask;
 static uint64_t user_hud_scene_frame, user_hud_mask_upload_frame;
 static bool user_hud_scene_valid;
 static uint8_t *user_hud_mask_pixels;
@@ -2659,25 +2659,19 @@ static bool user_hud_scene_current(void) {
     return user_hud_scene_valid && user_hud_scene_frame == g_present_count;
 }
 
-// Save the scene after its final 3D/post-processing pass and immediately before the HUD is drawn.
-// The user shader processes this clean image; the original HUD is composited back at presentation.
+// Prepare the HUD mask at the scene/HUD boundary. The custom shader still samples the
+// original final game image; the unmodified HUD is composited back over its processed result.
 void vk_user_shader_hud_scene_capture(NvnTexture *source) {
-    if (!source || !vk_user_shader_hud_capture_needed() || user_hud_scene_current()) return;
+    if (!source || !source->backend || !vk_user_shader_hud_capture_needed() || user_hud_scene_current()) return;
     user_hud_scene_valid = false;
-    vk_end_pass();
-    st.rt_dirty = true;
-    TexBackend *src = vk_tex(source, true);
-    if (!src || !src->image || src->stand_in || !(src->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
+    TexBackend *src = source->backend;
+    if (!src->image || src->stand_in || !(src->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
         LOG("[shader] HUD separation unavailable: no sampleable scene colour target\n");
         return;
     }
-    vk_ms_resolve(src);
-    if (!picture_copy(src, &user_hud_scene_copy)) {
-        LOG("[shader] HUD separation unavailable: could not copy the pre-HUD scene\n");
-        return;
-    }
-    const uint64_t mask_bytes = (uint64_t)user_hud_scene_copy.width * user_hud_scene_copy.height;
-    if (!mask_bytes || mask_bytes > SIZE_MAX) {
+    const uint32_t width = source->width, height = source->height;
+    const uint64_t mask_bytes = (uint64_t)width * height;
+    if (!width || !height || mask_bytes > SIZE_MAX) {
         LOG("[shader] HUD separation unavailable: invalid mask dimensions\n");
         return;
     }
@@ -2688,8 +2682,8 @@ void vk_user_shader_hud_scene_capture(NvnTexture *source) {
     }
     user_hud_mask_pixels = mask;
     user_hud_mask_bytes = (size_t)mask_bytes;
-    user_hud_mask_width = user_hud_scene_copy.width;
-    user_hud_mask_height = user_hud_scene_copy.height;
+    user_hud_mask_width = width;
+    user_hud_mask_height = height;
     user_hud_mask_rects = 0;
     user_hud_mask_upload_frame = UINT64_MAX;
     memset(user_hud_mask_pixels, 0, user_hud_mask_bytes);
@@ -8387,10 +8381,9 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     VkImageView hud_mask_view = VK_NULL_HANDLE;
     VkPipeline hud_overlay_pipeline = VK_NULL_HANDLE;
     if (!hdr && user_shader_module()) {
-        bool scene_pair = user_hud_scene_current() && user_hud_scene_copy.image &&
-                          user_hud_scene_copy.width == b->width && user_hud_scene_copy.height == b->height &&
-                          user_hud_scene_copy.format == b->format && user_hud_mask.image &&
-                          user_hud_mask_upload_frame == g_present_count;
+        bool scene_pair = user_hud_scene_current() &&
+                          user_hud_mask_width == b->width && user_hud_mask_height == b->height &&
+                          user_hud_mask.image && user_hud_mask_upload_frame == g_present_count;
         if (scene_pair) {
             hud_mask_view = vk_image_view(&user_hud_mask, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8_UNORM,
                                           0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -8434,7 +8427,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     if (kind == 3)
         user_depth_report(has_depth_view ? "BOUND" : "FALLBACK", has_depth_view ? "ok" : user_depth_reason, b);
     VkDescriptorImageInfo ii[2] = {
-        {vk_default_sampler(!sharp), raw_view(kind == 3 ? &user_hud_scene_copy : b), VK_IMAGE_LAYOUT_GENERAL},
+        {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
         {vk_default_sampler(false), depth_view, VK_IMAGE_LAYOUT_GENERAL}
     };
     VkWriteDescriptorSet w[3] = {
