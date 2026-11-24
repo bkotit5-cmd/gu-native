@@ -196,18 +196,15 @@ final class Notices {
         }
         p.edit().putLong("shown_at", now).apply();
         String v = latest.startsWith("v") || latest.startsWith("V") ? latest.substring(1) : latest;
-        // (a copy signed by someone else: Android won't install the official one over it, and uninstalling it deletes the
-        // save in Android/data, so the save is exported first)
-        boolean over = official(a);
         Look.notice(a, es ? "HAY UNA VERSIÓN NUEVA" : "A NEW VERSION IS OUT",
                 es ? "La versión " + v + " ya está disponible (tienes la " + mine + "). "
-                     + (over ? "Se instala encima de esta: tu partida y tus ajustes se quedan como están."
-                             : "Esta copia no es la oficial, así que la oficial no se instala encima. Primero exporta tu partida "
-                               + "(Opciones, Sistema, Tu partida, Exportar partida); después desinstala esta copia, instala la oficial e importa tu partida.")
+                     + "Abre Ajustes → Sistema → Tu juego → Versión y actualizaciones para descargarla. "
+                     + "El actualizador comprueba el certificado antes de abrir el instalador. Si el certificado no coincide, "
+                     + "Android no podrá instalarla encima: exporta primero tu partida antes de cambiar de versión."
                    : "Version " + v + " is out (you have " + mine + "). "
-                     + (over ? "It installs over this one: your save and your settings stay as they are."
-                             : "This copy isn't the official one, so the official one won't install over it. First export your "
-                               + "save (Settings, System, Your game, Export save); then uninstall this copy, install the official one and import your save."),
+                     + "Open Settings → System → Your game → App version & updates to download it. "
+                     + "The updater checks the signing certificate before opening Android's installer. If the certificate "
+                     + "does not match, Android cannot install it over this copy; export your save before switching builds.",
                 new Look.Choice(es ? "Ver" : "View", true, () -> {
                     try {
                         a.startActivity(new Intent(Intent.ACTION_VIEW,
