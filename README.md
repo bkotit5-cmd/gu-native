@@ -76,12 +76,13 @@ Upscaling and frame-generation paths are hardware/driver dependent. An option be
 
 The **Shader** page is the in-game manager for custom **single-pass Vulkan GLSL fragment shaders**. It lists installed `.glsl` files, marks the active shader, lets you select a shader, switch back to **Use built-in shader**, and edit annotated parameters on a separate **Edit shader parameters** page. On Android, press and hold a shader row to open its removal confirmation; Windows retains its remove control. **Add shader file** imports a `.glsl` file. On Android it opens Android's system document picker and copies the selected file into the app's `shaders/` directory; the picker is a small bridge activity, not a separate orange shader-management screen. Android shader imports are limited to 2 MiB. On Windows, the app uses the native SDL file dialog. Shader changes are detected by the render thread and applied by hot-reloading on the next presented frame, without restarting the game.
 
-The renderer expects Vulkan GLSL 450. When a custom shader is active, `t` is the scene captured before the game's 2D HUD; the original HUD is composited back afterward from a mask built from the HUD quad transforms. The mask uses slightly expanded quad bounds, so transparent areas inside a sprite rectangle may also be preserved. If the renderer cannot capture a compatible scene/mask in a frame, it bypasses custom GLSL for that frame and presents the original image rather than risking a depth-blurred HUD:
+The renderer expects Vulkan GLSL 450. When a custom shader is active, `t` is the final game image including the 2D HUD. The renderer restores original HUD pixels after the shader using a mask built from the HUD quad transforms. The optional `hudMask` sampler at **set 0, binding 3** exposes that mask to shaders; 1 marks a HUD pixel and 0 marks scene. The mask uses slightly expanded quad bounds, so transparent areas inside a sprite rectangle may also be preserved. If a compatible mask cannot be captured for a frame, the renderer bypasses custom GLSL for that frame and presents the original image rather than risking a depth-blurred HUD:
 
 ```glsl
 #version 450
 layout(set = 0, binding = 0) uniform sampler2D t;
 layout(set = 0, binding = 1) uniform sampler2D depthTex; // optional scene depth
+layout(set = 0, binding = 3) uniform sampler2D hudMask;  // optional: red = HUD pixel
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 o;
 
@@ -90,15 +91,16 @@ void main() {
 }
 ```
 
-- `t`: resolved game image (binding 0).
+- `t`: resolved final game image, including the HUD (binding 0).
 - `depthTex`: optional scene depth (binding 1), raw device depth 0..1, not linearized eye-space distance. Sample the value from `.r`.
-- `uv`: fullscreen texture coordinates shared by colour and depth.
+- `hudMask`: optional HUD mask (binding 3), red channel 1 for HUD and 0 for scene. Use it to reject HUD pixels from blur taps; binding 3 is reserved for this sampler.
+- `uv`: fullscreen texture coordinates shared by colour, depth and mask.
 - `o`: output pixel colour.
 - Fragment entry point: `main`; source file limit: 2 MB.
 
 When a matching scene depth target is available, the renderer binds it to `depthTex` and resolves supported multisampled depth before presentation. A 1×1 fallback texture is bound when depth capture or view creation is unavailable. With custom GLSL active in SDR, the log reports `[shader] depthTex: BOUND` or `FALLBACK` plus the reason, dimensions, formats, sample count, aspect and active colour attachments. Diagnostics are emitted when that reported state changes, not every frame.
 
-Raw device depth must be linearized before using it as eye-space distance. Do not assume camera near/far planes, forward/reversed-Z, or depth availability in every scene. Camera near/far uniforms and a separate depth prepass are not provided. The Forge overlay is drawn after the game's image and HUD composite.
+Raw device depth must be linearized before using it as eye-space distance. Do not assume camera near/far planes, forward/reversed-Z, or depth availability in every scene. Camera near/far uniforms and a separate depth prepass are not provided. The DoF sample uses `hudMask` to avoid blurring HUD centres or sampling HUD pixels into nearby scene blur; the renderer then composites the original HUD back. The Forge overlay is drawn afterward.
 
 ### Live shader parameters
 
