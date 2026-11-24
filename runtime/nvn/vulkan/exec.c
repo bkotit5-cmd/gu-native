@@ -7535,10 +7535,11 @@ static const char *user_depth_reason = "not_captured";
 // matters more than the largest depth image elsewhere in memory.
 static void user_depth_report(const char *state, const char *reason, TexBackend *presented) {
     static const char *last_state, *last_reason;
-    static const NvnTexture *last_colour, *last_source;
-    static const TexBackend *last_depth, *last_presented;
+    static const NvnTexture *last_colour, *last_attachment, *last_source;
+    static const TexBackend *last_depth, *last_ms, *last_presented;
     static uint32_t last_cw, last_ch, last_aw, last_ah, last_sw, last_sh, last_pw, last_ph;
-    static uint32_t last_dfmt, last_dsamples, last_daspect, last_dlevel, last_dlayer;
+    static uint32_t last_afmt, last_sfmt, last_dfmt, last_dsamples, last_daspect, last_dlevel, last_dlayer;
+    static uint32_t last_ms_fmt, last_ms_samples;
     static bool last_standin, last_ms_dirty;
     static char last_slots[384];
 
@@ -7548,8 +7549,12 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     uint32_t ah = user_depth_attachment ? user_depth_attachment->height : 0;
     uint32_t sw = user_depth_source ? user_depth_source->width : 0;
     uint32_t sh = user_depth_source ? user_depth_source->height : 0;
+    uint32_t afmt = user_depth_attachment ? user_depth_attachment->format : 0;
+    uint32_t sfmt = user_depth_source ? user_depth_source->format : 0;
     uint32_t dfmt = user_depth_target ? user_depth_target->format : 0;
     uint32_t dsamples = user_depth_target ? user_depth_target->samples : 0;
+    uint32_t ms_fmt = user_depth_target && user_depth_target->ms ? user_depth_target->ms->format : 0;
+    uint32_t ms_samples = user_depth_target && user_depth_target->ms ? user_depth_target->ms->samples : 0;
     uint32_t daspect = user_depth_target ? user_depth_target->aspect : 0;
     bool standin = user_depth_target ? user_depth_target->stand_in : false;
     bool ms_dirty = user_depth_target ? user_depth_target->ms_dirty : false;
@@ -7567,12 +7572,14 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     }
 
     bool same = last_state && last_reason && !strcmp(last_state, state) && !strcmp(last_reason, reason) &&
-                last_colour == user_depth_colour && last_source == user_depth_source && last_depth == user_depth_target &&
-                last_presented == presented && last_cw == cw && last_ch == ch && last_aw == aw && last_ah == ah &&
-                last_sw == sw && last_sh == sh && last_pw == pw && last_ph == ph && last_dfmt == dfmt &&
-                last_dsamples == dsamples && last_daspect == daspect && last_dlevel == user_depth_level &&
-                last_dlayer == user_depth_layer && last_standin == standin && last_ms_dirty == ms_dirty &&
-                !strcmp(last_slots, slots);
+                last_colour == user_depth_colour && last_attachment == user_depth_attachment &&
+                last_source == user_depth_source && last_depth == user_depth_target &&
+                last_ms == (user_depth_target ? user_depth_target->ms : NULL) && last_presented == presented &&
+                last_cw == cw && last_ch == ch && last_aw == aw && last_ah == ah && last_sw == sw && last_sh == sh &&
+                last_pw == pw && last_ph == ph && last_afmt == afmt && last_sfmt == sfmt && last_dfmt == dfmt &&
+                last_dsamples == dsamples && last_daspect == daspect && last_ms_fmt == ms_fmt &&
+                last_ms_samples == ms_samples && last_dlevel == user_depth_level && last_dlayer == user_depth_layer &&
+                last_standin == standin && last_ms_dirty == ms_dirty && !strcmp(last_slots, slots);
     if (same) return;
 
     LOG("[shader] depthTex: %s reason=%s capture_color=%p %ux%u nvn_fmt=%#x "
@@ -7595,12 +7602,15 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     last_state = state;
     last_reason = reason;
     last_colour = user_depth_colour;
+    last_attachment = user_depth_attachment;
     last_source = user_depth_source;
     last_depth = user_depth_target;
+    last_ms = user_depth_target ? user_depth_target->ms : NULL;
     last_presented = presented;
     last_cw = cw; last_ch = ch; last_aw = aw; last_ah = ah; last_sw = sw; last_sh = sh; last_pw = pw; last_ph = ph;
-    last_dfmt = dfmt; last_dsamples = dsamples; last_daspect = daspect; last_dlevel = user_depth_level;
-    last_dlayer = user_depth_layer; last_standin = standin; last_ms_dirty = ms_dirty;
+    last_afmt = afmt; last_sfmt = sfmt; last_dfmt = dfmt; last_dsamples = dsamples; last_daspect = daspect;
+    last_ms_fmt = ms_fmt; last_ms_samples = ms_samples; last_dlevel = user_depth_level; last_dlayer = user_depth_layer;
+    last_standin = standin; last_ms_dirty = ms_dirty;
     snprintf(last_slots, sizeof last_slots, "%s", slots);
 }
 
