@@ -25,8 +25,6 @@ public final class LosslessDllImportActivity extends Activity {
     private static final int PICK_DLL = 1;
     private static final long MAX_DLL_BYTES = 128L << 20;
 
-    private static native void nativeLosslessDllChanged();
-
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -52,7 +50,7 @@ public final class LosslessDllImportActivity extends Activity {
                 if (!"Lossless.dll".equalsIgnoreCase(name))
                     throw new Exception("Choose Lossless.dll from the Steam Lossless Scaling installation.");
                 copyDll(data.getData());
-                nativeLosslessDllChanged();
+                GameActivity.nativeLosslessDllChanged(new File(AppHome.home(this), "lossless/Lossless.dll").getAbsolutePath());
                 Toast.makeText(this, "Lossless.dll imported. The app will validate its shaders when Lossless FG starts.",
                         Toast.LENGTH_LONG).show();
             } catch (Exception e) {
