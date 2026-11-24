@@ -193,11 +193,32 @@ On Android, open **Settings → System → Your game → App version & updates**
 
 The start-up notice also checks this repository's latest stable release at most once per day. It only announces a newer version and opens the release page; use the System updater to download and install the APK.
 
+### Android signing key
+
+This fork uses its own persistent **PKCS12** signing keystore. Keep the keystore file and its passwords in a safe backup outside the repository. Never commit the keystore, `keystore.properties`, Base64 keystore contents or passwords to Git.
+
+Configure these four GitHub Actions repository secrets under **Settings → Secrets and variables → Actions**:
+
+- `ANDROID_KEYSTORE_BASE64`: Base64 encoding of the fork's `mhgu-fork-release.p12` keystore file.
+- `ANDROID_KEYSTORE_PASSWORD`: the keystore password.
+- `ANDROID_KEY_ALIAS`: the key alias stored in the keystore.
+- `ANDROID_KEY_PASSWORD`: the private-key password.
+
+Both **Build Android debug APK** and **Release Android APK** use these same secrets and sign their APKs with the same persistent key. The workflows verify that the keystore can be opened before compiling. Debug builds therefore also require all four signing secrets; they do not fall back to Android's temporary debug certificate.
+
 ### Publishing an Android update
 
 1. Set the new dotted version in `VERSION` and increase `VERSION_CODE`. The Android package version code must always be greater than the previously published one.
-2. Add these GitHub Actions repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
-3. Make sure the keystore is the same one used to sign the already-installed APK when users should be able to update in place. Encode the existing `android/mhgu.keystore` file as Base64 for `ANDROID_KEYSTORE_BASE64`.
-4. Push a tag matching the version, for example `v1.0.1.2`. The `Release Android APK` workflow builds the signed arm64-v8a APK and attaches it to a GitHub Release. The updater reads the latest stable release and its APK asset.
+2. Confirm that all four signing secrets above still point to the same permanent fork keystore. Do not generate a replacement keystore for an ordinary update.
+3. Publish using either method:
+   - **Tag push:** push a tag matching the version, for example `v1.0.1.3`. The `Release Android APK` workflow validates the tag, builds the signed arm64-v8a APK and attaches it to a GitHub Release.
+   - **Manual workflow:** open **Actions → Release Android APK → Run workflow**, select `main`, and leave `release_tag` blank to use `v` plus the value in `VERSION`. You may enter that exact tag explicitly instead. The workflow rejects a tag that does not match `VERSION`.
+4. Confirm that the workflow completed successfully and that the GitHub Release contains `app-release.apk`. The updater reads the latest stable release and its APK asset.
 
-Android rejects an APK signed with a different key as an in-place update. The updater checks for this before opening the installer and explains the conflict; switching signing keys requires exporting the save, uninstalling the old app, installing the new build and importing the save. The release workflow intentionally fails when its signing secrets are missing rather than publishing an APK with a temporary signing key.
+### First transition from an older debug APK
+
+An APK installed before this fork's persistent signing key was configured may have been signed with Android's temporary debug key. Android will reject the new fork-signed APK as an in-place update because its certificate is different. For that one-time migration, export the MHGU save from the app and keep an independent copy outside the app, uninstall the older APK, install the fork-signed release, then restore/import the save if needed. Do not rely only on Android's uninstall data-retention prompt as your save backup.
+
+After the fork-signed release is installed, future debug and release APKs from these workflows use the same permanent certificate, so they can update one another in place as long as the package name remains `com.abc.mhgu.recomp` and `VERSION_CODE` increases.
+
+The release workflow intentionally fails when any signing secret is missing or the keystore cannot be opened. It must never publish an APK with a temporary signing key.
