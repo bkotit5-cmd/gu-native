@@ -7651,8 +7651,8 @@ static void user_shader_params_save(const char *path, const UserShaderParam *par
     if (fclose(f) != 0) ok = false;
     if (ok) {
         if (rename(tmp, path) != 0) {
-            remove(path);
-            if (rename(tmp, path) != 0) remove(tmp);
+            LOG("[shader] could not save parameter values to %s\n", path);
+            remove(tmp);
         }
     } else remove(tmp);
 }
@@ -7981,7 +7981,10 @@ static VkShaderModule user_shader_module(void) {
     free(compile_source);
     free(source);
     if (user_shader) LOG("[shader] user GLSL hot-loaded: %s\n", name);
-    else LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
+    else {
+        user_shader_params_clear();
+        LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
+    }
     return user_shader;
 }
 
