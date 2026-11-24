@@ -86,6 +86,19 @@ else()
   add_library(main SHARED ${RT_ALL})
 endif()
 
+# Android-only: Bloodframe's MIT-licensed native LSFG runtime. The player's Lossless.dll is
+# imported at runtime and is never downloaded, bundled, or executed as a Windows library.
+if(ANDROID)
+  set(BLOODFRAME_SRC ${S}/deps/src/bloodframe)
+  if(NOT EXISTS "${BLOODFRAME_SRC}/android/CMakeLists.txt")
+    message(FATAL_ERROR "Pinned Bloodframe source is missing; run deps/fetch_sources.sh first.")
+  endif()
+  add_subdirectory(${BLOODFRAME_SRC}/android bloodframe)
+  set_target_properties(bloodframe PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+  target_link_options(bloodframe PRIVATE -Wl,-z,max-page-size=16384)
+  add_dependencies(main bloodframe)
+endif()
+
 set(LIB_INC ${DEPS}/sdl3/include ${DEPS}/shaderc/include ${DEPS}/ffmpeg/include)
 if(WIN32)
   list(APPEND LIB_INC ${DEPS}/vulkan/include)  # (los encabezados de Vulkan: en Android, los del NDK)
