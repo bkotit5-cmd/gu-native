@@ -61,17 +61,15 @@ JNIEXPORT void JNICALL Java_com_mhgu_recomp_ShaderImportActivity_nativeShaderFil
     diag_log_detail("[shader][detail] Android shader import completed; refresh request sent to the game thread\n");
 }
 
-JNIEXPORT void JNICALL Java_com_mhgu_recomp_LosslessDllImportActivity_nativeLosslessDllChanged(JNIEnv *env, jclass cls) {
-    (void)env, (void)cls;
-    diag_log_detail("[lossless][detail] User Lossless.dll imported into app-private storage; Vulkan/shader validation is deferred until Lossless FG initialization\\n");
-}
-
 JNIEXPORT void JNICALL Java_com_mhgu_recomp_GameActivity_nativeLosslessDllChanged(JNIEnv *env, jclass cls, jstring path) {
     (void)cls;
     const char *value = path ? (*env)->GetStringUTFChars(env, path, NULL) : NULL;
     lossless_framegen_set_dll_path(value);
     if (value) (*env)->ReleaseStringUTFChars(env, path, value);
-    diag_log_detail("[lossless][detail] Persisted Lossless.dll path delivered to Android native runtime; file/API readiness is checked lazily\\n");
+    const bool dll_ok = lossless_framegen_has_dll();
+    const bool api_ok = lossless_framegen_library_available();
+    diag_log_detail("[lossless][detail] Lossless FG prerequisites: user DLL %s, Android LSFG API %s; runtime/Vulkan support is checked when enabled\\n",
+                    dll_ok ? "present" : "missing", api_ok ? "present" : "unavailable");
 }
 
 // ---- guest address space
