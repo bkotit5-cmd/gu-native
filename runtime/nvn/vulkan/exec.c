@@ -2614,6 +2614,11 @@ static void snapshots_invalidate(NvnTexture *t);
 static NvnTexture *mf_tex;        // the picture of the run of models open (NULL none)
 static uint64_t mf_frame;         // the frame it opened in
 static TexBackend mf_before, mf_after;
+static TexBackend user_hud_scene_copy;
+static uint64_t user_hud_scene_frame;
+static bool user_hud_scene_valid;
+static _Atomic bool user_shader_hud_capture_enabled = true;
+
 static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (made as b's size and format)
     VkCommandBuffer cb = vk_cmd();
     if (d->image && (d->width != b->width || d->height != b->height || d->format != b->format)) {
@@ -2638,6 +2643,39 @@ static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (mad
     vk_full_barrier(cb);
     return true;
 }
+
+void vk_user_shader_hud_capture_enable(bool enabled) {
+    atomic_store(&user_shader_hud_capture_enabled, enabled);
+}
+
+bool vk_user_shader_hud_capture_needed(void) {
+    return atomic_load(&user_shader_hud_capture_enabled);
+}
+
+static bool user_hud_scene_current(void) {
+    return user_hud_scene_valid && user_hud_scene_frame == g_present_count;
+}
+
+// Save the scene after its final 3D/post-processing pass and immediately before the HUD is drawn.
+// The user shader processes this clean image; the original HUD is composited back at presentation.
+void vk_user_shader_hud_scene_capture(NvnTexture *source) {
+    if (!source || !vk_user_shader_hud_capture_needed() || user_hud_scene_current()) return;
+    user_hud_scene_valid = false;
+    vk_end_pass();
+    TexBackend *src = vk_tex(source, true);
+    if (!src || !src->image || src->stand_in || !(src->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
+        LOG("[shader] HUD separation unavailable: no sampleable scene colour target\n");
+        return;
+    }
+    vk_ms_resolve(src);
+    if (!picture_copy(src, &user_hud_scene_copy)) {
+        LOG("[shader] HUD separation unavailable: could not copy the pre-HUD scene\n");
+        return;
+    }
+    user_hud_scene_frame = g_present_count;
+    user_hud_scene_valid = true;
+}
+
 static void models_fxaa_begin(NvnTexture *t) {
     vk_end_pass();
     st.rt_dirty = true;
@@ -6969,6 +7007,23 @@ static void draw(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.rt.ncolor; i++)
         if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) snapshots_invalidate(st.rt.color[i]);
     if (in_pass && pass_ro_depth && !ro_want && draw_writes_ds()) st.rt_dirty = true, stat_ro_left++;  // (read-only no more)
+
+    // Fallback for the plain non-FSR / non-PS1 path: identify the first 2D draw into a full-screen colour target.
+    // Small post passes that sample another render target are not the HUD boundary.
+    if (!user_hud_scene_current() && vk_user_shader_hud_capture_needed() &&
+        !st.ds[0] && st.rt.ncolor > 0 && st.rt.color[0]) {
+        bool post = (uint32_t)r->x[2] <= 6;
+        bool reads_rt = false;
+        for (int i = 0; post && i < pr->fi->ntex; i++) {
+            NvnTexture *sampled = draw_texture(1, pr->fi, i);
+            if (sampled && sampled->backend && ((TexBackend *)sampled->backend)->gpu_owned)
+                reads_rt = true;
+        }
+        NvnTexture *scene = st.rt.color[0];
+        if (!(post && reads_rt) && scene->width >= 512 && scene->height >= 288)
+            vk_user_shader_hud_scene_capture(scene);
+    }
+
     cur_draw = r, cur_draw_indexed = indexed, cur_draw_pr = pr;  // (perf_noload: the pass's first draw)
     begin_pass();
     cur_draw = NULL;
@@ -7523,8 +7578,8 @@ static VkPipelineLayout present_fx_layout;
 
 // User presentation shader state. Polling and pipeline replacement happen on the render thread.
 // Keep the depth target paired with the exact colour image sent to presentation.
-static VkPipeline present_pipes[4];
-static VkRenderPass present_render_passes[4];
+static VkPipeline present_pipes[5];
+static VkRenderPass present_render_passes[5];
 static VkShaderModule user_shader;
 static uint64_t user_shader_file_key;
 static bool user_shader_key_valid;
@@ -7974,16 +8029,19 @@ static VkShaderModule user_shader_module(void) {
 
     if (!n) {
         user_shader_params_clear();
+        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] custom GLSL disabled; built-in presentation restored\n");
         return VK_NULL_HANDLE;
     }
     if (!valid_name) {
         user_shader_params_clear();
+        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] active GLSL marker has an invalid filename\n");
         return VK_NULL_HANDLE;
     }
     if (!shader_ok) {
         user_shader_params_clear();
+        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] selected GLSL file is missing, empty, or larger than 2 MB: %s\n", source_path);
         return VK_NULL_HANDLE;
     }
@@ -7991,6 +8049,7 @@ static VkShaderModule user_shader_module(void) {
     f = fopen(source_path, "rb");
     if (!f) {
         user_shader_params_clear();
+        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] could not open selected GLSL file: %s\n", source_path);
         return VK_NULL_HANDLE;
     }
@@ -7999,7 +8058,7 @@ static VkShaderModule user_shader_module(void) {
     if (!source) { fclose(f); user_shader_params_clear(); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
     bool read_ok = fread(source, 1, (size_t)bytes, f) == (size_t)bytes;
     fclose(f);
-    if (!read_ok) { free(source); user_shader_params_clear(); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
+    if (!read_ok) { free(source); user_shader_params_clear(); vk_user_shader_hud_capture_enable(false); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
     source[bytes] = 0;
 
     char params_path[1800];
@@ -8008,9 +8067,12 @@ static VkShaderModule user_shader_module(void) {
     user_shader = compile_source ? vk_compile_glsl(compile_source, STAGE_FRAGMENT, name) : VK_NULL_HANDLE;
     free(compile_source);
     free(source);
-    if (user_shader) LOG("[shader] user GLSL hot-loaded: %s\n", name);
-    else {
+    if (user_shader) {
+        vk_user_shader_hud_capture_enable(true);
+        LOG("[shader] user GLSL hot-loaded: %s\n", name);
+    } else {
         user_shader_params_clear();
+        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
     }
     return user_shader;
@@ -8100,8 +8162,8 @@ void vk_present_depth_resolve(void) {
     if (user_depth_target) vk_ms_resolve(user_depth_target);
 }
 
-// kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding; 3: user GLSL
-// fragment post-process (SDR only).
+// kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding;
+// kind 3: user GLSL on the pre-HUD scene; kind 4: restore the original game HUD over the processed scene.
 static VkPipeline present_pipeline(int kind) {
     VkRenderPass rp = vk_window_pass();
     if (present_render_passes[kind] == rp) return present_pipes[kind];
@@ -8125,7 +8187,8 @@ static VkPipeline present_pipeline(int kind) {
     }
     VkPipeline *pp = &present_pipes[kind];
     VkShaderModule fragment = kind == 3 ? user_shader_module()
-                              : vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag");
+                              : vk_builtin_shader(kind == 4 ? "present.hudoverlay" :
+                                                  kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag");
     if (!fragment) return VK_NULL_HANDLE;
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
@@ -8140,7 +8203,16 @@ static VkPipeline present_pipeline(int kind) {
                                                  .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1};
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
-    VkPipelineColorBlendAttachmentState cba = {.colorWriteMask = 0xF};
+    VkPipelineColorBlendAttachmentState cba = {
+        .blendEnable = kind == 4,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .colorWriteMask = 0xF
+    };
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1,
                                               .pAttachments = &cba};
     VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -8183,9 +8255,21 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     const int stock_kind = hdr ? 2 : colour_neutral(&colour) && !ps1 ? 0 : 1;
     int kind = stock_kind;
     VkPipeline p = VK_NULL_HANDLE;
+    bool hud_separated = false;
     if (!hdr && user_shader_module()) {
-        kind = 3;
-        p = present_pipeline(kind);
+        hud_separated = user_hud_scene_current() && user_hud_scene_copy.image &&
+                        user_hud_scene_copy.width == b->width && user_hud_scene_copy.height == b->height &&
+                        user_hud_scene_copy.format == b->format;
+        if (hud_separated) {
+            kind = 3;
+            p = present_pipeline(kind);
+        } else {
+            static uint64_t last_no_hud_scene_frame = UINT64_MAX;
+            if (last_no_hud_scene_frame != g_present_count) {
+                LOG("[shader] clean pre-HUD scene unavailable or incompatible; custom GLSL bypassed for this frame to keep HUD sharp\n");
+                last_no_hud_scene_frame = g_present_count;
+            }
+        }
     }
     if (!p) {
         kind = stock_kind;
@@ -8213,7 +8297,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     if (kind == 3)
         user_depth_report(has_depth_view ? "BOUND" : "FALLBACK", has_depth_view ? "ok" : user_depth_reason, b);
     VkDescriptorImageInfo ii[2] = {
-        {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
+        {vk_default_sampler(!sharp), raw_view(kind == 3 ? &user_hud_scene_copy : b), VK_IMAGE_LAYOUT_GENERAL},
         {vk_default_sampler(false), depth_view, VK_IMAGE_LAYOUT_GENERAL}
     };
     VkWriteDescriptorSet w[3] = {
@@ -8277,6 +8361,30 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     float pv[8] = {nvn_window_origin() == 0 ? 1.0f : 0.0f, (float)turn, 0, 0, 0, 0, 1, 1};  // (flip, turn, crop origin / size)
     vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
     vkCmdDraw(cb, 3, 1, 0, 0);
+
+    // The user shader has only seen the clean 3D scene. Restore the pixels changed by the game's HUD
+    // from the original image using a difference mask made from (final game image - pre-HUD scene).
+    if (kind == 3 && hud_separated) {
+        VkPipeline overlay = present_pipeline(4);
+        if (overlay) {
+            VkDescriptorSet hud_set = vk_alloc_set(present_set_layout);
+            VkDescriptorImageInfo hud_ii[2] = {
+                {vk_default_sampler(false), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
+                {vk_default_sampler(false), raw_view(&user_hud_scene_copy), VK_IMAGE_LAYOUT_GENERAL}
+            };
+            VkWriteDescriptorSet hud_w[2] = {
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 0,
+                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hud_ii[0]},
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 1,
+                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hud_ii[1]}
+            };
+            vkUpdateDescriptorSets(g_vk.dev, 2, hud_w, 0, NULL);
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, overlay);
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, present_layout, 0, 1, &hud_set, 0, NULL);
+            vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
+            vkCmdDraw(cb, 3, 1, 0, 0);
+        }
+    }
 }
 
 // ================================================================== executor
