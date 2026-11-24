@@ -25,7 +25,7 @@ void main() {
 ```
 
 - `t` is the resolved game image.
-- `depthTex` is optional and exposes the scene depth attachment paired with the presented colour target. It contains raw device depth in the range 0..1, not linearized eye-space distance. A 1×1 fallback texture is bound when the renderer cannot identify a matching depth target.
+- `depthTex` is optional and exposes the scene depth attachment paired with the presented colour target. It contains raw device depth in the range 0..1, not linearized eye-space distance. A 1×1 fallback texture is bound when the renderer cannot identify a matching depth target. When a custom GLSL shader is active, the log reports `[shader] depthTex: BOUND` or `FALLBACK`, including the rejection reason, target extents, NVN/Vulkan formats, sample count, depth aspect, and active colour attachments.
 - `uv` is the fullscreen texture coordinate.
 - `o` is the final colour for the pixel.
 - The entry point must be `main`.
