@@ -8374,18 +8374,26 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     int kind = stock_kind;
     VkPipeline p = VK_NULL_HANDLE;
     bool hud_separated = false;
+    VkImageView hud_mask_view = VK_NULL_HANDLE;
+    VkPipeline hud_overlay_pipeline = VK_NULL_HANDLE;
     if (!hdr && user_shader_module()) {
-        hud_separated = user_hud_scene_current() && user_hud_scene_copy.image &&
-                        user_hud_scene_copy.width == b->width && user_hud_scene_copy.height == b->height &&
-                        user_hud_scene_copy.format == b->format && user_hud_mask.image &&
-                        user_hud_mask_upload_frame == g_present_count;
+        bool scene_pair = user_hud_scene_current() && user_hud_scene_copy.image &&
+                          user_hud_scene_copy.width == b->width && user_hud_scene_copy.height == b->height &&
+                          user_hud_scene_copy.format == b->format && user_hud_mask.image &&
+                          user_hud_mask_upload_frame == g_present_count;
+        if (scene_pair) {
+            hud_mask_view = vk_image_view(&user_hud_mask, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8_UNORM,
+                                          0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
+            hud_overlay_pipeline = present_pipeline(4);
+            hud_separated = hud_mask_view != VK_NULL_HANDLE && hud_overlay_pipeline != VK_NULL_HANDLE;
+        }
         if (hud_separated) {
             kind = 3;
             p = present_pipeline(kind);
         } else {
             static uint64_t last_no_hud_scene_frame = UINT64_MAX;
             if (last_no_hud_scene_frame != g_present_count) {
-                LOG("[shader] clean pre-HUD scene unavailable or incompatible; custom GLSL bypassed for this frame to keep HUD sharp\n");
+                LOG("[shader] pre-HUD scene/mask unavailable; custom GLSL bypassed this frame so depth cannot blur the HUD\\n");
                 last_no_hud_scene_frame = g_present_count;
             }
         }
@@ -8484,13 +8492,10 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     // The user shader has only seen the clean 3D scene. Restore original HUD pixels from the
     // quad mask accumulated while the game's non-depth-tested HUD transforms were translated.
     if (kind == 3 && hud_separated) {
-        VkPipeline overlay = present_pipeline(4);
-        VkImageView mask_view = vk_image_view(&user_hud_mask, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8_UNORM,
-                                              0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
-        if (overlay && mask_view) {
+        if (hud_overlay_pipeline && hud_mask_view) {
             VkDescriptorSet hud_set = vk_alloc_set(present_set_layout);
             VkDescriptorImageInfo hud_ii = {vk_default_sampler(false), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
-            VkDescriptorImageInfo mask_ii = {vk_default_sampler(false), mask_view, VK_IMAGE_LAYOUT_GENERAL};
+            VkDescriptorImageInfo mask_ii = {vk_default_sampler(false), hud_mask_view, VK_IMAGE_LAYOUT_GENERAL};
             VkWriteDescriptorSet hud_w[2] = {
                 {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 0,
                  .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hud_ii},
