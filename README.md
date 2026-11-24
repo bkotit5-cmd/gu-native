@@ -60,22 +60,6 @@ A touch button can show or hide the in-game minimap during a hunt. Its visibilit
 - **HUD Size:** global quest-HUD scaling from 100% down to 60%, in 5% steps.
 - **Text Outline:** adds a dark outline to quest dialogue and help-box text to improve readability. It does not outline every UI label or every piece of game text.
 
-### Hunting Aids
-
-Optional hunting aids are available under **Graphics & Audio → Screen and HUD**. They are off by default:
-
-- **Monsters always on the map:** shows large monsters on the in-game map from the start of a solo quest, as though they had been marked. Multiplayer maps retain the game's normal behaviour.
-- **Damage numbers:** displays damage from hits on large monsters; size and colour can be adjusted.
-- **Monster health bars:** shows each large monster's name and current/maximum health. The bars can be moved and resized with the HUD editor.
-
-These are presentation overlays or map aids; they do not add new monsters or change the damage dealt by the game.
-
-### Quest quality-of-life options
-
-- **Gather everything in one press:** one gathering action or carve collects the remaining available items at once, subject to the game's gathering rules, tool durability and pouch capacity.
-- **Send all to the box:** the quest-reward screen sends all rewards that fit in the item box at once.
-- **Move to skip the flex:** moving or taking another action after a potion, drink or meal ends the flex animation early; the item's effect remains.
-
 ## Graphics and performance
 
 The available options depend on the device, GPU, driver and platform. The app includes:
