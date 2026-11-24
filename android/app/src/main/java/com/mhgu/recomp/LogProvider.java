@@ -18,7 +18,7 @@ import java.io.FileNotFoundException;
  * cerrado por un error. (1.0.1: mhgu-log.txt, o mhgu-log.zip con él adentro cuando es grande: Diag.bundle)
  */
 public class LogProvider extends ContentProvider {
-    private static final String AUTHORITY = "com.mhgu.recomp.logs", NAME = "mhgu-log.txt", ZIP = "mhgu-log.zip";
+    private static final String AUTHORITY = "com.abc.mhgu.recomp.logs", NAME = "mhgu-log.txt", ZIP = "mhgu-log.zip";
 
     static File report(Context c) { return report(c, false); }
     static File report(Context c, boolean zip) { return new File(c.getCacheDir(), zip ? ZIP : NAME); }
