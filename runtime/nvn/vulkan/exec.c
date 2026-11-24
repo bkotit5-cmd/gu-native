@@ -36,6 +36,7 @@
 
 #include "../../diag.h"
 #include "../../colour_filter.h"
+#include "../../diag.h"
 #include "../../kernel.h"
 #include "../../user_shader_params.h"
 #include <ctype.h>
@@ -2785,6 +2786,16 @@ void vk_user_shader_hud_mask_upload(TexBackend *presented) {
     vkCmdCopyBufferToImage(cb, pixels.buf, user_hud_mask.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
     vk_full_barrier(cb);
     user_hud_mask_upload_frame = g_present_count;
+    static uint32_t detail_last_w, detail_last_h, detail_last_rects;
+    static bool detail_last_full;
+    if (detail_last_w != w || detail_last_h != h || detail_last_rects != user_hud_mask_rect_count ||
+        detail_last_full != user_hud_mask_full) {
+        diag_log_detail("[shader][detail] HUD mask upload ready: %ux%u, %zu KB, %u rect(s), mode=%s\n",
+                        w, h, user_hud_mask_bytes / 1024, user_hud_mask_rect_count,
+                        user_hud_mask_full ? "full-frame" : "HUD bounds");
+        detail_last_w = w; detail_last_h = h; detail_last_rects = user_hud_mask_rect_count;
+        detail_last_full = user_hud_mask_full;
+    }
 }
 
 static void models_fxaa_begin(NvnTexture *t) {
@@ -8155,17 +8166,23 @@ static VkShaderModule user_shader_module(void) {
     }
     long bytes = (long)shader_stat.st_size;
     char *source = malloc((size_t)bytes + 1);
-    if (!source) { fclose(f); user_shader_params_clear(); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
+    if (!source) { fclose(f); user_shader_uses_depth = false; user_shader_params_clear(); vk_user_shader_hud_capture_enable(false); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
     bool read_ok = fread(source, 1, (size_t)bytes, f) == (size_t)bytes;
     fclose(f);
     if (!read_ok) { free(source); user_shader_uses_depth = false; user_shader_params_clear(); vk_user_shader_hud_capture_enable(false); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
     source[bytes] = 0;
 
     bool source_uses_depth = user_shader_source_uses_depth(source);
+    const uint64_t compile_started = plat_now_ns();
     char params_path[1800];
     snprintf(params_path, sizeof params_path, "%s.params", source_path);
     char *compile_source = user_shader_params_prepare(source, (size_t)bytes, params_path);
     user_shader = compile_source ? vk_compile_glsl(compile_source, STAGE_FRAGMENT, name) : VK_NULL_HANDLE;
+    const double compile_ms = (plat_now_ns() - compile_started) / 1e6;
+    const int parameter_count = vk_user_shader_param_count();
+    diag_log_detail("[shader][detail] GLSL %s: %ld bytes, %d live parameter(s), depthTex %s, module %s in %.2f ms\n",
+                    name, bytes, parameter_count, source_uses_depth ? "required" : "not used",
+                    user_shader ? "compiled" : "failed", compile_ms);
     free(compile_source);
     free(source);
     if (user_shader) {
