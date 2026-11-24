@@ -2524,7 +2524,7 @@ void cache_clear_row(std::vector<Row> &r) {
         "primeras zonas pueden tironear o mostrar modelos tarde hasta que estén armados. Un segundo toque, antes de que "
         "el juego vuelva a empezar, conserva la caché.");
 }
-// Installed shaders are shown and selectable in the monochrome in-game menu; the orange Android screen only imports files.
+// Installed shaders are selected and managed in the in-game menu; Android imports a file through the system document picker.
 static std::filesystem::path user_shader_directory() {
     const char *home = std::getenv("MHGU_HOME");
     return home && *home ? std::filesystem::path(home) / "shaders" : std::filesystem::path("shaders");
