@@ -24,15 +24,16 @@ void main() {
 }
 ```
 
-- `t` is the resolved 3D scene image captured before the game's 2D HUD when a custom shader is active.
+- `t` is the resolved final game image, including the game's 2D HUD. The original HUD pixels are restored after the custom shader runs.
 - `depthTex` is optional scene depth paired with the presented colour target. It contains raw device depth in the range 0..1, not linearized eye-space distance. Sample its value from the `.r` component.
-- `uv` is the fullscreen texture coordinate shared by the colour and depth inputs.
+- `hudMask` is an optional renderer-generated mask at **set 0, binding 3**. Its red channel is 1 for pixels belonging to the game's 2D HUD and 0 for scene pixels. Declare it when the shader needs to exclude HUD pixels from blur/filter sampling; binding 3 is reserved for this sampler.
+- `uv` is the fullscreen texture coordinate shared by the colour, depth and HUD-mask inputs.
 - `o` is the final output pixel colour.
 - The fragment entry point must be `main`; source files are limited to 2 MB.
 
 When a matching scene depth target is available, the renderer binds it to `depthTex` and resolves supported multisampled depth before presentation. A 1×1 fallback texture is bound when depth capture or view creation is unavailable. With a custom GLSL shader active in SDR, the log reports `[shader] depthTex: BOUND` or `FALLBACK`, the rejection reason, target dimensions and formats, sample count, depth aspect, and active colour attachments. These diagnostic messages are emitted when the reported state changes, rather than every frame.
 
-Raw device depth must be linearized by the shader before using it as eye-space distance. Do not assume a near/far plane, forward/reversed-Z convention, or identical depth availability in every menu, loading, cutscene or gameplay scene. The renderer captures the scene before the game's non-depth-tested 2D HUD, runs the custom shader on that scene image, then composites the original HUD back using a mask built from the HUD quad transforms. The mask expands each quad's transformed bounds slightly to retain antialiased edges; transparent parts inside a quad's rectangle may also be preserved. If a compatible pre-HUD scene or mask cannot be captured for a frame, the custom shader is bypassed for that frame and the original game image is presented instead, so missing capture data does not cause the HUD to be depth-blurred. The Forge overlay is drawn afterward. The depth input remains the scene depth and does not provide camera near/far uniforms or a separate depth prepass.
+Raw device depth must be linearized by the shader before using it as eye-space distance. Do not assume a near/far plane, forward/reversed-Z convention, or identical depth availability in every menu, loading, cutscene or gameplay scene. The custom shader runs on the final game image, then the renderer composites the original 2D HUD pixels back over its result using a mask built from the HUD quad transforms. The mask expands each quad's transformed bounds slightly to retain antialiased edges; transparent parts inside a quad's rectangle may also be preserved. For blur effects, sample `hudMask` and reject HUD pixels both at the output coordinate and in neighbouring taps, so HUD colours do not bleed into nearby scene pixels. If a compatible mask cannot be captured for a frame, custom GLSL is bypassed for that frame and the original image is presented instead. The Forge overlay is drawn afterward. The depth input remains scene depth and does not provide camera near/far uniforms or a separate depth prepass.
 
 ## Editable shader parameters
 
@@ -54,7 +55,7 @@ The format is:
 
 Supported types are `float`, `int`, and `bool`. Names must be GLSL-style identifiers. The label is shown in the menu; if omitted, the parameter name is used. A float or integer appears as an adjustable number row; a boolean appears as a toggle. Values are clamped to the declared range. Integer values and steps are rounded to whole numbers. Use a minimum lower than the maximum and a positive step.
 
-The app injects a uniform block at **set 0, binding 2** when at least one valid annotation exists. Do not declare another resource at that binding in the same shader. The app also defines a macro for each parameter; use `PARAM_<name>` in GLSL rather than reading the injected block yourself:
+The app injects a uniform block at **set 0, binding 2** when at least one valid annotation exists. Do not declare another resource at that binding in the same shader. **Set 0, binding 3 is reserved for the optional `sampler2D hudMask` input** described above. The app also defines a macro for each parameter; use `PARAM_<name>` in GLSL rather than reading the injected block yourself:
 
 ```glsl
 #version 450
@@ -78,7 +79,7 @@ Only annotated `float`, `int`, and `bool` values are exposed by this interface. 
 
 
 
-The repository includes [an MHGU World-style DoF example with 16 editable controls](../examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). Its `DOF_FALLBACK` option is off by default: when scene depth is unavailable, the example leaves the scene sharp instead of applying a full-screen tilt-shift blur. The renderer handles HUD exclusion separately; `SCENE_EDGE_PROTECT` is only an optional edge-aware safeguard for high-contrast edges in the 3D scene.
+The repository includes [an MHGU World-style DoF example with 16 editable controls](../examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). It declares `hudMask`, skips masked pixels in its DoF centre and blur taps, and relies on the renderer to restore the original HUD pixels after processing. Its `DOF_FALLBACK` option is off by default: when scene depth is unavailable, the example leaves the scene sharp instead of applying a full-screen tilt-shift blur. `SCENE_EDGE_PROTECT` is an optional edge safeguard for high-contrast edges in the 3D scene.
 
 ## ReShade compatibility status
 
