@@ -62,7 +62,7 @@ _Static_assert(BIND_COMBO15 - BIND_COMBO1 + 1 == TOUCH_COMBOS, "a keybind for ea
 #define CONFIG_DEFAULT_FXAA 1
 #endif
 #define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ON, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1, 0, 1, \
-    1, 0, 1, 1, TOUCH_SHOW_DEFAULT, 0, {{0}}, {PADB_NONE}, "Auto", 0, 1, 1, 1, 0, 1, {{0}}, {{0}}, 0, 1.0f, 1
+    1, 0, 1, 1, TOUCH_SHOW_DEFAULT, 0, {{0}}, {PADB_NONE}, "Auto", 0, 1, 1, 1, 0, 1, {{0}}, {{0}}, 0, 1.0f, 1, 0
 // (in Config's order, config.h: a new field there needs its value here, in its place - shadows, adreno_fix, bloom, reverb before
 // touch_show: without them the touch buttons' defaults moved two places and most buttons were off; after touch_show the
 // thank-you not shown yet, then the combined buttons, none, gpu, the menu's hint not seen yet, the mouse in the game's
@@ -793,6 +793,10 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "ThanksShown = Off\n"
     "\n"
+    "; Extra shader, Vulkan, HUD-mask and file-import diagnostics in log.txt. Turn on before reproducing a problem.\n"
+    "; Default: Off\n"
+    "DetailedLog = Off\n"
+    "\n"
     "; Android: at most once a day, the app asks GitHub for the latest release of khorne-hub/gu-native (nothing else is\n"
     "; sent) and says so at the next start when there is a newer version. It never downloads or installs anything.\n"
     "; On, Off\n"
@@ -1108,6 +1112,7 @@ const ConfigSetting g_settings[] = {
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     ON_OFF("Application", "ThanksShown", thanks_shown, false),  // (written as the thank-you closes: settings_panel.cpp)
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Off|never|0,On|ask|auto|automatic|1", NULL, false, ERR_UPDATES},
+    ON_OFF("Application", "DetailedLog", detailed_log, false),
 #ifndef __ANDROID__  // (a phone's settings button is always on the screen: no notice, no key)
     ON_OFF("Application", "MenuHintSeen", menu_hint_seen, false),
 #endif
