@@ -74,9 +74,9 @@ Upscaling and frame-generation paths are hardware/driver dependent. An option be
 
 ## Custom GLSL shaders
 
-The **Shader** page can load a custom **single-pass Vulkan GLSL fragment shader** from a `.glsl` file. On Android, the monochrome in-game Shader page lists installed shaders; the separate orange Android activity is only the import/remove file manager. On Windows, a file picker imports and selects a shader. Selecting, disabling, removing or replacing the active shader hot-reloads it on the next presented frame without restarting the game.
+The **Shader** page loads custom **single-pass Vulkan GLSL fragment shaders** from `.glsl` files. On Android, **Add shader file** opens the system document picker; there is no separate orange shader import/management screen. Select, disable or remove installed shaders from the monochrome in-game **Settings → Shader** page. Windows uses its file picker. Shader selection and replacement hot-reload on the next presented frame without restarting the game.
 
-The renderer expects Vulkan GLSL 450 with this interface:
+The renderer expects Vulkan GLSL 450:
 
 ```glsl
 #version 450
@@ -90,19 +90,34 @@ void main() {
 }
 ```
 
-- `t`: the resolved game image.
-- `depthTex`: optional scene depth paired with the presented colour target. It is raw device depth in the range 0..1, not linearized eye-space distance. Sample its depth value from the `.r` component.
-- `uv`: fullscreen texture coordinates shared by the colour and depth inputs.
+- `t`: resolved game image (binding 0).
+- `depthTex`: optional scene depth (binding 1), raw device depth 0..1, not linearized eye-space distance. Sample the value from `.r`.
+- `uv`: fullscreen texture coordinates shared by colour and depth.
 - `o`: output pixel colour.
-- The fragment entry point is `main`; the current renderer supports source files up to 2 MB.
+- Fragment entry point: `main`; source file limit: 2 MB.
 
-When a matching scene depth target is available, the renderer binds it to `depthTex` and resolves supported multisampled depth before presentation. A 1×1 fallback texture is bound when depth capture or view creation is unavailable. With a custom GLSL shader active in SDR, the log reports `[shader] depthTex: BOUND` or `FALLBACK`, the rejection reason, target dimensions and formats, sample count, depth aspect, and active colour attachments. These diagnostic messages are emitted when the reported state changes, rather than every frame.
+When a matching scene depth target is available, the renderer binds it to `depthTex` and resolves supported multisampled depth before presentation. A 1×1 fallback texture is bound when depth capture or view creation is unavailable. With custom GLSL active in SDR, the log reports `[shader] depthTex: BOUND` or `FALLBACK` plus the reason, dimensions, formats, sample count, aspect and active colour attachments. Diagnostics are emitted when that reported state changes, not every frame.
 
-Raw device depth must be linearized by the shader before using it as eye-space distance. Do not assume a near/far plane, forward/reversed-Z convention, or identical depth availability in every menu, loading, cutscene or gameplay scene. The input does not provide a dedicated UI mask, camera near/far uniforms, or a separate depth prepass. A shader can therefore blur game HUD elements that are already part of `t`; the Forge overlay is drawn afterward.
+Raw device depth must be linearized before using it as eye-space distance. Do not assume camera near/far planes, forward/reversed-Z, or depth availability in every scene. There is no dedicated UI mask, camera near/far uniform or separate depth prepass. A shader can blur game HUD elements already included in `t`; the Forge overlay is drawn afterward.
+
+### Live shader parameters
+
+Expose up to 16 controls by adding comments to a GLSL file:
+
+```glsl
+#version 450
+// @param saturation float 1.18 0.0 2.0 0.01 Saturation
+// @param enabled bool 1 0 1 1 Enable effect
+// @param quality int 2 1 4 1 Quality
+```
+
+Format: `// @param <name> <type> <default> <minimum> <maximum> <step> <display label>`. Supported types are `float`, `int` and `bool`; names are GLSL-style identifiers. Float/integer parameters appear as adjustable number rows; boolean parameters appear as toggles. Values are clamped to their ranges, and integer values/steps are rounded to whole numbers.
+
+The app automatically injects a uniform block at **set 0, binding 2** when the shader has valid parameter annotations. Use `PARAM_<name>` in shader code, for example `PARAM_saturation`; do not declare another resource at binding 2. Parameter changes are sent through a Vulkan uniform buffer on the next presented frame, so they do not recompile the shader or rebuild its pipeline. Values are stored per shader in a sidecar file named `<shader>.params` (for example, `saturation.glsl.params`). **Reset shader parameters** restores the defaults in the source file without changing the original GLSL. Arbitrary local variables and custom uniform blocks are not automatically exposed; only annotated `float`, `int` and `bool` values are supported.
 
 A compile or pipeline failure falls back to the built-in presentation shader and is logged. Custom GLSL replaces the built-in Colour/PS1 presentation filters in SDR; HDR output bypasses the custom shader.
 
-**Not supported:** ReShade `.fx` / `.fxh` effects and `.ini` presets, RetroArch slang shaders, multipass chains, custom uniform interfaces or shader include files. These require a separate runtime or conversion to the supported single-pass GLSL interface.
+**Not supported:** ReShade `.fx` / `.fxh` effects and `.ini` presets, RetroArch slang shaders, multipass chains, arbitrary uniform reflection and shader include files. ReShade requires a separate effect runtime or conversion to the supported single-pass GLSL interface.
 
 See [the GLSL shader guide](docs/USER_GLSL_SHADERS.md) and [the sample saturation shader](examples/glsl/saturation.glsl).
 
