@@ -255,7 +255,7 @@ void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
 #define FPS_PHONE_MAX 240
 #define FPS_UNLIMITED 1000
 #ifdef __ANDROID__
-#define FPS_MAX FPS_PHONE_MAX
+#define FPS_MAX 120
 #else
 #define FPS_MAX FPS_UNLIMITED
 #endif
