@@ -1,6 +1,11 @@
 name: Build Android debug APK
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-android-debug.yml"
   workflow_dispatch:
 
 permissions:
