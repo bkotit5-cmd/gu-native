@@ -41,9 +41,9 @@ import java.util.Locale;
 public class GameFolderActivity extends Activity {
     static final String EXTRA_CHANGE = "change";
     private static final int PICK = 1, READ = 2, BUILD = 3;
-    private static final int WINE = Color.rgb(38, 18, 14), PANEL = Color.rgb(26, 12, 9), CREAM = Color.rgb(240, 228, 200);
-    private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
-    private static final int ALERT = Color.rgb(255, 150, 120);
+    private static final int WINE = Color.rgb(0, 0, 0), PANEL = Color.rgb(16, 16, 16), CREAM = Color.rgb(245, 245, 245);
+    private static final int GOLD = Color.rgb(255, 255, 255), BRONZE = Color.rgb(44, 44, 44), EDGE = Color.rgb(205, 205, 205);
+    private static final int ALERT = Color.rgb(210, 210, 210);
     private static final int MIN_FILES = 35000;  // (1.4.0 has 35531; the margin as in runtime/main.c)
     private static final byte[] BUILD_ID = {(byte) 0xfb, 0x08, (byte) 0xf1, (byte) 0xd2, 0x0f, (byte) 0xd1, 0x20, 0x4f};
 
@@ -102,7 +102,6 @@ public class GameFolderActivity extends Activity {
         if (!change) AppHome.ensure(this);  // (a folder of the app's that another app made: given back, or the private one)
         boolean rejected = rejectedFile().exists();
         File ext = AppHome.external(this), chosen = saved(), own = new File(ext != null ? ext : home(), "data");
-        if (!change) Notices.checkInBackground(this);
         if (!change && !rejected && haveLib() && (looksRight(chosen) || (chosen == null && looksRight(own)))) {
             proceed();
             return;
@@ -168,7 +167,7 @@ public class GameFolderActivity extends Activity {
                     new Look.Choice(es ? "Continuar" : "Continue", true, this::proceed));
             return;
         }
-        SaveFolderActivity.gate(this, () -> Notices.beforeGame(this, this::startGame));
+        SaveFolderActivity.gate(this, this::startGame);
     }
 
     // ---- the screen
