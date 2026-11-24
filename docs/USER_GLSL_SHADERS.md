@@ -78,7 +78,7 @@ Only annotated `float`, `int`, and `bool` values are exposed by this interface. 
 
 
 
-The repository includes [an MHGU World-style DoF example with 16 editable controls](../examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). Its `HUD_EDGE_PROTECT` option reduces blur around strong local colour edges to help preserve text and icon outlines. This is an edge-aware approximation, not a true HUD mask; adjust it conservatively and expect some scene edges to be preserved as well.
+The repository includes [an MHGU World-style DoF example with 16 editable controls](../examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). Its `DOF_FALLBACK` option is off by default: when scene depth is unavailable, the example leaves the image sharp instead of applying a full-screen tilt-shift blur to the HUD. Its `HUD_EDGE_PROTECT` option reduces blur around strong local colour edges to help preserve text and icon outlines when depth-based DoF is active. This is an edge-aware approximation, not a true HUD mask; adjust it conservatively and expect some scene edges to be preserved as well.
 
 ## ReShade compatibility status
 
