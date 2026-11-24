@@ -178,6 +178,7 @@ static void publish_live(const Config *c, bool all) {
 // Counts the live settings' publishes (a save, the start): what is drawn from them may change when it moves
 int config_live_generation(void) { return SDL_GetAtomicInt(&live_gen); }
 void config_store_loaded(const Config *c) {
+    diag_detailed_log_set(c->detailed_log != 0);
     publish_live(c, !have_saved);
     saved = *c; have_saved = true;
     SDL_SetAtomicInt(&language, c->language);
