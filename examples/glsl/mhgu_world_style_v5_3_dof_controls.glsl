@@ -1,7 +1,7 @@
 #version 450
 
 // =====================================================================
-//  MHGU "World Style" v5.2 - grading ala Monster Hunter World + DoF
+//  MHGU "World Style" v5.3 - grading ala Monster Hunter World + DoF + editable controls
 //  Vulkan GLSL 450, single-pass fragment shader.
 //  Input: t (gambar game), depthTex (raw depth 0..1, opsional), uv, o.
 //  Jika app hanya memberi depth 1x1 (fallback), DoF memakai blur tilt-shift.
@@ -258,7 +258,7 @@ void main() {
 
         // Approximate HUD safeguard: reduce blur around strong local colour edges.
         // The final game image contains both 3D and HUD pixels; this is not a true UI mask.
-        // The two-pixel neighbourhood also protects thin text strokes and icon borders.
+        // The two-pixel neighbourhood aims to preserve thin text strokes and icon borders.
         if (HUD_EDGE_PROTECT > 0.0 && abs(cc) >= 0.0004) {
             float centerY = luma(orig);
             float edge = 0.0;
