@@ -1,18 +1,6 @@
 name: Build Android debug APK
 
 on:
-  push:
-    branches: [main, 'integrate/**', 'fix/**']
-    paths:
-      - '.github/workflows/build-android-debug.yml'
-      - 'runtime/**'
-      - 'deps/**'
-      - 'native/**'
-      - 'updater/**'
-      - 'third_party/**'
-      - 'tools/**'
-      - 'android/**'
-      - 'VERSION'
   workflow_dispatch:
 
 permissions:

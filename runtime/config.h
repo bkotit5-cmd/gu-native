@@ -72,7 +72,7 @@ typedef struct {
     int display_mode;         // DISPLAY_*
     int width, height;        // screen / window size (Fullscreen: the monitor mode)
     int render_w, render_h;   // the game's 3D resolution (16:9)
-    int fps;                  // frame rate cap: 30..240 (a desktop: up to FPS_UNLIMITED)
+    int fps;                  // frame-rate target: FPS_UNLIMITED means no engine frame cap
     int vsync;                // 1: present without tearing (mailbox / FIFO, at most the refresh rate), 0: immediate
     int msaa;                 // samples of the 3D scene: 1 (off), 2, 4, 8
     int fxaa;                 // the game's own FXAA pass: 1 on, 0 off
@@ -247,18 +247,12 @@ void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
                              // keeps the 3D picture 320x180 at least)
 #define LOW_END_SCALE 40  // what the menu's Low-end mode sets: RenderScale, FPS
 #define LOW_END_FPS 30
-// [Performance] FPS: the most a phone takes; a desktop also takes more, up to FPS_UNLIMITED ("Unlimited" in the file
-// and the menu: as many frames as the PC draws, the engine's limiter at 1 ms a frame, which no frame here is faster than).
-// The least, FPS_MIN (1.0.1: 30 before; for the weakest phones, players asked for 20): the engine's frame step is in 60
-// fps frames (runtime/hle/vi.c), 4 of them at 15, which it caps at 16
+// [Performance] FPS: FPS_MIN..FPS_PHONE_MAX when capped; FPS_UNLIMITED requests the engine's fastest 1 ms frame step.
+// Android uses FPS_UNLIMITED, while VSync controls the maximum displayed refresh rate.
 #define FPS_MIN 15
 #define FPS_PHONE_MAX 240
 #define FPS_UNLIMITED 1000
-#ifdef __ANDROID__
-#define FPS_MAX FPS_PHONE_MAX
-#else
 #define FPS_MAX FPS_UNLIMITED
-#endif
 #define LOW_END_TOASTER 2   // LowEnd = Toaster: everything for speed and the battery (config.c, textures.c, the menu)
 #define TOASTER_SCALE 25    // what the menu's Toaster sets: RenderScale (and LOW_END_FPS)
 #define TOASTER_HUD_LINES 540  // Toaster (and Brick): the HUD's picture at most this tall (config.c, fsr.c's output)
@@ -347,7 +341,6 @@ bool config_validate(const Config *config, char *error, size_t error_size);
 // Immutable boot settings stay in g_config. These getters are atomic live values.
 void config_runtime_init(const Config *effective); // After environment/Auto resolution at startup.
 float config_live_fps(void);
-void config_adaptive_fps(bool enabled);  // temporary Android fallback to 60 FPS after sustained 120 Hz misses
 float config_live_fov(void);
 float config_live_mouse_sensitivity(void);
 float config_live_draw_distance(void);

@@ -916,9 +916,10 @@ static void run_job(const UpJob *j) {
 // worker has taken yet). The copies still run on the GPU ahead of their submission's draws, with the same data, so
 // nothing is drawn early or half uploaded. The same data: a write the CPU makes later in the same list (ClearBuffer,
 // CopyBufferToBuffer, UpdateUniformBuffer) over memory a queued band has yet to read waits for the bands first
-// (vk_upload_jobs_guard), so the draw before it sees the old contents. A texture under UP_ASYNC is done on the spot, as
-// before: queuing it costs more than it saves. So is one decoded on the CPU (a phone's BCn, ASTC): bcn.c already spreads
-// a big one over threads of its own, and three decodes at once would hold three times its buffers (a phone's memory).
+// (vk_upload_jobs_guard), so the draw before it sees the old contents. Normal textures under UP_ASYNC are still done
+// on the spot: queuing them costs more than it saves. BC-to-ETC2 is the exception, including small textures: its CPU
+// encoder must not run inline on the render thread. CPU-decoded BCn/ASTC stays on the caller as before: bcn.c spreads
+// large decodes over its own workers, and queuing several would multiply their temporary memory use.
 // MHGU_TEX_ASYNC=0: everything on the spot (for comparisons).
 #define UP_WORKERS 3         // (besides the render thread, as bcn.c's)
 #define UP_ASYNC (256u << 10)
@@ -1371,7 +1372,8 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     b->full_t = tex_t, b->hash_gen = b->wgen;
     if (!tex_sample_once || (!b->uploaded && !b->dynamic)) b->sample_hash = fnv_sample(mem, total), stat_tex_samples++;
     bool fmt_ok = b->format == fmt_of(t->format).vf || b->astc_bw || b->bcn;
-    bool async = fmt_ok && (!b->bcn || b->bcn_etc2) && !b->astc_bw && total >= UP_ASYNC && up_workers();
+    bool async = fmt_ok && (!b->bcn || b->bcn_etc2) && !b->astc_bw &&
+                 (total >= UP_ASYNC || b->bcn_etc2) && up_workers();
     if (b->uploaded && tex_stream && fmt_ok && ch && b->chg_run >= TEX_STREAM_RUN) {  // (MHGU_PERF_TEXSTREAM) see above
         uint32_t n = (uint32_t)plan(t, b, mem, P_COUNT, NULL, false);
         UpRec *rec = malloc(sizeof *rec + (n ? n : 1) * sizeof *rec->h);

@@ -53,9 +53,14 @@ unsigned int encoder_slots() {
 }
 
 unsigned int encoder_jobs(uint64_t blocks) {
+#ifdef __ANDROID__
+    (void)blocks;
+    // Upload workers already provide concurrency. Avoid nested ETC encoder threads competing with the game and renderer.
+    return 1u;
+#else
     static const unsigned int cores = std::thread::hardware_concurrency();
-    // Two encoder tasks can run at once; on 8-core phones, give each a second worker for large tiles.
     return cores >= 8 && blocks >= 4096 ? 2u : 1u;
+#endif
 }
 
 class EncoderSlot {

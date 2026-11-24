@@ -23,7 +23,7 @@
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_no_msaa, runtime_no_fxaa;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1};
-static SDL_AtomicInt live_fps, adaptive_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
+static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_binds[BINDS][BIND_KEYS],
                      live_touch, live_touch_hud, live_touch_show[TB_COUNT], live_touch_combo[TOUCH_COMBOS], live_touch_combo_pad[TOUCH_COMBOS], live_touch_cam, live_touch_opacity, live_lock_on = {1}, live_gyro_aim, live_gyro_sens, live_mouse_menus = {1},
@@ -95,7 +95,7 @@ static XplayLive live_xplay;  // (under live_ldn_lock too: config_live_crossplay
 // A save updates changed hot fields only. Saving the volume must not silently
 // remove an unchanged FOV/FPS override supplied by the development environment.
 static void publish_live(const Config *c, bool all) {
-    if (all || c->fps != saved.fps) { set_float(&live_fps, (float)c->fps); SDL_SetAtomicInt(&adaptive_fps, 0); }
+    if (all || c->fps != saved.fps) set_float(&live_fps, (float)c->fps);
     if (all || c->fov != saved.fov) set_float(&live_fov, c->fov);
     if (all || c->mouse_sensitivity != saved.mouse_sensitivity) set_float(&live_mouse, c->mouse_sensitivity);
     if (all || c->draw_distance != saved.draw_distance) set_float(&live_draw, c->draw_distance);
@@ -205,12 +205,11 @@ void config_runtime_init(const Config *effective) {
     }
 }
 float config_live_fps(void) {
-    float fps = get_float(&live_fps);
-    return SDL_GetAtomicInt(&adaptive_fps) && fps > 60.0f ? 60.0f : fps;
-}
-// A temporary runtime cap after sustained missed 120 Hz presents. The saved FPS is never changed.
-void config_adaptive_fps(bool enabled) {
-    SDL_SetAtomicInt(&adaptive_fps, enabled && get_float(&live_fps) > 60.0f ? 1 : 0);
+#ifdef __ANDROID__
+    return (float)FPS_UNLIMITED;
+#else
+    return get_float(&live_fps);
+#endif
 }
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
@@ -316,7 +315,6 @@ void config_live_test(const Config *c) {
     SDL_SetAtomicInt(&live_grass, c->grass);
     SDL_SetAtomicInt(&live_effects, c->effects);
     set_float(&live_fps, (float)c->fps);
-    SDL_SetAtomicInt(&adaptive_fps, 0);
 }
 int config_live_bind(int bind, int slot) { return SDL_GetAtomicInt(&live_binds[bind][slot]); }
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size) {

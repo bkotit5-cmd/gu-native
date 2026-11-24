@@ -58,10 +58,12 @@ _Static_assert(BIND_COMBO15 - BIND_COMBO1 + 1 == TOUCH_COMBOS, "a keybind for ea
 #define CONFIG_DEFAULT_SIZE 0, 0
 #ifdef __ANDROID__
 #define CONFIG_DEFAULT_FXAA 0  // (as the new mhgurecomp.ini says: the first run, before that file is read, too)
+#define CONFIG_DEFAULT_FPS FPS_UNLIMITED
 #else
 #define CONFIG_DEFAULT_FXAA 1
+#define CONFIG_DEFAULT_FPS 60
 #endif
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ON, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1, 0, 1, \
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, CONFIG_DEFAULT_FPS, 1, 1, CONFIG_DEFAULT_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ON, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 1, TOUCH_AUTO, 1, 1.0f, 0.8f, 100, 1, 1, 0, 1, 0, 1, \
     1, 0, 1, 1, TOUCH_SHOW_DEFAULT, 0, {{0}}, {PADB_NONE}, "Auto", 0, 1, 1, 1, 0, 1, {{0}}, {{0}}, 0, 1.0f, 1
 // (in Config's order, config.h: a new field there needs its value here, in its place - shadows, adreno_fix, bloom, reverb before
 // touch_show: without them the touch buttons' defaults moved two places and most buttons were off; after touch_show the
@@ -256,15 +258,16 @@ static const char DEFAULT_INI[] =
     "\n"
     "[Performance]\n"
 #ifdef __ANDROID__
-    "; Framerate cap\n"
-    "; Between 15 and 240\n"
+    "; Frame-rate cap disabled: the game runs as fast as the device can render; when VSync is on, displayed frames follow the screen's refresh rate.\n"
+    "; Default: Unlimited\n"
+    "FPS = Unlimited\n"
 #else
     "; Framerate cap. Unlimited: as many frames as the PC can draw, with VSync Off (with VSync On, the monitor's\n"
     "; refresh rate is the most)\n"
     "; Between 15 and 240, or Unlimited (a number up to 1000 is taken too)\n"
-#endif
     "; Default: 60\n"
     "FPS = 60\n"
+#endif
     "\n"
     "; VSync\n"
     "VSync = On\n"
@@ -1212,7 +1215,7 @@ bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
     switch (s->kind) {
     case SET_BOOL: return parse_bool(v, field_int(c, s->field));
     case SET_INT: {
-#if FPS_MAX == FPS_UNLIMITED  // (a desktop's FPS = Unlimited, as config_format writes it)
+#if FPS_MAX == FPS_UNLIMITED  // (config_format writes FPS_UNLIMITED as "Unlimited")
         if (s->field == offsetof(Config, fps) && !strcasecmp(v, "Unlimited")) {
             *field_int(c, s->field) = FPS_UNLIMITED;
             return true;
@@ -1648,6 +1651,13 @@ void config_load(void) {
     recent_tidy(g_config.ldn_recent_server[0], LDN_RECENT, sizeof g_config.ldn_recent_server[0], true);
     recent_tidy(g_config.ldn_recent_key[0], LDN_RECENT, sizeof g_config.ldn_recent_key[0], false);
 
+#ifdef __ANDROID__
+    if (g_config.fps != FPS_UNLIMITED) {
+        LOG("[config] Android frame-rate cap disabled; ignoring saved FPS value %d\n", g_config.fps);
+        g_config.fps = FPS_UNLIMITED;
+    }
+#endif
+
     // (a file of an older version, with LowEnd on and no Shadows: off, as the menu's Low-end mode now sets them; a
     // desktop's Low-end mode keeps the shadows, and only Toaster turns them off)
 #ifdef __ANDROID__
@@ -1721,7 +1731,9 @@ void config_load(void) {
     if ((e = getenv("MHGU_BLOOM"))) g_config.bloom = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_GRASS"))) g_config.grass = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_EFFECTS"))) g_config.effects = atoi(e) != 0, config_live_test(&g_config);
+#ifndef __ANDROID__
     if ((e = getenv("MHGU_FPS_LIMIT")) && atoi(e) >= FPS_MIN && atoi(e) <= FPS_MAX) g_config.fps = atoi(e), config_live_test(&g_config);
+#endif
     if ((e = getenv("MHGU_SCALE")) && atoi(e) >= 10 && atoi(e) <= 100) g_config.render_scale = atoi(e);
     if ((e = getenv("MHGU_SHADOWS"))) g_config.shadows = atoi(e) != 0, config_live_test(&g_config);
     if ((e = getenv("MHGU_FSR"))) g_config.fsr = atoi(e) != 0;  // (test runs: MHGU_FSR=0|1, MHGU_FSR_QUALITY=quality...)

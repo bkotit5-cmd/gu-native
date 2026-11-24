@@ -3085,6 +3085,10 @@ void rows_graphics_10(std::vector<Row> &r) {
 void reset_graphics_10() { s.draft.low_end = config_defaults().low_end; }
 MENU_ENTRY("graphics", 10, rows_graphics_10, reset_graphics_10);
 void rows_graphics_20(std::vector<Row> &r) {
+#ifdef __ANDROID__
+    note(r, "graphics.fps.unlimited",
+         tr("The frame-rate cap is disabled on Android. With VSync on, displayed frames follow the screen's refresh rate."));
+#else
     Config &c = s.draft;
     number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
 #ifndef __ANDROID__  // (a desktop: past 240 comes Unlimited; a number in between, as the file may have it, stays a number)
@@ -3119,6 +3123,7 @@ void rows_graphics_20(std::vector<Row> &r) {
         if (now < -1)
             focus("choice." + std::to_string(-1 - now));
     };
+#endif
 }
 void reset_graphics_20() { s.draft.fps = config_defaults().fps; }
 MENU_ENTRY("graphics", 20, rows_graphics_20, reset_graphics_20);
