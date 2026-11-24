@@ -2665,6 +2665,7 @@ void vk_user_shader_hud_scene_capture(NvnTexture *source) {
     if (!source || !vk_user_shader_hud_capture_needed() || user_hud_scene_current()) return;
     user_hud_scene_valid = false;
     vk_end_pass();
+    st.rt_dirty = true;
     TexBackend *src = vk_tex(source, true);
     if (!src || !src->image || src->stand_in || !(src->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
         LOG("[shader] HUD separation unavailable: no sampleable scene colour target\n");
@@ -2705,10 +2706,17 @@ static void user_hud_mask_mark_full(void) {
 // Rasterise a HUD quad's transformed bounds into the pre-HUD image's pixel coordinates.
 // The 2-pixel expansion retains the antialiased outside edge of text and icons.
 static void user_hud_mask_add(const float m[16]) {
-    if (!user_hud_scene_current() || !user_hud_mask_pixels || !m) return;
+    if (!m || !vk_user_shader_hud_capture_needed()) return;
+    // On the plain non-FSR/non-PS1 path, this first HUD quad is the boundary:
+    // snapshot the scene before writing this quad into the mask.
+    if (!user_hud_scene_current() && st.rt.ncolor > 0 && st.rt.color[0] &&
+        st.rt.color[0]->width >= 512 && st.rt.color[0]->height >= 288)
+        vk_user_shader_hud_scene_capture(st.rt.color[0]);
+    if (!user_hud_scene_current() || !user_hud_mask_pixels) return;
     const float w = (float)user_hud_mask_width, h = (float)user_hud_mask_height;
     const float cx = m[12], cy = m[13];
-    const float hx = hypotf(m[0], m[1]), hy = hypotf(m[4], m[5]);
+    // Axis-aligned bounds of the two transformed quad axes; sums also cover rotated UI elements.
+    const float hx = fabsf(m[0]) + fabsf(m[4]), hy = fabsf(m[1]) + fabsf(m[5]);
     if (!isfinite(cx) || !isfinite(cy) || !isfinite(hx) || !isfinite(hy) || hx < 0.25f || hy < 0.25f)
         return;
     if (hx >= 640.0f || hy >= 360.0f) {
@@ -2775,6 +2783,10 @@ void vk_user_shader_hud_mask_upload(void) {
     }
 
     VkSpan pixels = vk_transient_copy(user_hud_mask_pixels, user_hud_mask_bytes, 16);
+    if (!pixels.buf || !pixels.ptr) {
+        LOG("[shader] HUD separation unavailable: mask upload buffer allocation failed\n");
+        return;
+    }
     VkBufferImageCopy copy = {
         .bufferOffset = pixels.off, .bufferRowLength = w, .bufferImageHeight = h,
         .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
@@ -5041,10 +5053,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
             if (is_fullscreen && g_hudtrace_active)
                 LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: whole screen, kept\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
-                if (is_fullscreen && pos_z <= 180.0f &&
-                (ui_loading_pass || ui_title_pass || ui_frontend_pass || ui_stamp_pass ||
-                 ui_results_pass || ui_meownster_pass || ui_menu_pass || ui_window_pass))
-                user_hud_mask_mark_full();  // (a known fullscreen UI layer, not a scene post pass)
+                if (is_fullscreen && pos_z <= 180.0f)
+                user_hud_mask_mark_full();  // a non-depth-tested fullscreen overlay is preserved as HUD
             if (!is_fullscreen) {
                 // The HUD keeps the 16:9 shape it is laid out in: on a wider picture its parts are narrowed (s) and moved
                 // toward their side, on a narrower one (16:10) flattened (sy) and moved toward the top or bottom.
