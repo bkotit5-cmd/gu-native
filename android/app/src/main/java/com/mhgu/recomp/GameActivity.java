@@ -44,9 +44,12 @@ import java.io.OutputStream;
 public class GameActivity extends SDLActivity {
     private static final String TAG = "MHGU";
 
+    /** Keep the user-selected DLL path available to the native LSFG backend across app restarts. */
+    static native void nativeLosslessDllChanged(String absolutePath);
+
     @Override
     protected String[] getLibraries() {
-        return new String[] { "c++_shared", "SDL3", "mhguffmpeg", "main" };
+        return new String[] { "c++_shared", "SDL3", "mhguffmpeg", "bloodframe", "main" };
     }
 
     private boolean viaEntry;
@@ -68,6 +71,7 @@ public class GameActivity extends SDLActivity {
         Diag.install(this);  // (1.0.1: the versions seen, a Java crash's stack for Share log)
         prepareFiles();
         super.onCreate(savedInstanceState);
+        nativeLosslessDllChanged(new File(AppHome.home(this), "lossless/Lossless.dll").getAbsolutePath());
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         pickRefreshRate();
         Diag.logToGame(this);  // (the phone and the app into log.txt, off this thread)
