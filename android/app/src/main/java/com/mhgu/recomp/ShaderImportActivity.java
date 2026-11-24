@@ -23,6 +23,8 @@ public final class ShaderImportActivity extends Activity {
     private static final int PICK_SHADER = 1;
     private static final long MAX_SHADER_BYTES = 2L << 20;
 
+    private static native void nativeShaderFilesChanged();
+
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -50,6 +52,7 @@ public final class ShaderImportActivity extends Activity {
                 name = safeName(name);
                 if (!name.toLowerCase(Locale.ROOT).endsWith(".glsl")) throw new Exception("Choose a .glsl file.");
                 copyShader(data.getData(), name);
+                nativeShaderFilesChanged();  // refresh after the atomic file install succeeds
                 Toast.makeText(this, "Imported " + name + ". Select it in Settings → Shader.", Toast.LENGTH_LONG).show();
             } catch (Exception e) {
                 Log.e(TAG, "shader import: " + e);
