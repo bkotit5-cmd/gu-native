@@ -7763,6 +7763,7 @@ static char *user_shader_params_prepare(const char *source, size_t source_size, 
                             item.minimum = ceilf(item.minimum);
                             item.maximum = floorf(item.maximum);
                             item.step = fmaxf(1.0f, roundf(item.step));
+                            if (item.minimum > item.maximum) item.type = -1;
                         } else if (item.type == USER_SHADER_PARAM_BOOL) {
                             item.minimum = 0.0f;
                             item.maximum = 1.0f;
@@ -7961,15 +7962,16 @@ static VkShaderModule user_shader_module(void) {
 
     f = fopen(source_path, "rb");
     if (!f) {
+        user_shader_params_clear();
         LOG("[shader] could not open selected GLSL file: %s\n", source_path);
         return VK_NULL_HANDLE;
     }
     long bytes = (long)shader_stat.st_size;
     char *source = malloc((size_t)bytes + 1);
-    if (!source) { fclose(f); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
+    if (!source) { fclose(f); user_shader_params_clear(); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
     bool read_ok = fread(source, 1, (size_t)bytes, f) == (size_t)bytes;
     fclose(f);
-    if (!read_ok) { free(source); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
+    if (!read_ok) { free(source); user_shader_params_clear(); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
     source[bytes] = 0;
 
     char params_path[1800];
@@ -8183,22 +8185,28 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
         {vk_default_sampler(false), depth_view, VK_IMAGE_LAYOUT_GENERAL}
     };
-    float shader_values[USER_SHADER_PARAM_MAX][4];
-    vk_user_shader_params_pack(shader_values);
-    uint64_t param_align = g_vk.props.limits.minUniformBufferOffsetAlignment;
-    if (param_align < 16) param_align = 16;
-    VkSpan param_span = vk_transient(sizeof shader_values, param_align);
-    memcpy(param_span.ptr, shader_values, sizeof shader_values);
-    VkDescriptorBufferInfo param_buffer = {.buffer = param_span.buf, .offset = param_span.off, .range = sizeof shader_values};
     VkWriteDescriptorSet w[3] = {
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[0]},
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 1, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 2, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &param_buffer}
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}
     };
-    vkUpdateDescriptorSets(g_vk.dev, 3, w, 0, NULL);
+    uint32_t write_count = 2;
+    if (kind == 3 && vk_user_shader_param_count() > 0) {
+        float shader_values[USER_SHADER_PARAM_MAX][4];
+        vk_user_shader_params_pack(shader_values);
+        uint64_t param_align = g_vk.props.limits.minUniformBufferOffsetAlignment;
+        if (param_align < 16) param_align = 16;
+        VkSpan param_span = vk_transient(sizeof shader_values, param_align);
+        memcpy(param_span.ptr, shader_values, sizeof shader_values);
+        VkDescriptorBufferInfo param_buffer = {.buffer = param_span.buf, .offset = param_span.off, .range = sizeof shader_values};
+        w[2] = (VkWriteDescriptorSet){
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 2, .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &param_buffer
+        };
+        write_count = 3;
+    }
+    vkUpdateDescriptorSets(g_vk.dev, write_count, w, 0, NULL);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &ds, 0, NULL);
     ss.known &= ~SS_SETS;  // (not draw's sets any more)
