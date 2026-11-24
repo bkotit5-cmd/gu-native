@@ -188,16 +188,16 @@ Keep independent backups of important saves before changing game files, importin
 
 ## Diagnostics and Detailed Log
 
-The shared `log.txt` includes a session-relative clock, a record of settings that differ from their defaults, settings changes made during the session, and periodic frame-interval summaries. The summaries include p50, p90 and p99 frame intervals, the longest interval, and the count of intervals over 100 ms.
+The shared `log.txt` includes a session-relative clock, a record of settings that differ from their defaults, settings changes made during the session, and frame-interval summaries once a minute. Each summary includes p50, p90 and p99 frame intervals, the longest interval, and the count of intervals over 100 ms.
 
-On Android, open **Settings → System → Your game → Detailed log** and enable it before reproducing a problem. It is **off by default**. When enabled, it adds extra diagnostic records for:
+Open **Settings → System → Your game → Detailed log** and enable it before reproducing a problem. It is **off by default**. When enabled, it adds extra diagnostic records for:
 
-- Shader discovery, selection, compilation and shader-list refresh.
+- Shader discovery/list refresh, compilation and compile-failure reporting.
 - Shader import completion and refresh requests.
 - HUD-mask capture and upload state.
 - Vulkan presentation path, image target and relevant format/resolution changes.
 
-The detailed traces are intended to record useful operations and state changes rather than repeatedly printing an unchanged status every frame. Important normal error messages remain available when Detailed Log is off. Use **Share log** on the same **Your game** page to send the log for troubleshooting. The log writer also limits log growth so long sessions do not create an unbounded log file.
+The detailed traces are intended to record useful operations and state changes rather than repeatedly printing an unchanged status every frame. Important normal error messages remain available when Detailed Log is off. On Android, use **Share log** on the same **Your game** page; on Windows, use **Log folder** to open the log location. The log writer also limits log growth so long sessions do not create an unbounded log file.
 
 ## Compatibility and safety notes
 
