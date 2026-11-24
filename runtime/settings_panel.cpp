@@ -3098,12 +3098,13 @@ void rows_graphics_20(std::vector<Row> &r) {
     };
     r.back().help = tr("The most frames a second. Unlimited: as many as the PC can draw, with VSync off; with VSync on, the monitor's refresh rate is the most. On a PC that can't hold 60, 30 is steadier: Toaster sets it, and Low-end mode leaves the frame rate as it is.");
 #endif
-    // left / right: one frame per second more or less; Confirm: the common ones
-    static const int presets[] = {15, 20, 30, 60, 90, 120, 144, 240,  // (the MH4U port's same list; 15 and 20 since 1.0.1)
 #ifndef __ANDROID__
-                                  FPS_UNLIMITED,
+    // left / right: one frame per second more or less; Confirm: the common ones
+    static const int presets[] = {15, 20, 30, 60, 90, 120, 144, 240, FPS_UNLIMITED};
+#else
+    r.back().help = tr("Choose 30, 60, 90 or 120 frames per second. A lower limit can reduce heat and battery use. VSync still controls how frames are displayed on the screen.");
+    static const int presets[] = {30, 60, 90, 120};
 #endif
-    };
     r.back().menu = true;
     Row copy = r.back();
     r.back().activate = [copy]() {
