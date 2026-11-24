@@ -7782,8 +7782,10 @@ static char *user_shader_params_prepare(const char *source, size_t source_size, 
                             item.step = 1.0f;
                             item.initial = item.initial >= 0.5f ? 1.0f : 0.0f;
                         }
-                        item.value = user_shader_param_clamp(&item, item.initial);
-                        parsed[count++] = item;
+                        if (item.type >= 0) {
+                            item.value = user_shader_param_clamp(&item, item.initial);
+                            parsed[count++] = item;
+                        }
                     }
                 }
             }
