@@ -137,6 +137,13 @@
             android:excludeFromRecents="true"
             android:exported="false" />
 
+        <!-- Settings -> Graphics -> Advanced: import the player's own Steam Lossless.dll through SAF. -->
+        <activity android:name=".LosslessDllImportActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:screenOrientation="sensorLandscape"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+
         <!-- El editor de diseño: Imagen -> Agregar imágenes (las imágenes propias de los botones, PicturesActivity) -->
         <activity android:name=".PicturesActivity"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
