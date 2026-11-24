@@ -382,8 +382,9 @@ public final class AppUpdateActivity extends Activity {
                         archive.getLongVersionCode() <= installed.getLongVersionCode())
                     throw new java.io.IOException("The APK version or version code is not newer than the installed app.");
                 if (!sameSigningCertificate(installed, archive))
-                    throw new java.io.IOException("This APK uses a different signing certificate. Android cannot install it over this copy. "
-                            + "Export your save before switching builds; see the release page for installation instructions.");
+                    throw new java.io.IOException("This APK uses a different signing certificate, so Android cannot install it over this app. "
+                            + "To switch builds, export your save from Settings > System > Your game > Export save, uninstall this app, "
+                            + "install the APK, then import your save.");
 
                 if (finalApk.exists() && !finalApk.delete())
                     throw new java.io.IOException("Cannot replace the cached APK.");
