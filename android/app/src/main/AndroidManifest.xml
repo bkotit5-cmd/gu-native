@@ -18,6 +18,7 @@
     <!-- Android 9 y 10: legacy write access when imported mods/cheats/DLC are copied into the selected game folder. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- multijugador (Local Play por IP / hubs) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -146,6 +147,18 @@
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:screenOrientation="sensorLandscape"
             android:exported="false" />
+
+        <!-- Settings -> System -> App version & updates; opens the Android package installer for a verified APK. -->
+        <activity android:name=".AppUpdateActivity"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+        <!-- Only the downloaded update APK is exposed, read-only and only through a temporary URI grant. -->
+        <provider android:name=".UpdateFileProvider"
+            android:authorities="${applicationId}.updatefiles"
+            android:exported="false"
+            android:grantUriPermissions="true" />
 
         <!-- Ajustes -> Carpeta de partidas (y la pantalla de arranque si esa carpeta tiene un problema) -->
         <activity android:name=".SaveFolderActivity"
