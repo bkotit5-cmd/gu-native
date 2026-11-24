@@ -7112,22 +7112,6 @@ static void draw(CmdRec *r, bool indexed) {
         else vk_ps1_draw(&fd);
     }
 
-    // Fallback for a plain 2D HUD draw when neither FSR nor the PS1 hook captured H.
-    // Exclude tiny fullscreen post passes that sample render targets.
-    if (!user_hud_mask_current() && vk_user_shader_hud_capture_needed() &&
-        !st.ds[0] && st.rt.ncolor > 0 && st.rt.color[0]) {
-        bool post = (uint32_t)r->x[2] <= 6;
-        bool reads_rt = false;
-        for (int i = 0; post && i < pr->fi->ntex; i++) {
-            NvnTexture *sampled = draw_texture(1, pr->fi, i);
-            if (sampled && sampled->backend && ((TexBackend *)sampled->backend)->gpu_owned)
-                reads_rt = true;
-        }
-        NvnTexture *scene = st.rt.color[0];
-        if (!(post && reads_rt) && scene->width >= 512 && scene->height >= 288)
-            vk_user_shader_hud_mask_begin(scene);
-    }
-
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
     if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
     models_fxaa_track(ms_want_depth);  // (FXAA: the same, models_fxaa_end)
@@ -8377,9 +8361,9 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     VkImageView hud_mask_view = VK_NULL_HANDLE;
     VkPipeline hud_overlay_pipeline = VK_NULL_HANDLE;
     if (!hdr && user_shader_module()) {
-        bool scene_pair = user_hud_mask_current() &&
+        bool scene_pair = user_hud_mask_upload_frame == g_present_count &&
                           user_hud_mask_width == b->width && user_hud_mask_height == b->height &&
-                          user_hud_mask.image && user_hud_mask_upload_frame == g_present_count;
+                          user_hud_mask.image;
         if (scene_pair) {
             hud_mask_view = vk_image_view(&user_hud_mask, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8_UNORM,
                                           0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
