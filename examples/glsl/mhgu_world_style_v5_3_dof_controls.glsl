@@ -3,7 +3,7 @@
 // =====================================================================
 //  MHGU "World Style" v5.3 - grading ala Monster Hunter World + DoF + editable controls
 //  Vulkan GLSL 450, single-pass fragment shader.
-//  Input: t (gambar game), depthTex (raw depth 0..1, opsional), uv, o.
+//  Input: t (final game image), depthTex (raw depth 0..1, optional), hudMask (HUD quad mask), uv, o.
 //  Jika app hanya memberi depth 1x1 (fallback), DoF memakai blur tilt-shift.
 //
 //  Alur: DoF (bokeh) -> sharpen (hanya area tajam) -> soft bloom
