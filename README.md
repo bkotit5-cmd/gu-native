@@ -76,7 +76,7 @@ Upscaling and frame-generation paths are hardware/driver dependent. An option be
 
 The **Shader** page is the in-game manager for custom **single-pass Vulkan GLSL fragment shaders**. It lists installed `.glsl` files, marks the active shader, lets you select a shader, switch back to **Use built-in shader**, and edit annotated parameters on a separate **Edit shader parameters** page. On Android, press and hold a shader row to open its removal confirmation; Windows retains its remove control. **Add shader file** imports a `.glsl` file. On Android it opens Android's system document picker and copies the selected file into the app's `shaders/` directory; the picker is a small bridge activity, not a separate orange shader-management screen. Android shader imports are limited to 2 MiB. On Windows, the app uses the native SDL file dialog. Shader changes are detected by the render thread and applied by hot-reloading on the next presented frame, without restarting the game.
 
-The renderer expects Vulkan GLSL 450:
+The renderer expects Vulkan GLSL 450. When a custom shader is active, `t` is the scene captured before the game's 2D HUD; the original HUD is composited back afterward from a mask built from the HUD quad transforms. The mask uses slightly expanded quad bounds, so transparent areas inside a sprite rectangle may also be preserved. If the renderer cannot capture a compatible scene/mask in a frame, it bypasses custom GLSL for that frame and presents the original image rather than risking a depth-blurred HUD:
 
 ```glsl
 #version 450
@@ -98,7 +98,7 @@ void main() {
 
 When a matching scene depth target is available, the renderer binds it to `depthTex` and resolves supported multisampled depth before presentation. A 1×1 fallback texture is bound when depth capture or view creation is unavailable. With custom GLSL active in SDR, the log reports `[shader] depthTex: BOUND` or `FALLBACK` plus the reason, dimensions, formats, sample count, aspect and active colour attachments. Diagnostics are emitted when that reported state changes, not every frame.
 
-Raw device depth must be linearized before using it as eye-space distance. Do not assume camera near/far planes, forward/reversed-Z, or depth availability in every scene. There is no dedicated UI mask, camera near/far uniform or separate depth prepass. A shader can blur game HUD elements already included in `t`; the Forge overlay is drawn afterward.
+Raw device depth must be linearized before using it as eye-space distance. Do not assume camera near/far planes, forward/reversed-Z, or depth availability in every scene. Camera near/far uniforms and a separate depth prepass are not provided. The Forge overlay is drawn after the game's image and HUD composite.
 
 ### Live shader parameters
 
@@ -119,7 +119,7 @@ A compile or pipeline failure falls back to the built-in presentation shader and
 
 **Not supported:** ReShade `.fx` / `.fxh` effects and `.ini` presets, RetroArch slang shaders, multipass chains, arbitrary uniform reflection and shader include files. ReShade requires a separate effect runtime or conversion to the supported single-pass GLSL interface.
 
-See [the GLSL shader guide](docs/USER_GLSL_SHADERS.md), [the sample saturation shader](examples/glsl/saturation.glsl), and [the parameterized MHGU World-style DoF shader](examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). The DoF sample's HUD edge protection is approximate; the renderer does not currently provide a separate HUD mask.
+See [the GLSL shader guide](docs/USER_GLSL_SHADERS.md), [the sample saturation shader](examples/glsl/saturation.glsl), and [the parameterized MHGU World-style DoF shader](examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). The DoF sample's `SCENE_EDGE_PROTECT` option is an optional edge safeguard for 3D scene details; HUD exclusion is handled by the renderer.
 
 ## Forge plugin support
 
