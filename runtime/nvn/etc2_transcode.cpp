@@ -130,33 +130,46 @@ extern "C" bool nvn_transcode_bcn_etc2(int kind, const uint8_t *blocks, uint32_t
     if (have_path && cache_read(path, header, out, expected_bytes)) return true;
 
     std::lock_guard<std::mutex> one_encoder(encode_mutex);
-    // Another worker may have completed the same transcode while this one waited for the memory-limited encoder slot.
+    // A concurrent upload may have produced this exact transcode while we waited for the bounded-memory encoder.
     if (have_path && cache_read(path, header, out, expected_bytes)) return true;
-    const size_t pixels = static_cast<size_t>(width) * height;
-    float *rgba = static_cast<float *>(malloc(pixels * 4 * sizeof(float)));
+
+    // Encode complete ETC2 block-row tiles. Temporary float memory is bounded independently of texture height.
+    constexpr uint32_t TILE_HEIGHT = 64;  // whole 4x4 block rows
+    const uint32_t block_width = (width + 3) / 4;
+    const size_t tile_pixels = static_cast<size_t>(width) * (height < TILE_HEIGHT ? height : TILE_HEIGHT);
+    float *rgba = static_cast<float *>(malloc(tile_pixels * 4 * sizeof(float)));
     if (!rgba) {
         memset(out, 0, expected_bytes);
         return false;
     }
-    bcn_decode_float_rgba(kind, blocks, width, height, rgba);
 
-    bool ok = false;
-    unsigned char *bits = nullptr;
-    try {
-        Etc::Image image(rgba, width, height, Etc::RGBA);
-        const Etc::Image::Format format = kind == BCN_BC1
-            ? (srgb ? Etc::Image::Format::SRGB8A1 : Etc::Image::Format::RGB8A1)
-            : (srgb ? Etc::Image::Format::SRGBA8 : Etc::Image::Format::RGBA8);
-        const Etc::Image::EncodingStatus status = image.Encode(format, Etc::RGBA, 0.0f, 1, 1);
-        bits = image.GetEncodingBits();
-        const bool has_error =
-            (static_cast<unsigned>(status) & static_cast<unsigned>(Etc::Image::ERROR_THRESHOLD)) != 0;
-        ok = !has_error && bits && image.GetEncodingBitsBytes() == expected_bytes;
-        if (ok) memcpy(out, bits, expected_bytes);
-    } catch (...) {
-        ok = false;
+    bool ok = true;
+    for (uint32_t y = 0; y < height && ok; y += TILE_HEIGHT) {
+        const uint32_t tile_height = height - y < TILE_HEIGHT ? height - y : TILE_HEIGHT;
+        const uint64_t source_block_offset = static_cast<uint64_t>(y / 4) * block_width * source_bpb;
+        const uint64_t output_block_offset = static_cast<uint64_t>(y / 4) * block_width * target_bpb;
+        const size_t tile_bytes = static_cast<size_t>(block_width) * ((tile_height + 3) / 4) * target_bpb;
+
+        bcn_decode_float_rgba(kind, blocks + source_block_offset, width, tile_height, rgba);
+
+        unsigned char *bits = nullptr;
+        try {
+            Etc::Image image(rgba, width, tile_height, Etc::RGBA);
+            const Etc::Image::Format format = kind == BCN_BC1
+                ? (srgb ? Etc::Image::Format::SRGB8A1 : Etc::Image::Format::RGB8A1)
+                : (srgb ? Etc::Image::Format::SRGBA8 : Etc::Image::Format::RGBA8);
+            const Etc::Image::EncodingStatus status = image.Encode(format, Etc::RGBA, 0.0f, 1, 1);
+            bits = image.GetEncodingBits();
+            const bool has_error =
+                (static_cast<unsigned>(status) & static_cast<unsigned>(Etc::Image::ERROR_THRESHOLD)) != 0;
+            ok = !has_error && bits && image.GetEncodingBitsBytes() == tile_bytes;
+            if (ok) memcpy(out + output_block_offset, bits, tile_bytes);
+        } catch (...) {
+            ok = false;
+        }
+        // Etc::Image's destructor intentionally does not own m_paucEncodingBits.
+        delete[] bits;
     }
-    delete[] bits; // Etc::Image's destructor intentionally does not own m_paucEncodingBits.
     free(rgba);
 
     if (!ok) {
