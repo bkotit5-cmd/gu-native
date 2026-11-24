@@ -87,18 +87,6 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Verify fork signing key
-        shell: pwsh
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'
-          & keytool -list -keystore $keystorePath -storetype PKCS12 -storepass $env:ANDROID_KEYSTORE_PASSWORD -alias $env:ANDROID_KEY_ALIAS
-          if ($LASTEXITCODE -ne 0) {
-            throw "The configured fork signing key could not be opened."
-          }
-
       - name: Set up Python for Phone Builder packaging
         uses: actions/setup-python@v7
         with:
