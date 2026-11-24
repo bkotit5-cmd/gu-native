@@ -1739,7 +1739,7 @@ static void hud_start(const char *why) {
     }
     if (ps1 && frame_fsr) vk_ps1_dither(hs->backend);
     // Snapshot the clean scene before any redirected HUD draw reaches H'.
-    vk_user_shader_hud_mask_begin(hs);
+
     {  // every change between FSR and plain scaling, with the reason (always logged; at most 500 lines)
         static int last = -1, nlog;
         const char *why_not = frame_fsr ? NULL : !depth || dn < 16 ? "no 3D scene this frame (fewer than 16 depth-writing draws)"
