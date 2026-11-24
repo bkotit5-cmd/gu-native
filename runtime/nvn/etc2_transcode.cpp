@@ -39,7 +39,20 @@ struct CacheHeader {
     char digest[65];
 };
 
-std::mutex cache_mutex;
+struct CacheWriteJob {
+    char path[160];
+    CacheHeader header;
+    size_t bytes;
+    uint8_t *data;
+    CacheWriteJob *next;
+};
+
+std::mutex cache_queue_mutex;
+std::condition_variable cache_queue_cv;
+CacheWriteJob *cache_queue_head, *cache_queue_tail;
+size_t cache_queue_pending_bytes;
+bool cache_writer_started;
+constexpr size_t CACHE_WRITE_QUEUE_LIMIT = 16u << 20;
 std::mutex encode_mutex;
 std::condition_variable encode_cv;
 unsigned int active_encoders;
@@ -110,8 +123,8 @@ void make_digest(int kind, uint32_t width, uint32_t height, bool srgb,
 }
 
 bool cache_read(const char *path, const CacheHeader &expected, uint8_t *out, size_t bytes) {
-    std::lock_guard<std::mutex> lock(cache_mutex);
-    if (!cache_dirs()) return false;
+    // Cache files are immutable after publication: writers use a temporary file and rename it into place.
+    // Reads therefore need no global lock and can proceed concurrently on independent upload workers.
     FILE *f = fopen(path, "rb");
     if (!f) return false;
     CacheHeader h{};
@@ -120,18 +133,18 @@ bool cache_read(const char *path, const CacheHeader &expected, uint8_t *out, siz
         h.version == expected.version && h.kind == expected.kind &&
         h.width == expected.width && h.height == expected.height &&
         h.srgb == expected.srgb && h.format == expected.format &&
-        h.output_bytes == expected.output_bytes && !strcmp(h.digest, expected.digest) &&
+        h.output_bytes == expected.output_bytes && h.digest[64] == '\\0' &&
+        !strcmp(h.digest, expected.digest) &&
         fread(out, 1, bytes, f) == bytes && fgetc(f) == EOF && !ferror(f);
     fclose(f);
-    if (!ok) remove(path);
+    // Do not unlink a bad entry here: another worker may have replaced it after this reader opened it.
+    // A successful cache write will replace stale/corrupt entries safely.
     return ok;
 }
 
-void cache_write(const char *path, const CacheHeader &header, const uint8_t *data, size_t bytes) {
-    std::lock_guard<std::mutex> lock(cache_mutex);
+void cache_write_file(const char *path, const CacheHeader &header, const uint8_t *data, size_t bytes) {
+    // Called only by the dedicated cache writer, never by a texture upload worker.
     if (!cache_dirs()) return;
-    struct stat st;
-    if (stat(path, &st) == 0) return;
     char tmp[256];
     const uint64_t serial = temp_serial.fetch_add(1, std::memory_order_relaxed);
     if (snprintf(tmp, sizeof(tmp), "%s.tmp.%llu", path, static_cast<unsigned long long>(serial)) >=
@@ -141,11 +154,89 @@ void cache_write(const char *path, const CacheHeader &header, const uint8_t *dat
     bool ok = fwrite(&header, sizeof(header), 1, f) == 1 &&
               fwrite(data, 1, bytes, f) == bytes && fflush(f) == 0;
     if (fclose(f) != 0) ok = false;
-    if (ok) {
-        if (rename(tmp, path) != 0) remove(tmp);
-    } else {
+    if (!ok) {
         remove(tmp);
+        return;
     }
+#ifdef _WIN32
+    // The C runtime's rename does not replace an existing destination on Windows.
+    // Cache entries are disposable and can always be regenerated.
+    remove(path);
+#endif
+    if (rename(tmp, path) != 0) remove(tmp);
+}
+
+void cache_writer_loop() {
+    for (;;) {
+        CacheWriteJob *job;
+        {
+            std::unique_lock<std::mutex> lock(cache_queue_mutex);
+            cache_queue_cv.wait(lock, [] { return cache_queue_head != nullptr; });
+            job = cache_queue_head;
+            cache_queue_head = job->next;
+            if (!cache_queue_head) cache_queue_tail = nullptr;
+        }
+
+        cache_write_file(job->path, job->header, job->data, job->bytes);
+        const size_t bytes = job->bytes;
+        free(job->data);
+        free(job);
+
+        {
+            std::lock_guard<std::mutex> lock(cache_queue_mutex);
+            cache_queue_pending_bytes -= bytes;
+        }
+    }
+}
+
+bool cache_enqueue_write(const char *path, const CacheHeader &header, const uint8_t *data, size_t bytes) {
+    // Cache persistence is best-effort. Bound the extra copy so slow storage cannot grow RAM usage indefinitely.
+    if (!bytes || bytes > CACHE_WRITE_QUEUE_LIMIT) return false;
+    {
+        std::lock_guard<std::mutex> lock(cache_queue_mutex);
+        if (bytes > CACHE_WRITE_QUEUE_LIMIT - cache_queue_pending_bytes) return false;
+        cache_queue_pending_bytes += bytes;
+        if (!cache_writer_started) {
+            try {
+                std::thread(cache_writer_loop).detach();
+                cache_writer_started = true;
+            } catch (...) {
+                cache_queue_pending_bytes -= bytes;
+                return false;
+            }
+        }
+    }
+
+    CacheWriteJob *job = static_cast<CacheWriteJob *>(malloc(sizeof(*job)));
+    uint8_t *copy = static_cast<uint8_t *>(malloc(bytes));
+    if (!job || !copy) {
+        free(job);
+        free(copy);
+        std::lock_guard<std::mutex> lock(cache_queue_mutex);
+        cache_queue_pending_bytes -= bytes;
+        return false;
+    }
+    memcpy(copy, data, bytes);
+    memset(job, 0, sizeof(*job));
+    if (snprintf(job->path, sizeof(job->path), "%s", path) >= static_cast<int>(sizeof(job->path))) {
+        free(copy);
+        free(job);
+        std::lock_guard<std::mutex> lock(cache_queue_mutex);
+        cache_queue_pending_bytes -= bytes;
+        return false;
+    }
+    job->header = header;
+    job->bytes = bytes;
+    job->data = copy;
+
+    {
+        std::lock_guard<std::mutex> lock(cache_queue_mutex);
+        if (cache_queue_tail) cache_queue_tail->next = job;
+        else cache_queue_head = job;
+        cache_queue_tail = job;
+    }
+    cache_queue_cv.notify_one();
+    return true;
 }
 } // namespace
 
@@ -235,7 +326,7 @@ extern "C" bool nvn_transcode_bcn_etc2(int kind, const uint8_t *blocks, uint32_t
         log_transcode(kind, width, height, false, started);
         return false;
     }
-    if (have_path) cache_write(path, header, out, expected_bytes);
+    if (have_path) cache_enqueue_write(path, header, out, expected_bytes);
     log_transcode(kind, width, height, false, started);
     return true;
 }
