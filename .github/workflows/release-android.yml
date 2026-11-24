@@ -32,148 +32,13 @@ jobs:
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           $code = [int](Get-Content VERSION_CODE -Raw).Trim()
-          if ($version -notmatch '^\d+(\.\d+)*
-      - name: Set up Android signing key
-        shell: pwsh
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          foreach ($name in @('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD')) {
-            if (-not [Environment]::GetEnvironmentVariable($name)) {
-              throw "Missing GitHub Actions secret: $name"
-            }
+
+          if ($version -notmatch '^\\d+(\\.\\d+)*$') {
+            throw "VERSION must be a dotted numeric version."
           }
-          $keystore = [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
-          [IO.File]::WriteAllBytes((Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'), $keystore)
-          $properties = "storePassword=$env:ANDROID_KEYSTORE_PASSWORD`nkeyAlias=$env:ANDROID_KEY_ALIAS`nkeyPassword=$env:ANDROID_KEY_PASSWORD`n"
-          [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'android\keystore.properties'), $properties, [Text.Encoding]::ASCII)
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
-
-      - name: Verify fork signing key
-        shell: pwsh
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'
-          & keytool -list -keystore $keystorePath -storetype PKCS12 -storepass $env:ANDROID_KEYSTORE_PASSWORD -alias $env:ANDROID_KEY_ALIAS
-          if ($LASTEXITCODE -ne 0) { throw "The configured fork signing key could not be opened." }
-
-      - name: Set up Python for Phone Builder packaging
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Set up Android command-line tools
-        uses: android-actions/setup-android@v4
-        with:
-          packages: ''
-
-      - name: Install Android SDK packages at the path expected by Khorne build scripts
-        shell: pwsh
-        run: |
-          $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
-          New-Item -ItemType Directory -Force -Path $sdk | Out-Null
-
-          $toolsRoot = $env:ANDROID_SDK_ROOT
-          if (-not $toolsRoot) { $toolsRoot = $env:ANDROID_HOME }
-          if (-not $toolsRoot) { $toolsRoot = $sdk }
-
-          $manager = Get-ChildItem -Path (Join-Path $toolsRoot 'cmdline-tools') -Filter sdkmanager.bat -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $manager) { throw "sdkmanager.bat was not found under $toolsRoot" }
-
-          $licenseAnswers = (1..30 | ForEach-Object { 'y' }) -join "`n"
-          $licenseAnswers | & $manager.FullName "--sdk_root=$sdk" "--licenses"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          & $manager.FullName "--sdk_root=$sdk" "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
-          "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
-
-          foreach ($required in @(
-            (Join-Path $sdk 'platforms\android-35'),
-            (Join-Path $sdk 'ndk\27.0.12077973'),
-            (Join-Path $sdk 'cmake\3.22.1\bin\cmake.exe'),
-            (Join-Path $sdk 'cmake\3.22.1\bin\ninja.exe')
-          )) {
-            if (-not (Test-Path $required)) { throw "Android build component is missing: $required" }
+          if ($code -lt 1) {
+            throw "VERSION_CODE must be a positive integer."
           }
-
-      - name: Set up MSYS2 build tools
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MSYS
-          path-type: inherit
-          update: true
-          install: git make
-
-      - name: Fetch pinned native dependency sources
-        shell: msys2 {0}
-        run: bash deps/fetch_sources.sh
-
-      - name: Build SDL3 and shaderc
-        shell: msys2 {0}
-        env:
-          JOBS: 4
-        run: bash deps/build_deps.sh arm64-v8a
-
-      - name: Build FFmpeg
-        shell: msys2 {0}
-        env:
-          JOBS: 4
-        run: bash deps/build_ffmpeg.sh arm64-v8a
-
-      - name: Build native runtime and Phone Builder tools
-        shell: msys2 {0}
-        env:
-          JOBS: 4
-        run: bash native/build_native.sh arm64-v8a Release
-
-      - name: Verify native libraries and Phone Builder bundle
-        shell: pwsh
-        run: |
-          $root = $env:GITHUB_WORKSPACE
-          $native = Join-Path $root 'android\app\src\main\jniLibs\arm64-v8a'
-          foreach ($name in @('libmain.so', 'libmhguffmpeg.so', 'libSDL3.so', 'libc++_shared.so', 'libpyrun.so', 'libzigcc.so')) {
-            $file = Join-Path $native $name
-            if (-not (Test-Path $file)) { throw "Native build output is missing: $file" }
-          }
-          $builderTools = Join-Path $root 'android\app\src\main\assets\builder\tools.zip'
-          if (-not (Test-Path $builderTools)) { throw "Phone Builder bundle is missing: $builderTools" }
-
-      - name: Build signed Android release APK
-        shell: pwsh
-        run: |
-          Push-Location android
-          try {
-            .\gradlew.bat --no-daemon --max-workers=4 assembleRelease
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          finally {
-            Pop-Location
-          }
-
-      - name: Publish GitHub Release with APK
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release_meta.outputs.release_tag }}
-          target_commitish: ${{ github.sha }}
-          name: MHGU Recompiled ${{ steps.release_meta.outputs.release_tag }}
-          generate_release_notes: true
-          files: android/app/build/outputs/apk/release/app-release.apk
-) { throw "VERSION must be a dotted numeric version." }
-          if ($code -lt 1) { throw "VERSION_CODE must be a positive integer." }
 
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
             $requested = $env:INPUT_RELEASE_TAG
@@ -189,6 +54,7 @@ jobs:
           if ($tag -ne "v$version") {
             throw "Release tag $tag must match VERSION (v$version)."
           }
+
           "release_tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Set up Android signing key
@@ -200,14 +66,22 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           foreach ($name in @('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD')) {
-            if (-not [Environment]::GetEnvironmentVariable($name)) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
               throw "Missing GitHub Actions secret: $name"
             }
           }
+
           $keystore = [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
-          [IO.File]::WriteAllBytes((Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'), $keystore)
+          if ($keystore.Length -eq 0) {
+            throw "ANDROID_KEYSTORE_BASE64 decoded to an empty file."
+          }
+
+          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\\mhgu.keystore'
+          [IO.File]::WriteAllBytes($keystorePath, $keystore)
+
           $properties = "storePassword=$env:ANDROID_KEYSTORE_PASSWORD`nkeyAlias=$env:ANDROID_KEY_ALIAS`nkeyPassword=$env:ANDROID_KEY_PASSWORD`n"
-          [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'android\keystore.properties'), $properties, [Text.Encoding]::ASCII)
+          $propertiesPath = Join-Path $env:GITHUB_WORKSPACE 'android\\keystore.properties'
+          [IO.File]::WriteAllText($propertiesPath, $properties, [Text.Encoding]::ASCII)
 
       - name: Set up Java 17
         uses: actions/setup-java@v6
@@ -215,6 +89,18 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
+
+      - name: Verify fork signing key
+        shell: pwsh
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\\mhgu.keystore'
+          & keytool -list -keystore $keystorePath -storetype PKCS12 -storepass $env:ANDROID_KEYSTORE_PASSWORD -alias $env:ANDROID_KEY_ALIAS
+          if ($LASTEXITCODE -ne 0) {
+            throw "The configured fork signing key could not be opened."
+          }
 
       - name: Set up Python for Phone Builder packaging
         uses: actions/setup-python@v7
@@ -229,7 +115,7 @@ jobs:
       - name: Install Android SDK packages at the path expected by Khorne build scripts
         shell: pwsh
         run: |
-          $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+          $sdk = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'
           New-Item -ItemType Directory -Force -Path $sdk | Out-Null
 
           $toolsRoot = $env:ANDROID_SDK_ROOT
@@ -237,7 +123,9 @@ jobs:
           if (-not $toolsRoot) { $toolsRoot = $sdk }
 
           $manager = Get-ChildItem -Path (Join-Path $toolsRoot 'cmdline-tools') -Filter sdkmanager.bat -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $manager) { throw "sdkmanager.bat was not found under $toolsRoot" }
+          if (-not $manager) {
+            throw "sdkmanager.bat was not found under $toolsRoot"
+          }
 
           $licenseAnswers = (1..30 | ForEach-Object { 'y' }) -join "`n"
           $licenseAnswers | & $manager.FullName "--sdk_root=$sdk" "--licenses"
@@ -250,12 +138,14 @@ jobs:
           "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
 
           foreach ($required in @(
-            (Join-Path $sdk 'platforms\android-35'),
-            (Join-Path $sdk 'ndk\27.0.12077973'),
-            (Join-Path $sdk 'cmake\3.22.1\bin\cmake.exe'),
-            (Join-Path $sdk 'cmake\3.22.1\bin\ninja.exe')
+            (Join-Path $sdk 'platforms\\android-35'),
+            (Join-Path $sdk 'ndk\\27.0.12077973'),
+            (Join-Path $sdk 'cmake\\3.22.1\\bin\\cmake.exe'),
+            (Join-Path $sdk 'cmake\\3.22.1\\bin\\ninja.exe')
           )) {
-            if (-not (Test-Path $required)) { throw "Android build component is missing: $required" }
+            if (-not (Test-Path $required)) {
+              throw "Android build component is missing: $required"
+            }
           }
 
       - name: Set up MSYS2 build tools
@@ -292,20 +182,25 @@ jobs:
         shell: pwsh
         run: |
           $root = $env:GITHUB_WORKSPACE
-          $native = Join-Path $root 'android\app\src\main\jniLibs\arm64-v8a'
+          $native = Join-Path $root 'android\\app\\src\\main\\jniLibs\\arm64-v8a'
           foreach ($name in @('libmain.so', 'libmhguffmpeg.so', 'libSDL3.so', 'libc++_shared.so', 'libpyrun.so', 'libzigcc.so')) {
             $file = Join-Path $native $name
-            if (-not (Test-Path $file)) { throw "Native build output is missing: $file" }
+            if (-not (Test-Path $file)) {
+              throw "Native build output is missing: $file"
+            }
           }
-          $builderTools = Join-Path $root 'android\app\src\main\assets\builder\tools.zip'
-          if (-not (Test-Path $builderTools)) { throw "Phone Builder bundle is missing: $builderTools" }
+
+          $builderTools = Join-Path $root 'android\\app\\src\\main\\assets\\builder\\tools.zip'
+          if (-not (Test-Path $builderTools)) {
+            throw "Phone Builder bundle is missing: $builderTools"
+          }
 
       - name: Build signed Android release APK
         shell: pwsh
         run: |
           Push-Location android
           try {
-            .\gradlew.bat --no-daemon --max-workers=4 assembleRelease
+            .\\gradlew.bat --no-daemon --max-workers=4 assembleRelease
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           finally {
@@ -315,8 +210,8 @@ jobs:
       - name: Publish GitHub Release with APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          tag_name: ${{ steps.release_meta.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          name: MHGU Recompiled ${{ inputs.release_tag || github.ref_name }}
+          name: MHGU Recompiled ${{ steps.release_meta.outputs.release_tag }}
           generate_release_notes: true
           files: android/app/build/outputs/apk/release/app-release.apk
