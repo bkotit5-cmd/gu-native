@@ -2657,10 +2657,6 @@ void user_shader_rows(std::vector<Row> &r) {
     action(r, "shader.import", en_es("Import / add shader", "Importar / añadir shader"),
            []() { g_user_shader_files_ready = false; pc_import_shader(); });
 #endif
-    note(r, "shader.depth", en_es("Custom GLSL can read scene depth as depthTex (binding 1).",
-                                  "GLSL personalizado puede leer profundidad de escena en depthTex (binding 1)."));
-    note(r, "shader.reshade", en_es("ReShade .fx / .ini presets and multi-pass techniques are not supported yet.",
-                                    "Los archivos ReShade .fx / presets .ini y técnicas multipase aún no son compatibles."));
     r.back().help = en_es(
         "Vulkan GLSL 450 fullscreen fragment shader. Binding 0: sampler2D t (game image). Optional binding 1: "
         "sampler2D depthTex (paired scene depth, raw 0..1 device depth). Selection and file changes hot-reload without "
@@ -2670,6 +2666,11 @@ void user_shader_rows(std::vector<Row> &r) {
         "sampler2D depthTex (profundidad de escena, profundidad sin linealizar 0..1). La selección y los cambios se recargan "
         "sin reiniciar. Sigue siendo GLSL de un pase; ReShade .fx, .fxh, presets .ini y multipase requieren otro runtime. "
         "La salida HDR omite GLSL personalizado.");
+    note(r, "shader.depth", en_es("Custom GLSL can read scene depth as depthTex (binding 1).",
+                                  "GLSL personalizado puede leer profundidad de escena en depthTex (binding 1)."));
+    note(r, "shader.reshade", en_es("ReShade .fx / .ini presets and multi-pass techniques are not supported yet.",
+                                    "Los archivos ReShade .fx / presets .ini y técnicas multipase aún no son compatibles."));
+
 }
 MENU_ENTRY("shader", 10, user_shader_rows);
 

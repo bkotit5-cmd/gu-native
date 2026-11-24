@@ -30,7 +30,7 @@ void main() {
 - `o` is the final colour for the pixel.
 - The entry point must be `main`.
 
-The renderer resolves multisampled scene depth before the presentation pass. Depth-aware blur and DoF can sample `depthTex`; shaders must linearize it and account for the game's depth convention if they need eye-space distance. This input does not provide a separate depth prepass or guarantee a matching depth attachment in every menu/UI scene.
+The renderer captures the same scene depth attachment selected by the game pass, including its FSR output-size depth target when FSR scaling is active, and resolves supported multisampled depth before the presentation pass. Depth-aware blur and DoF can sample `depthTex`; shaders must linearize it and account for the game's depth convention if they need eye-space distance. This input does not provide a separate depth prepass or guarantee a matching depth attachment in every menu/UI scene.
 
 The app compiles GLSL with shaderc for the active Vulkan 1.1/1.2 device. Source files are limited to 2 MB. Shader selection and source replacement trigger a render-thread reload; HDR presentation still bypasses custom GLSL.
 

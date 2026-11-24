@@ -7659,10 +7659,11 @@ void vk_present_depth_capture(NvnTexture *colour) {
 
     user_depth_level = st.rt.has_dview && (st.rt.dview.setmask & 1) ? st.rt.dview.base_level : 0;
     user_depth_layer = st.rt.has_dview && (st.rt.dview.setmask & 2) ? st.rt.dview.min_layer : 0;
-    // vk_ms_resolve() resolves only mip 0 / layer 0. Do not expose a stale multisample depth image for subviews.
-    if (depth->ms && depth->ms_dirty &&
-        (user_depth_level || user_depth_layer || !depth_copy_ok(depth->ms->format))) {
-        LOG("[shader] depth input unavailable for this multisample depth subview/format\n");
+    // vk_ms_resolve() resolves only mip 0 / layer 0. Never expose an unsupported or stale MSAA depth subview.
+    static int depth_warnings;
+    if (depth->ms && (user_depth_level || user_depth_layer || !depth_copy_ok(depth->ms->format))) {
+        if (depth_warnings++ < 4)
+            LOG("[shader] depth input unavailable for this multisample depth subview/format\n");
         return;
     }
     user_depth_target = depth;
