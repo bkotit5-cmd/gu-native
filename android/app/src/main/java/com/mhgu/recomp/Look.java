@@ -27,9 +27,9 @@ import java.util.Locale;
  * stack when there are more than two, so a long label is never cut.
  */
 final class Look {
-    static final int WINE = Color.rgb(38, 18, 14), PANEL = Color.rgb(26, 12, 9), CREAM = Color.rgb(240, 228, 200);
-    static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
-    static final int ALERT = Color.rgb(255, 150, 120);
+    static final int WINE = Color.rgb(0, 0, 0), PANEL = Color.rgb(16, 16, 16), CREAM = Color.rgb(245, 245, 245);
+    static final int GOLD = Color.rgb(255, 255, 255), BRONZE = Color.rgb(44, 44, 44), EDGE = Color.rgb(205, 205, 205);
+    static final int ALERT = Color.rgb(210, 210, 210);
 
     private Look() {}
 
