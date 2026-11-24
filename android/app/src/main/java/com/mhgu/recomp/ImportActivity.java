@@ -38,8 +38,8 @@ import java.util.zip.ZipInputStream;
 
 /**
  * Ajustes -> Trucos / Mods: importa trucos, mods y DLC desde el almacenamiento del jugador.
- * Estos archivos conservan sus carpetas y formatos de siempre. Los shaders se importan por el selector de documentos
- * del sistema; su selección y eliminación se hacen en la página Shader del menú del juego.
+ * Estos archivos conservan sus carpetas y formatos de siempre. Los shaders se importan mediante la actividad del selector
+ * de documentos del sistema; esta pantalla propia solo gestiona trucos, mods y DLC.
  * El navegador propio sirve para los archivos del juego que Android 11 o más no deja abrir con un explorador normal.
  */
 public class ImportActivity extends Activity {
