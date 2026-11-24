@@ -37,8 +37,24 @@ jobs:
             }
           }
           $keystore = [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
-          [IO.File]::WriteAllBytes((Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'), $keystore)
-          $properties = "storePassword=$env:ANDROID_KEYSTORE_PASSWORD`nkeyAlias=$env:ANDROID_KEY_ALIAS`nkeyPassword=$env:ANDROID_KEY_PASSWORD`n"
+          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'
+          [IO.File]::WriteAllBytes($keystorePath, $keystore)
+
+          # Detect the keystore format instead of assuming it is always PKCS12.
+          $detectedStoreType = $null
+          foreach ($candidateType in @('PKCS12', 'JKS')) {
+            & keytool -list -keystore $keystorePath -storetype $candidateType -storepass $env:ANDROID_KEYSTORE_PASSWORD *> $null
+            if ($LASTEXITCODE -eq 0) {
+              $detectedStoreType = $candidateType
+              break
+            }
+          }
+          if (-not $detectedStoreType) {
+            throw "The keystore could not be opened as PKCS12 or JKS. Check that the GitHub keystore file and store password belong together."
+          }
+
+          "ANDROID_KEYSTORE_TYPE=$detectedStoreType" >> $env:GITHUB_ENV
+          $properties = "storePassword=$env:ANDROID_KEYSTORE_PASSWORD`nkeyAlias=$env:ANDROID_KEY_ALIAS`nkeyPassword=$env:ANDROID_KEY_PASSWORD`nstoreType=$detectedStoreType`n"
           [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'android\keystore.properties'), $properties, [Text.Encoding]::ASCII)
 
       - name: Verify fork signing key
@@ -48,8 +64,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'
-          & keytool -list -keystore $keystorePath -storetype PKCS12 -storepass $env:ANDROID_KEYSTORE_PASSWORD -alias $env:ANDROID_KEY_ALIAS
-          if ($LASTEXITCODE -ne 0) { throw "The configured fork signing key could not be opened." }
+          $storeType = $env:ANDROID_KEYSTORE_TYPE
+          if (-not $storeType) { throw "The keystore format was not detected." }
+          & keytool -list -keystore $keystorePath -storetype $storeType -storepass $env:ANDROID_KEYSTORE_PASSWORD -alias $env:ANDROID_KEY_ALIAS
+          if ($LASTEXITCODE -ne 0) { throw "The keystore opened, but the configured key alias could not be verified." }
 
       - name: Set up Python for Phone Builder packaging
         uses: actions/setup-python@v7
