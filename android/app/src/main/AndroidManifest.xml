@@ -114,7 +114,7 @@
             android:excludeFromRecents="true"
             android:exported="true" />
         <provider android:name=".LogProvider"
-            android:authorities="com.mhgu.recomp.logs"
+            android:authorities="com.abc.mhgu.recomp.logs"
             android:process=":share"
             android:exported="false"
             android:grantUriPermissions="true" />
