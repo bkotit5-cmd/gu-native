@@ -5041,8 +5041,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
             if (is_fullscreen && g_hudtrace_active)
                 LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: whole screen, kept\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
-            if (is_fullscreen && pos_z <= 180.0f)
-                user_hud_mask_mark_full();  // (a non-depth-tested fullscreen UI/fade is a HUD layer too)
+                if (is_fullscreen && pos_z <= 180.0f &&
+                (ui_loading_pass || ui_title_pass || ui_frontend_pass || ui_stamp_pass ||
+                 ui_results_pass || ui_meownster_pass || ui_menu_pass || ui_window_pass))
+                user_hud_mask_mark_full();  // (a known fullscreen UI layer, not a scene post pass)
             if (!is_fullscreen) {
                 // The HUD keeps the 16:9 shape it is laid out in: on a wider picture its parts are narrowed (s) and moved
                 // toward their side, on a narrower one (16:10) flattened (sy) and moved toward the top or bottom.
@@ -8283,11 +8285,12 @@ static VkPipeline present_pipeline(int kind) {
     VkRenderPass rp = vk_window_pass();
     if (present_render_passes[kind] == rp) return present_pipes[kind];
     if (!present_layout) {
-        VkDescriptorSetLayoutBinding b[3] = {
+        VkDescriptorSetLayoutBinding b[4] = {
             {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
             {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
-            {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL}};
-        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 3, .pBindings = b};
+            {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+            {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL}};
+        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 4, .pBindings = b};
         VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &present_set_layout));
         VkPushConstantRange r = {VK_SHADER_STAGE_VERTEX_BIT, 0, 32};
         VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
@@ -8374,7 +8377,8 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     if (!hdr && user_shader_module()) {
         hud_separated = user_hud_scene_current() && user_hud_scene_copy.image &&
                         user_hud_scene_copy.width == b->width && user_hud_scene_copy.height == b->height &&
-                        user_hud_scene_copy.format == b->format;
+                        user_hud_scene_copy.format == b->format && user_hud_mask.image &&
+                        user_hud_mask_upload_frame == g_present_count;
         if (hud_separated) {
             kind = 3;
             p = present_pipeline(kind);
@@ -8477,21 +8481,21 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
     vkCmdDraw(cb, 3, 1, 0, 0);
 
-    // The user shader has only seen the clean 3D scene. Restore the pixels changed by the game's HUD
-    // from the original image using a difference mask made from (final game image - pre-HUD scene).
+    // The user shader has only seen the clean 3D scene. Restore original HUD pixels from the
+    // quad mask accumulated while the game's non-depth-tested HUD transforms were translated.
     if (kind == 3 && hud_separated) {
         VkPipeline overlay = present_pipeline(4);
-        if (overlay) {
+        VkImageView mask_view = vk_image_view(&user_hud_mask, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8_UNORM,
+                                              0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
+        if (overlay && mask_view) {
             VkDescriptorSet hud_set = vk_alloc_set(present_set_layout);
-            VkDescriptorImageInfo hud_ii[2] = {
-                {vk_default_sampler(false), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
-                {vk_default_sampler(false), raw_view(&user_hud_scene_copy), VK_IMAGE_LAYOUT_GENERAL}
-            };
+            VkDescriptorImageInfo hud_ii = {vk_default_sampler(false), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
+            VkDescriptorImageInfo mask_ii = {vk_default_sampler(false), mask_view, VK_IMAGE_LAYOUT_GENERAL};
             VkWriteDescriptorSet hud_w[2] = {
                 {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 0,
-                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hud_ii[0]},
-                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 1,
-                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hud_ii[1]}
+                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hud_ii},
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 3,
+                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mask_ii}
             };
             vkUpdateDescriptorSets(g_vk.dev, 2, hud_w, 0, NULL);
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, overlay);
