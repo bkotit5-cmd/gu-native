@@ -5041,6 +5041,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
             if (is_fullscreen && g_hudtrace_active)
                 LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: whole screen, kept\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
+            if (is_fullscreen && pos_z <= 180.0f)
+                user_hud_mask_mark_full();  // (a non-depth-tested fullscreen UI/fade is a HUD layer too)
             if (!is_fullscreen) {
                 // The HUD keeps the 16:9 shape it is laid out in: on a wider picture its parts are narrowed (s) and moved
                 // toward their side, on a narrower one (16:10) flattened (sy) and moved toward the top or bottom.
@@ -5423,6 +5425,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             part >= 0 && part_nearest ? " (nearest)" : "", hud_hidden ? " hidden" : "");
                 }
                 if (!hud_moves && !part_custom) {  // (the touch layer told; the piece, its scissor and its matrix stay the game's)
+                    if (!hud_hidden && !is_3d_overlay) user_hud_mask_add(m);
                     ui_relax_scissor = false;
                     return ubo_span(guest_copy(r.addr, size), size);
                 }
@@ -5444,6 +5447,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
+                if (!hud_hidden && !is_3d_overlay) user_hud_mask_add(m);
                 if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
                 // The game clips some windows (a list, the help windows' body) with a scissor laid out for the 16:9 window:
                 // it moves with the piece, as its group was anchored last frame (the group is not complete yet), or for a
@@ -7106,21 +7110,8 @@ static void draw(CmdRec *r, bool indexed) {
         else vk_ps1_draw(&fd);
     }
 
-    ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
-    if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
-    models_fxaa_track(ms_want_depth);  // (FXAA: the same, models_fxaa_end)
-    if (st.rt_dirty) vk_end_pass();  // (MSAA: the ending pass marks its targets for resolving before they are read)
-    ms_resolve_sampled(0, pr->vi);
-    ms_resolve_sampled(1, pr->fi);
-    if (fill.dst) fill_sampled_stage(0, pr->vi), fill_sampled_stage(1, pr->fi);  // (MHGU_PERF_HUDSTART_FUSE: H' read first)
-    resolve_feedback(pr);
-    if (st.rt.depth && st.ds[0] && st.ds[1]) snapshots_invalidate(st.rt.depth);
-    for (int i = 0; i < st.rt.ncolor; i++)
-        if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) snapshots_invalidate(st.rt.color[i]);
-    if (in_pass && pass_ro_depth && !ro_want && draw_writes_ds()) st.rt_dirty = true, stat_ro_left++;  // (read-only no more)
-
-    // Fallback for the plain non-FSR / non-PS1 path: identify the first 2D draw into a full-screen colour target.
-    // Small post passes that sample another render target are not the HUD boundary.
+    // Fallback for a plain 2D HUD draw when neither FSR nor the PS1 hook captured H.
+    // Exclude tiny fullscreen post passes that sample render targets.
     if (!user_hud_scene_current() && vk_user_shader_hud_capture_needed() &&
         !st.ds[0] && st.rt.ncolor > 0 && st.rt.color[0]) {
         bool post = (uint32_t)r->x[2] <= 6;
@@ -7134,6 +7125,19 @@ static void draw(CmdRec *r, bool indexed) {
         if (!(post && reads_rt) && scene->width >= 512 && scene->height >= 288)
             vk_user_shader_hud_scene_capture(scene);
     }
+
+    ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
+    if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
+    models_fxaa_track(ms_want_depth);  // (FXAA: the same, models_fxaa_end)
+    if (st.rt_dirty) vk_end_pass();  // (MSAA: the ending pass marks its targets for resolving before they are read)
+    ms_resolve_sampled(0, pr->vi);
+    ms_resolve_sampled(1, pr->fi);
+    if (fill.dst) fill_sampled_stage(0, pr->vi), fill_sampled_stage(1, pr->fi);  // (MHGU_PERF_HUDSTART_FUSE: H' read first)
+    resolve_feedback(pr);
+    if (st.rt.depth && st.ds[0] && st.ds[1]) snapshots_invalidate(st.rt.depth);
+    for (int i = 0; i < st.rt.ncolor; i++)
+        if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) snapshots_invalidate(st.rt.color[i]);
+    if (in_pass && pass_ro_depth && !ro_want && draw_writes_ds()) st.rt_dirty = true, stat_ro_left++;  // (read-only no more)
 
     cur_draw = r, cur_draw_indexed = indexed, cur_draw_pr = pr;  // (perf_noload: the pass's first draw)
     begin_pass();
