@@ -12,6 +12,10 @@ extern "C" {
 
 // (main.c, first thing) the session's start: diag_clock counts from here
 void diag_start(void);
+// Extra diagnostic lines are opt-in. The setting is published atomically and can change while the game runs.
+void diag_detailed_log_set(bool enabled);
+bool diag_detailed_log_enabled(void);
+void diag_log_detail(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 // "h:mm:ss" since diag_start, in a buffer of the calling thread's (valid until its next call)
 const char *diag_clock(void);
 // The same into `buf` (no thread-local storage: for a crash's report, in a signal handler)
