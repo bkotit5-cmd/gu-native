@@ -1,4 +1,5 @@
 #include "settings_panel.h"
+#include "user_shader_params.h"
 #include "config.h"
 #include "colour_filter.h"
 #include "menu_confirm.h"
@@ -2611,6 +2612,47 @@ static bool set_active_user_shader(const std::string &name) {
     return true;
 }
 
+void user_shader_parameter_rows(std::vector<Row> &r) {
+    const int count = vk_user_shader_param_count();
+    header(r, "shader.parameters", en_es("Shader parameters", "Parámetros del shader"));
+    if (!count) {
+        note(r, "shader.parameters.none",
+             en_es("This shader does not expose adjustable values. Add // @param declarations to its GLSL source.",
+                   "Este shader no expone valores ajustables. Añade declaraciones // @param a su código GLSL."));
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        UserShaderParam p = {};
+        if (!vk_user_shader_param_get(i, &p)) continue;
+        const std::string id = std::string("shader.parameter.") + p.name;
+        if (p.type == USER_SHADER_PARAM_BOOL) {
+            Row row;
+            row.id = id;
+            row.title = p.label;
+            row.value = p.value >= 0.5f ? tr("On") : tr("Off");
+            row.toggle = p.value >= 0.5f ? 1 : 0;
+            row.adjust = [i](int d) { vk_user_shader_param_set(i, d > 0 ? 1.0f : 0.0f); };
+            row.activate = [i]() {
+                UserShaderParam current = {};
+                if (vk_user_shader_param_get(i, &current))
+                    vk_user_shader_param_set(i, current.value >= 0.5f ? 0.0f : 1.0f);
+            };
+            row.help = en_es("Applied immediately and saved with this shader.", "Se aplica de inmediato y se guarda con este shader.");
+            r.push_back(std::move(row));
+        } else {
+            add_number(r, id, p.label,
+                       [i]() { UserShaderParam current = {}; return vk_user_shader_param_get(i, &current) ? current.value : 0.0; },
+                       [i](double v) { vk_user_shader_param_set(i, (float)v); },
+                       p.minimum, p.maximum, p.step, p.type == USER_SHADER_PARAM_INT);
+            r.back().help = en_es("Applied immediately and saved with this shader.", "Se aplica de inmediato y se guarda con este shader.");
+        }
+    }
+    action(r, "shader.parameters.reset", en_es("Reset shader parameters", "Restablecer parámetros del shader"),
+           []() { vk_user_shader_params_reset(); });
+    r.back().help = en_es("Restores the defaults declared by this GLSL file.", "Restaura los valores predeterminados declarados en este archivo GLSL.");
+}
+
+// Installed shaders are shown and selectable in the monochrome in-game menu. Importing a shader uses Android's document picker.
 void user_shader_rows(std::vector<Row> &r) {
     const std::string active = active_user_shader_name();
     note(r, "shader.active",
@@ -2652,27 +2694,29 @@ void user_shader_rows(std::vector<Row> &r) {
     };
     r.push_back(std::move(disable));
 
+    if (!active.empty()) user_shader_parameter_rows(r);
+
 #ifdef __ANDROID__
-    action(r, "shader.import", en_es("Import / manage shaders", "Importar / gestionar shaders"),
+    action(r, "shader.import", en_es("Add shader file", "Añadir archivo de shader"),
            []() { g_user_shader_files_ready = false; ui_request_activity("showShaders"); });
 #else
-    action(r, "shader.import", en_es("Import / add shader", "Importar / añadir shader"),
+    action(r, "shader.import", en_es("Add shader file", "Añadir archivo de shader"),
            []() { g_user_shader_files_ready = false; pc_import_shader(); });
 #endif
     r.back().help = en_es(
-        "Vulkan GLSL 450 fullscreen fragment shader. Binding 0: sampler2D t (game image). Optional binding 1: "
-        "sampler2D depthTex (paired scene depth, raw 0..1 device depth). Selection and file changes hot-reload without "
-        "restarting. Still single-pass GLSL; ReShade .fx, .fxh, .ini presets and multi-pass techniques need a separate "
-        "effect runtime. HDR presentation bypasses custom GLSL.",
-        "Shader de fragmento Vulkan GLSL 450 a pantalla completa. Binding 0: sampler2D t (imagen del juego). Binding 1 opcional: "
-        "sampler2D depthTex (profundidad de escena, profundidad sin linealizar 0..1). La selección y los cambios se recargan "
-        "sin reiniciar. Sigue siendo GLSL de un pase; ReShade .fx, .fxh, presets .ini y multipase requieren otro runtime. "
-        "La salida HDR omite GLSL personalizado.");
+        "Opens the file picker to copy a Vulkan GLSL 450 fragment shader (.glsl) into the app. Binding 0: sampler2D t. "
+        "Optional binding 1: sampler2D depthTex. Exposed parameters use // @param declarations and can be edited here "
+        "without recompiling. ReShade .fx / .ini presets and multi-pass techniques are not supported.",
+        "Abre el selector de archivos para copiar un shader de fragmento Vulkan GLSL 450 (.glsl). Binding 0: sampler2D t. "
+        "Binding 1 opcional: sampler2D depthTex. Los parámetros expuestos con // @param se pueden editar aquí sin recompilar. "
+        "ReShade .fx / .ini y técnicas multipase aún no son compatibles.");
     note(r, "shader.depth", en_es("Custom GLSL can read scene depth as depthTex (binding 1).",
                                   "GLSL personalizado puede leer profundidad de escena en depthTex (binding 1)."));
+    note(r, "shader.parameters.help",
+         en_es("Parameter syntax: // @param name float default min max step Display name. Types: float, int, bool; up to 16.",
+               "Sintaxis: // @param name float default min max step Nombre visible. Tipos: float, int, bool; máximo 16."));
     note(r, "shader.reshade", en_es("ReShade .fx / .ini presets and multi-pass techniques are not supported yet.",
                                     "Los archivos ReShade .fx / presets .ini y técnicas multipase aún no son compatibles."));
-
 }
 MENU_ENTRY("shader", 10, user_shader_rows);
 
