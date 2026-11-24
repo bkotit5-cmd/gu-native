@@ -12,6 +12,7 @@
 
 layout(set = 0, binding = 0) uniform sampler2D t;
 layout(set = 0, binding = 1) uniform sampler2D depthTex;   // raw depth 0..1
+layout(set = 0, binding = 3) uniform sampler2D hudMask;    // 1 = original 2D HUD pixel; restored after this shader
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 o;
 
@@ -161,8 +162,11 @@ vec3 dofGather(vec3 orig, float cc, float zf, float focusFade, float aspect, flo
         vec2 off = vec2(k.x * rs.x - k.y * rs.y, k.x * rs.y + k.y * rs.x) * radius;
         off.x /= aspect;
         vec2 p = uv + off;
+        vec2 sampleUV = clamp(p, vec2(0.0), vec2(1.0));
+        // Don't pull HUD pixels into nearby scene blur samples.
+        if (textureLod(hudMask, sampleUV, 0.0).r >= 0.5) continue;
 
-        vec3 s = textureLod(t, clamp(p, vec2(0.0), vec2(1.0)), 0.0).rgb;
+        vec3 s = textureLod(t, sampleUV, 0.0).rgb;
         float cs = useDepth ? cocOf(zLin(depth01(p, rev)), zf) * focusFade : cocScreen(p);
 
         // Latar: abaikan sampel yang lebih tajam/dekat (cegah halo objek depan)
@@ -295,6 +299,10 @@ void main() {
             return;
         }
 
+        // The renderer also composites the exact original HUD pixels after the shader.
+        // Skip DoF at their centres and exclude them from neighbouring scene taps.
+        if (textureLod(hudMask, uv, 0.0).r >= 0.5)
+            cc = 0.0;
         if (abs(cc) >= 0.0004) {
             base = dofGather(orig, cc, zf, focusFade, aspect, ign, rev, hasDepth);
         }
