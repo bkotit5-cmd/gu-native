@@ -52,7 +52,8 @@ set(FSR_CXX ${FSR}/src/ffx_vk_fsr3_portable.cpp ${FSR}/src/ffx_fsr3_shaderblobs.
             ${FFX}/src/backends/vk/ffx_vk.cpp ${FFX}/src/backends/shared/ffx_shader_blobs.cpp)
 
 set(RT_ALL ${RT_SRC} ${S}/runtime/overlay.cpp ${S}/runtime/settings_panel.cpp ${S}/runtime/touch.cpp
-           ${S}/runtime/perfstats.cpp ${S}/runtime/hunt_overlay.cpp ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp ${FSR_C} ${FSR_CXX})
+           ${S}/runtime/perfstats.cpp ${S}/runtime/hunt_overlay.cpp ${S}/runtime/nvn/vulkan/lossless_framegen.cpp
+           ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp ${FSR_C} ${FSR_CXX})
 # The port's chat (runtime/chat, the same files as the MH4U port's app_native/chat; runtime/chat_port.cpp is MHGU's side of
 # it): its keys and signatures with libsecp256k1 (third_party/secp256k1, MIT), its relays through the system's TLS
 set(CHAT_DIR ${S}/runtime/chat)
