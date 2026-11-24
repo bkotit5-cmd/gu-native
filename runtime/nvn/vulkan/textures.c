@@ -1489,9 +1489,12 @@ VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uin
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = b->image, .viewType = type,
                                 .format = fmt, .components = sw, .subresourceRange = {aspect, lv0, nlv, ly0, nly}};
     VkImageView v;
-    if (vkCreateImageView(g_vk.dev, &vi, NULL, &v) != VK_SUCCESS) {
+    VkResult result = vkCreateImageView(g_vk.dev, &vi, NULL, &v);
+    if (result != VK_SUCCESS) {
         static int nfail;
-        if (nfail++ < 20) LOG("[vk] view failed: type %d fmt %d (image fmt %d) levels %u+%u layers %u+%u\n", type, fmt, b->format, lv0, nlv, ly0, nly);
+        if (nfail++ < 20)
+            LOG("[vk] view failed: VkResult %d type %d fmt %d (image fmt %d) levels %u+%u layers %u+%u\n",
+                result, type, fmt, b->format, lv0, nlv, ly0, nly);
         return VK_NULL_HANDLE;
     }
     ViewEnt *e = &view_tab[slot];
