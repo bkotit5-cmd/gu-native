@@ -94,7 +94,7 @@ jobs:
           msystem: MSYS
           path-type: inherit
           update: true
-          install: git make
+          install: git make mingw-w64-x86_64-glslang
 
       - name: Fetch pinned native dependency sources
         shell: msys2 {0}
