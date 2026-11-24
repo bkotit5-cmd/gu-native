@@ -2588,9 +2588,6 @@ static std::vector<std::string> enumerate_user_shaders() {
 static std::vector<std::string> g_user_shader_files;
 static bool g_user_shader_files_ready;
 static std::atomic<bool> g_user_shader_files_refresh_requested{false};
-extern "C" void settings_panel_shader_files_changed(void) {
-    g_user_shader_files_refresh_requested.store(true, std::memory_order_release);
-}
 static const std::vector<std::string> &user_shader_files() {
     const bool refresh = g_user_shader_files_refresh_requested.exchange(false, std::memory_order_acq_rel);
     if (!g_user_shader_files_ready || refresh) {
@@ -7046,6 +7043,10 @@ bool settings_panel_online_ok(const char *server) {
     }
     return false;
 }
+extern "C" void settings_panel_shader_files_changed(void) {
+    g_user_shader_files_refresh_requested.store(true, std::memory_order_release);
+}
+
 void settings_panel(bool *open) {
     thanks_frame();  // (first: while the thank-you is open, nothing after it gets the frame's input)
     if (!*open) {
