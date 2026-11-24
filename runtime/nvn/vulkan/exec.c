@@ -8415,6 +8415,22 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         kind = stock_kind;
         p = present_pipeline(kind);
     }
+    // Detailed presentation-path trace: only emit when the effective path or target format changes.
+    static int detail_last_kind = -1, detail_last_format = -1;
+    static uint32_t detail_last_width, detail_last_height;
+    static bool detail_last_hud, detail_last_depth;
+    if (detail_last_kind != kind || detail_last_format != (int)b->format ||
+        detail_last_width != b->width || detail_last_height != b->height ||
+        detail_last_hud != hud_separated || detail_last_depth != (kind == 3 && user_shader_uses_depth)) {
+        static const char *const kinds[] = {"built-in", "colour/PS1", "HDR10", "user GLSL", "HUD restore"};
+        diag_log_detail("[vk][detail] presentation path=%s target=%ux%u format=%d HUD-separated=%s depth-input=%s\\n",
+                        kind >= 0 && kind < 5 ? kinds[kind] : "unknown", b->width, b->height, b->format,
+                        hud_separated ? "yes" : "no",
+                        kind == 3 && user_shader_uses_depth ? (has_depth_view ? "bound" : "fallback") : "unused");
+        detail_last_kind = kind; detail_last_format = (int)b->format;
+        detail_last_width = b->width; detail_last_height = b->height;
+        detail_last_hud = hud_separated; detail_last_depth = kind == 3 && user_shader_uses_depth;
+    }
     VkPipelineLayout layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
     // ([Display] UpscaleFilter Sharp: a 3D picture smaller than the screen that is the game's own frame, its HUD in it - a
