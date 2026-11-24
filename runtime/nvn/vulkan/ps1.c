@@ -52,7 +52,7 @@ static void dither(const char *why) {
     TexBackend *b = vk_tex(g_h, true);
     vk_ps1_dither(b);
     // Preserve the dithered 3D image before the first 2D HUD draw is issued.
-    vk_user_shader_hud_scene_capture(g_h);
+    vk_user_shader_hud_mask_begin(g_h);
     static int nlog;
     if (nlog++ < 1) LOG("[ps1] 15-bit colour: the 3D picture (%ux%u) dithered at the start of the HUD (%s)\n", g_h->width,
                         g_h->height, why);
