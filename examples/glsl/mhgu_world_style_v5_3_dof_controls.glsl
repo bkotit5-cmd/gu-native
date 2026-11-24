@@ -24,7 +24,7 @@ layout(location = 0) out vec4 o;
 // @param AUTOFOCUS bool 1 0 1 1 Autofocus
 // @param FOCUS_SPREAD float 0.015 0.001 0.08 0.001 Autofocus sample spread
 // @param MANUAL_FOCUS_D float 0.80 0.0 1.0 0.01 Manual focus depth
-// @param DOF_FALLBACK bool 1 0 1 1 Enable tilt-shift if scene depth is unavailable
+// @param DOF_FALLBACK bool 0 0 1 1 Enable full-image tilt-shift if scene depth is unavailable
 // @param TILT_FOCUS_Y float 0.55 0.2 0.8 0.01 Tilt-shift focus position
 // @param TILT_BAND float 0.20 0.05 0.45 0.01 Tilt-shift sharp band
 // @param TILT_MAX float 0.010 0.0 0.03 0.001 Tilt-shift maximum blur
