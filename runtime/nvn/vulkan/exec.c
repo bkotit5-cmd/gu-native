@@ -7527,6 +7527,7 @@ static VkShaderModule user_shader;
 static uint64_t user_shader_file_key;
 static bool user_shader_key_valid;
 static TexBackend *user_depth_target;
+static uint32_t user_depth_level, user_depth_layer;
 
 static uint64_t user_shader_hash(uint64_t h, const void *data, size_t size) {
     const uint8_t *p = data;
@@ -7643,14 +7644,28 @@ void vk_present_shader_poll(void) {
 // Capture only the depth attachment paired with the game colour image being presented.
 void vk_present_depth_capture(NvnTexture *colour) {
     user_depth_target = NULL;
-    if (!colour || !st.rt.depth || !renderer_format_is_depth(st.rt.depth->format)) return;
-    for (int i = 0; i < st.rt.ncolor; i++) {
-        if (st.rt.color[i] != colour) continue;
-        TexBackend *depth = vk_tex(st.rt.depth, true);
-        if (depth && depth->image && !depth->stand_in && (depth->aspect & VK_IMAGE_ASPECT_DEPTH_BIT))
-            user_depth_target = depth;
+    user_depth_level = user_depth_layer = 0;
+    if (!colour || !st.rt.depth) return;
+    bool paired = false;
+    for (int i = 0; i < st.rt.ncolor; i++)
+        if (st.rt.color[i] == colour) { paired = true; break; }
+    if (!paired) return;
+
+    // begin_pass() maps both colour and depth through FSR's output-size stand-ins when pass_sx is scaled.
+    NvnTexture *depth_texture = pass_sx != 1.0f ? vk_fsr_map(st.rt.depth, true) : st.rt.depth;
+    if (!depth_texture || !renderer_format_is_depth(depth_texture->format)) return;
+    TexBackend *depth = vk_tex(depth_texture, true);
+    if (!depth || !depth->image || depth->stand_in || !(depth->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) return;
+
+    user_depth_level = st.rt.has_dview && (st.rt.dview.setmask & 1) ? st.rt.dview.base_level : 0;
+    user_depth_layer = st.rt.has_dview && (st.rt.dview.setmask & 2) ? st.rt.dview.min_layer : 0;
+    // vk_ms_resolve() resolves only mip 0 / layer 0. Do not expose a stale multisample depth image for subviews.
+    if (depth->ms && depth->ms_dirty &&
+        (user_depth_level || user_depth_layer || !depth_copy_ok(depth->ms->format))) {
+        LOG("[shader] depth input unavailable for this multisample depth subview/format\n");
         return;
     }
+    user_depth_target = depth;
 }
 
 // Called after the guest pass ends and before the swapchain render pass begins.
@@ -7758,7 +7773,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     if (user_depth_target && user_depth_target->image && !user_depth_target->stand_in) {
         static const VkComponentMapping identity = {0};
         VkImageView v = vk_image_view(user_depth_target, VK_IMAGE_VIEW_TYPE_2D, user_depth_target->format,
-                                      0, 1, 0, 1, identity, VK_IMAGE_ASPECT_DEPTH_BIT);
+                                      user_depth_level, 1, user_depth_layer, 1, identity, VK_IMAGE_ASPECT_DEPTH_BIT);
         if (v) depth_view = v;
     }
     VkDescriptorImageInfo ii[2] = {
