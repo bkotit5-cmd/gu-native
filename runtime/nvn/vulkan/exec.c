@@ -7527,7 +7527,7 @@ static VkShaderModule user_shader;
 static uint64_t user_shader_file_key;
 static bool user_shader_key_valid;
 static TexBackend *user_depth_target;
-static NvnTexture *user_depth_colour, *user_depth_source;
+static NvnTexture *user_depth_colour, *user_depth_attachment, *user_depth_source;
 static uint32_t user_depth_level, user_depth_layer;
 static const char *user_depth_reason = "not_captured";
 
@@ -7537,13 +7537,22 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     static const char *last_state, *last_reason;
     static const NvnTexture *last_colour, *last_source;
     static const TexBackend *last_depth, *last_presented;
-    static uint32_t last_cw, last_ch, last_sw, last_sh, last_pw, last_ph;
+    static uint32_t last_cw, last_ch, last_aw, last_ah, last_sw, last_sh, last_pw, last_ph;
+    static uint32_t last_dfmt, last_dsamples, last_daspect, last_dlevel, last_dlayer;
+    static bool last_standin, last_ms_dirty;
     static char last_slots[384];
 
     uint32_t cw = user_depth_colour ? user_depth_colour->width : 0;
     uint32_t ch = user_depth_colour ? user_depth_colour->height : 0;
+    uint32_t aw = user_depth_attachment ? user_depth_attachment->width : 0;
+    uint32_t ah = user_depth_attachment ? user_depth_attachment->height : 0;
     uint32_t sw = user_depth_source ? user_depth_source->width : 0;
     uint32_t sh = user_depth_source ? user_depth_source->height : 0;
+    uint32_t dfmt = user_depth_target ? user_depth_target->format : 0;
+    uint32_t dsamples = user_depth_target ? user_depth_target->samples : 0;
+    uint32_t daspect = user_depth_target ? user_depth_target->aspect : 0;
+    bool standin = user_depth_target ? user_depth_target->stand_in : false;
+    bool ms_dirty = user_depth_target ? user_depth_target->ms_dirty : false;
     uint32_t pw = presented ? presented->width : 0;
     uint32_t ph = presented ? presented->height : 0;
     char slots[384] = {0};
@@ -7559,15 +7568,20 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
 
     bool same = last_state && last_reason && !strcmp(last_state, state) && !strcmp(last_reason, reason) &&
                 last_colour == user_depth_colour && last_source == user_depth_source && last_depth == user_depth_target &&
-                last_presented == presented && last_cw == cw && last_ch == ch && last_sw == sw && last_sh == sh &&
-                last_pw == pw && last_ph == ph && !strcmp(last_slots, slots);
+                last_presented == presented && last_cw == cw && last_ch == ch && last_aw == aw && last_ah == ah &&
+                last_sw == sw && last_sh == sh && last_pw == pw && last_ph == ph && last_dfmt == dfmt &&
+                last_dsamples == dsamples && last_daspect == daspect && last_dlevel == user_depth_level &&
+                last_dlayer == user_depth_layer && last_standin == standin && last_ms_dirty == ms_dirty &&
+                !strcmp(last_slots, slots);
     if (same) return;
 
     LOG("[shader] depthTex: %s reason=%s capture_color=%p %ux%u nvn_fmt=%#x "
-        "depth_source=%p %ux%u nvn_fmt=%#x depth_backend=%p",
+        "depth_attachment=%p %ux%u nvn_fmt=%#x depth_source=%p %ux%u nvn_fmt=%#x "
+        "depth_backend=%p mip=%u layer=%u",
         state, reason, (void *)user_depth_colour, cw, ch, user_depth_colour ? user_depth_colour->format : 0,
+        (void *)user_depth_attachment, aw, ah, user_depth_attachment ? user_depth_attachment->format : 0,
         (void *)user_depth_source, sw, sh, user_depth_source ? user_depth_source->format : 0,
-        (void *)user_depth_target);
+        (void *)user_depth_target, user_depth_level, user_depth_layer);
     if (user_depth_target) {
         TexBackend *d = user_depth_target;
         LOG(" vk_fmt=%d extent=%ux%u samples=%u aspect=%#x stand_in=%d ms=%p ms_dirty=%d ms_valid=%d",
@@ -7584,7 +7598,9 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     last_source = user_depth_source;
     last_depth = user_depth_target;
     last_presented = presented;
-    last_cw = cw; last_ch = ch; last_sw = sw; last_sh = sh; last_pw = pw; last_ph = ph;
+    last_cw = cw; last_ch = ch; last_aw = aw; last_ah = ah; last_sw = sw; last_sh = sh; last_pw = pw; last_ph = ph;
+    last_dfmt = dfmt; last_dsamples = dsamples; last_daspect = daspect; last_dlevel = user_depth_level;
+    last_dlayer = user_depth_layer; last_standin = standin; last_ms_dirty = ms_dirty;
     snprintf(last_slots, sizeof last_slots, "%s", slots);
 }
 
@@ -7704,6 +7720,7 @@ void vk_present_shader_poll(void) {
 void vk_present_depth_capture(NvnTexture *colour) {
     user_depth_target = NULL;
     user_depth_colour = colour;
+    user_depth_attachment = st.rt.depth;
     user_depth_source = NULL;
     user_depth_level = user_depth_layer = 0;
     user_depth_reason = "no_color";
