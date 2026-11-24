@@ -1,9 +1,6 @@
 name: Build Android debug APK
 
 on:
-  push:
-    branches:
-      - integrate/blitz-cheat-fix-khorne
   workflow_dispatch:
 
 permissions:
