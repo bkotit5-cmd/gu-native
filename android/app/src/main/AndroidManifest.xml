@@ -15,7 +15,7 @@
          Android 11 en adelante pide el acceso a todos los archivos, Android 10 el de lectura -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
-    <!-- Android 9 y 10: los trucos, mods y DLC se copian a la carpeta del juego (ImportActivity) -->
+    <!-- Android 9 y 10: legacy write access when imported mods/cheats/DLC are copied into the selected game folder. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- multijugador (Local Play por IP / hubs) -->
     <uses-permission android:name="android.permission.INTERNET" />
