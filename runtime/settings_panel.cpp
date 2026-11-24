@@ -20,6 +20,7 @@
 #include "net/net.h"
 #include "platform.h"
 #include "logwriter.h"
+#include "diag.h"
 #include "textinput.h"
 #include "touch.h"
 #include "verify.h"
@@ -2582,6 +2583,7 @@ static std::vector<std::string> enumerate_user_shaders() {
     std::sort(names.begin(), names.end(), [&](const std::string &a, const std::string &b) {
         return lower(a) < lower(b);
     });
+    diag_log_detail("[shader][detail] shader directory scan: %zu valid .glsl file(s)\n", names.size());
     return names;
 }
 
@@ -2593,6 +2595,7 @@ static const std::vector<std::string> &user_shader_files() {
     if (!g_user_shader_files_ready || refresh) {
         g_user_shader_files = enumerate_user_shaders();
         g_user_shader_files_ready = true;
+        diag_log_detail("[shader][detail] installed shader list refreshed: %zu file(s)\n", g_user_shader_files.size());
     }
     return g_user_shader_files;
 }
@@ -4179,6 +4182,8 @@ void rows_system_game_10(std::vector<Row> &r) {
     action(r, "log.open", tr("Log folder"), []() { ui_request_share_log(); });
     r.back().help = tr("Opens the folder with log.txt, the game's log, to send it to whoever is helping you with a problem.");
 #endif
+    add_bool(r, "log.detailed", "Detailed log", &s.draft.detailed_log, ini("DetailedLog"));
+    r.back().help = tr("Adds extra shader, Vulkan, HUD-mask and file-import diagnostics to log.txt. Enable it before reproducing a problem; turn it off to keep the log smaller.");
 }
 MENU_ENTRY("system/game", 10, rows_system_game_10);
 
@@ -7045,6 +7050,7 @@ bool settings_panel_online_ok(const char *server) {
 }
 extern "C" void settings_panel_shader_files_changed(void) {
     g_user_shader_files_refresh_requested.store(true, std::memory_order_release);
+    diag_log_detail("[shader][detail] import callback received; shader-list refresh queued\n");
 }
 
 void settings_panel(bool *open) {
