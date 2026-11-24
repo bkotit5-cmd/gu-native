@@ -21,6 +21,7 @@
 #endif
 
 #include "../../colour_filter.h"
+#include "../../diag.h"
 #include "../../overlay.h"
 #include "../../kernel.h"
 #include "fsr.h"
@@ -1852,6 +1853,15 @@ void backend_present(NvnTexture *t) {
     g_last_picture = t;
     TexBackend *b = vk_tex(t, true);
     b->presented = true;
+    static uint32_t detail_last_present_w, detail_last_present_h;
+    static int detail_last_present_format = -1;
+    if (detail_last_present_w != t->width || detail_last_present_h != t->height ||
+        detail_last_present_format != (int)b->format) {
+        diag_log_detail("[vk][detail] final game image changed: %ux%u Vulkan format=%d FSR=%s\\n",
+                        t->width, t->height, b->format, g_fsr_on ? "on" : "off");
+        detail_last_present_w = t->width; detail_last_present_h = t->height;
+        detail_last_present_format = (int)b->format;
+    }
     vk_end_pass();
     vk_ms_resolve(b);
     if (shader_needs_depth)
