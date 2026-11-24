@@ -39,7 +39,7 @@ android {
         // firma propia del proyecto (android/mhgu.keystore, fuera de git)
         local {
             storeFile file('../mhgu.keystore')
-            storeType "PKCS12"
+            storeType signing['storeType'] ?: "PKCS12"
             storePassword signing['storePassword']
             keyAlias signing['keyAlias']
             keyPassword signing['keyPassword']
