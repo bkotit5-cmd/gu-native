@@ -2697,12 +2697,12 @@ static void user_hud_mask_mark_full(void) {
     user_hud_mask_rects++;
 }
 
-// Rasterise a HUD quad's transformed bounds into the pre-HUD image's pixel coordinates.
+// Rasterise a HUD quad's transformed bounds into the final game image's pixel coordinates.
 // The 2-pixel expansion retains the antialiased outside edge of text and icons.
 static void user_hud_mask_add(const float m[16]) {
     if (!m || !vk_user_shader_hud_capture_needed()) return;
-    // On the plain non-FSR/non-PS1 path, this first HUD quad is the boundary:
-    // snapshot the scene before writing this quad into the mask.
+    // On the plain non-FSR/non-PS1 path, this first HUD quad establishes the mask boundary.
+    // Initialise the mask before adding the first quad.
     if (!user_hud_mask_current() && st.rt.ncolor > 0 && st.rt.color[0] &&
         st.rt.color[0]->width >= 512 && st.rt.color[0]->height >= 288)
         vk_user_shader_hud_mask_begin(st.rt.color[0]);
@@ -8284,7 +8284,7 @@ void vk_present_depth_resolve(void) {
 }
 
 // kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding;
-// kind 3: user GLSL on the pre-HUD scene; kind 4: restore the original game HUD over the processed scene.
+// kind 3: user GLSL on the final game image; kind 4: restore original HUD pixels over the processed image.
 static VkPipeline present_pipeline(int kind) {
     VkRenderPass rp = vk_window_pass();
     if (present_render_passes[kind] == rp) return present_pipes[kind];
@@ -8499,7 +8499,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
     vkCmdDraw(cb, 3, 1, 0, 0);
 
-    // The user shader has only seen the clean 3D scene. Restore original HUD pixels from the
+    // The custom shader has processed the final game image. Restore original HUD pixels from the
     // quad mask accumulated while the game's non-depth-tested HUD transforms were translated.
     if (kind == 3 && hud_separated) {
         if (hud_overlay_pipeline && hud_mask_view) {
