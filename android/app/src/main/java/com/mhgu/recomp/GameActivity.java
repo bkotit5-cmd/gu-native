@@ -368,8 +368,11 @@ public class GameActivity extends SDLActivity {
     public static void importCheats() { startImport(ImportActivity.CHEATS); }
     public static void importMod() { startImport(ImportActivity.MOD); }
     public static void importDlc() { startImport(ImportActivity.DLC); }
-    /** Settings -> Shader: manage imported GLSL fragment shaders. */
-    public static void showShaders() { startImport(ImportActivity.SHADER); }
+    /** Settings -> Shader: pick a GLSL file with Android's built-in document picker. */
+    public static void showShaders() {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, ShaderImportActivity.class));
+    }
     private static void startImport(int kind) {
         SDLActivity activity = mSingleton;
         if (activity != null) activity.startActivity(new Intent(activity, ImportActivity.class).putExtra(ImportActivity.KIND, kind));
