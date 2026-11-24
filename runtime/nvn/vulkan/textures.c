@@ -742,12 +742,12 @@ uint32_t vk_page_gen(uint64_t addr) {
 int vk_pages_changed(uint64_t addr, uint64_t size, uint32_t since, uint32_t *now) {
     if (!size || addr < HEAP_BASE || addr - HEAP_BASE + size > HEAP_MAX || !pt_init()) return -1;
     uint64_t lo = (addr - HEAP_BASE) & ~(PT_PAGE - 1), hi = (addr - HEAP_BASE + size + PT_PAGE - 1) & ~(PT_PAGE - 1);
-    static uint64_t pages[4096];
+    static uint64_t pages[16384];
     uint64_t pg = PT_PAGE, host0 = (uint64_t)(uintptr_t)G2H(HEAP_BASE);
     int n = plat_written_pages(host0 + lo, hi - lo, pages, 4096, &pg);
     if (n < 0) return -1;
     uint32_t g = ++pt_cur;
-    if (n >= 4096) for (uint64_t p = lo / PT_PAGE; p < hi / PT_PAGE; p++) pt_gen[p] = g;
+    if (n >= 16384) for (uint64_t p = lo / PT_PAGE; p < hi / PT_PAGE; p++) pt_gen[p] = g;
     else for (int k = 0; k < n; k++) pt_gen[(pages[k] - host0) / PT_PAGE] = g;
     *now = g;
     for (uint64_t p = lo / PT_PAGE; p < hi / PT_PAGE; p++)

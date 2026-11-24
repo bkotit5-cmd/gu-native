@@ -44,7 +44,11 @@ static struct {
     int64_t ref;                // the vsync the period is measured from
     int64_t vsync, past_at;     // a vsync's time (a past present's), and when past presents were read
     uint32_t id;                // the latest presentID given (never 0)
-    struct { uint32_t id; int64_t slot, period; } sent[32];  // the presents given a time lately
+    struct { uint32_t id; int64_t slot, period; bool game_frame; } sent[256];  // pending presents with their origin
+    int64_t adaptive_start;
+    unsigned adaptive_frames;
+    int adaptive_generation;
+    bool adaptive_latched;
     int64_t margin, margin_period, margin_at, last_late;
     int64_t after[32];  // the latest frames' (shown - slot)
     int n_after;
@@ -106,6 +110,7 @@ void vk_pacing_swapchain(void) {
     pp.vsync = 0, pp.past_at = 0, pp.n_after = 0, pp.asked = 0;
     pp.last_slot = pp.last_frame_slot = pp.run_since = pp.moved_at = 0, pp.anew = false;
     memset(pp.sent, 0, sizeof pp.sent);
+    pp.adaptive_start = 0, pp.adaptive_frames = 0;
     if (pp.sc) ask_period(plat_now_ns());
 }
 
@@ -142,7 +147,8 @@ bool vk_pacing_fifo(void) {
     if (!pp.ext) return false;
     int64_t now = plat_now_ns();
     if (pp.sc && now - pp.period_at >= 2000000000) ask_period(now);
-    return cadence() >= 2;
+    double refresh = pp.period > 0 ? 1e9 / (double)pp.period : 0;
+    return cadence() >= 2 || (config_live_fps() >= 110.0f && config_live_fps() <= 130.0f && refresh >= 110.0);
 }
 
 static int64_t deadline_ns(void) {  // (GameActivity.presentationDeadlineNs; 0: unknown)
@@ -163,8 +169,13 @@ static int64_t deadline_ns(void) {  // (GameActivity.presentationDeadlineNs; 0: 
 // others a second time within 30 s raises the margin
 static void read_past(int64_t now) {
     pp.past_at = now;
-    VkPastPresentationTimingGOOGLE t[16];
-    uint32_t n = 16;
+    int generation = config_live_generation();
+    if (generation != pp.adaptive_generation) {
+        pp.adaptive_generation = generation;
+        pp.adaptive_latched = false, pp.adaptive_start = 0, pp.adaptive_frames = 0;
+    }
+    VkPastPresentationTimingGOOGLE t[256];
+    uint32_t n = 256;
     VkResult r = pp.past(g_vk.dev, pp.sc, &n, t);
     if (r != VK_SUCCESS && r != VK_INCOMPLETE) return;
     for (uint32_t i = 0; i < n; i++) {
@@ -182,10 +193,35 @@ static void read_past(int64_t now) {
                 pp.ref = shown;  // (not that rate: measured anew)
             }
         }
-        for (int k = 0; k < 32; k++) {
+        for (int k = 0; k < 256; k++) {
             if (pp.sent[k].id != t[i].presentID) continue;
             int64_t slot = pp.sent[k].slot, per = pp.sent[k].period;
+            bool game_frame = pp.sent[k].game_frame;
             pp.sent[k].id = 0;
+            if (game_frame && !pp.adaptive_latched && config_live_fps() >= 110.0f && config_live_fps() <= 130.0f &&
+                pp.period > 0 && 1e9 / (double)pp.period >= 110.0) {
+                if (!pp.adaptive_start) {
+                    pp.adaptive_start = shown;
+                    pp.adaptive_frames = 1;
+                } else {
+                    pp.adaptive_frames++;
+                    int64_t elapsed = shown - pp.adaptive_start;
+                    if (elapsed >= 2000000000ll) {
+                        double actual = (double)(pp.adaptive_frames - 1) * 1e9 / (double)elapsed;
+                        double target = config_live_fps();
+                        if (actual < target * 0.95) {
+                            pp.adaptive_latched = true;
+                            config_adaptive_fps(true);
+                            LOG("[perf] adaptive FPS: %.1f of %.0f requested on a %.0f Hz display; runtime cap lowered to 60 FPS (ADPF target follows)\n",
+                                actual, target, 1e9 / (double)pp.period);
+                        } else {
+                            pp.adaptive_start = shown;
+                            pp.adaptive_frames = 1;
+                        }
+                    }
+                }
+            }
+            if (slot <= 0 || per <= 0) break;
             // The time a present reports is its slot's vsync plus what the display adds: an Anbernic RG406V reports every
             // frame a whole period after its slot, steady on the screen all the same. So late is against the least of
             // the last 32 frames' (shown - slot): a buffer later than that by more than half a period. Not in a margin's
@@ -215,6 +251,7 @@ void vk_pacing_present(VkPresentInfoKHR *pi, bool new_frame) {
     static VkPresentTimesInfoGOOGLE pti = {.sType = VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE, .swapchainCount = 1, .pTimes = &pt};
     int follow = pp.follow;  // (frame generation: for this present only)
     pp.follow = 0;
+    bool is_game_frame = new_frame;
     if (!pp.ext || !pp.sc || pp.sc != g_vk.swapchain) return;
     int64_t now = plat_now_ns();
     if (now - pp.past_at >= 500000000) read_past(now);
@@ -237,8 +274,13 @@ void vk_pacing_present(VkPresentInfoKHR *pi, bool new_frame) {
         pp.told_n = n, pp.told_period = period, pp.told_at = now, pp.told_lines++;
         LOG("[vk] present timing: %d vsync(s) a game frame at %.0f FPS\n", n, (double)config_live_fps());
     }
-    if (n < 2 || pp.vsync <= 0 || period <= 0) {  // (not a whole fraction, or the grid not known yet: shown when ready)
+    if (n < 2 || pp.vsync <= 0 || period <= 0) {  // still record actual frames when no multi-vsync grid is needed
         pp.last_slot = pp.last_frame_slot = pp.run_since = 0, pp.anew = false;
+        for (int k = 0; k < 256; k++)
+            if (!pp.sent[k].id || (uint32_t)(pp.id - pp.sent[k].id) >= 256) {
+                pp.sent[k].id = pp.id, pp.sent[k].slot = 0, pp.sent[k].period = period, pp.sent[k].game_frame = is_game_frame;
+                break;
+            }
         return;
     }
     int64_t t = now + pp.margin;  // the first vsync of the grid at or after now + margin
@@ -279,9 +321,9 @@ void vk_pacing_present(VkPresentInfoKHR *pi, bool new_frame) {
     }
     pp.last_slot = slot;
     pt.desiredPresentTime = (uint64_t)(slot - period / 2);
-    for (int k = 0; k < 32; k++)  // (the oldest entry makes room)
-        if (!pp.sent[k].id || (uint32_t)(pp.id - pp.sent[k].id) >= 32) {
-            pp.sent[k].id = pp.id, pp.sent[k].slot = slot, pp.sent[k].period = period;
+    for (int k = 0; k < 256; k++)  // (the oldest entry makes room)
+        if (!pp.sent[k].id || (uint32_t)(pp.id - pp.sent[k].id) >= 256) {
+            pp.sent[k].id = pp.id, pp.sent[k].slot = slot, pp.sent[k].period = period, pp.sent[k].game_frame = is_game_frame;
             break;
         }
 }

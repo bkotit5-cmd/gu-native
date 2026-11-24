@@ -1242,7 +1242,7 @@ static bool vcache(uint64_t addr, uint64_t size, VkBuffer *buf) {
     }
     if (copy && since) {  // the pages written since the last refresh, as runs (none inside the slice: it has them)
         extern uint32_t vk_page_gen(uint64_t addr);
-        VkBufferCopy rg[64];
+        VkBufferCopy rg[512];
         int n = 0;
         uint64_t first = addr & ~4095ull;
         for (uint64_t p = first; p < addr + size; p += 4096) {
@@ -1255,7 +1255,7 @@ static bool vcache(uint64_t addr, uint64_t size, VkBuffer *buf) {
                 else continue;
             }
             if (n && rg[n - 1].dstOffset + rg[n - 1].size == lo - addr) { rg[n - 1].size += hi - lo; continue; }
-            if (n == 64) { n = -1; break; }
+            if (n == 512) { n = -1; break; }
             rg[n++] = (VkBufferCopy){lo - addr, lo - addr, hi - lo};  // (srcOffset fixed up below)
         }
         if (n < 0) since = 0;  // (scattered: the whole range)
@@ -1594,8 +1594,9 @@ static bool wait_new_builds(void) {
 }
 #endif
 
-// A frame's budget for draws waiting for builds: MHGU_PIPE_WAIT_MS, else 6 ms; a desktop's a quarter of the frame
-// interval up to that (at 160 Hz 1.6 ms: a 6.25 ms frame that waits 6 more misses its refresh, the picture repeats).
+// A frame's budget for draws waiting for builds: MHGU_PIPE_WAIT_MS overrides it. Android waits for the requested
+// shader/pipeline rather than dropping the draw; the startup prewarm keeps ordinary frames moving. A desktop retains
+// its short budget because a cold driver compile can take tens of milliseconds.
 static int64_t frame_wait_budget(void) {
     static int64_t fixed = -2;  // (-1: MHGU_PIPE_WAIT_MS not set)
     if (fixed == -2) {
@@ -1604,7 +1605,7 @@ static int64_t frame_wait_budget(void) {
     }
     if (fixed >= 0) return fixed;
 #ifdef __ANDROID__
-    return 6000000;
+    return INT64_MAX / 4;
 #else
     uint64_t dt = frame_dt_median();
     return dt && dt / 4 < 6000000 ? (int64_t)(dt / 4) : 6000000;
