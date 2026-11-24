@@ -18,7 +18,7 @@
 #include "modorder.h"
 #include "net/net.h"
 #include "platform.h"
-#include "rt.h"
+#include "logwriter.h"
 #include "textinput.h"
 #include "touch.h"
 #include "verify.h"
@@ -26,6 +26,7 @@
 #ifndef MHGU_VERSION
 #define MHGU_VERSION ""  // (the build gives it: native/CMakeLists.txt)
 #endif
+#define LOG(...) rt_logf(__VA_ARGS__)
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
