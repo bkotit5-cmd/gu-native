@@ -793,6 +793,13 @@ static void create_device(void) {
         g_fsr_unavailable = "Vulkan 1.1";  // (its quality's 3D size scaled up plainly: fsr.c vk_fsr_init)
     }
     ext[n_ext++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+#ifdef __ANDROID__
+    // The native Lossless Scaling backend shares frame images with its own Vulkan device through AHardwareBuffer.
+    // Enable the import extension only where the driver's extension list advertises it; frame generation
+    // will still report unavailable and leave the normal renderer untouched on devices without it.
+    g_vk.ahb_import = has_ext(ep, ne, VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
+    if (g_vk.ahb_import) ext[n_ext++] = VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
+#endif
     bool mirror_ext = !g_vk.api12 && has_ext(ep, ne, VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);  // (in 1.2: a feature)
     if (mirror_ext) ext[n_ext++] = VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME;
     g_vk.custom_border = has_ext(ep, ne, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
