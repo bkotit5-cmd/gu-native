@@ -2709,14 +2709,16 @@ void user_shader_rows(std::vector<Row> &r) {
                 else
                     LOG("[shader] could not select shader from in-game menu: %s\n", name.c_str());
             };
+#ifdef __ANDROID__
             item.help = en_es("Tap to activate. Press and hold this shader row to open its removal menu.",
                                "Toca para activar. Mantén pulsada esta fila para abrir el menú para eliminarlo.");
-#ifdef __ANDROID__
             item.long_press = [name]() {
                 s.shader_remove_name = name;
                 push(View::ShaderRemove, "dialog.cancel");
             };
 #else
+            item.help = en_es("Tap to activate. Use Remove to delete this shader.",
+                               "Toca para activar. Usa Eliminar para borrar este shader.");
             item.remove = [name]() {
                 if (!remove_user_shader_file(name))
                     LOG("[shader] removal failed from desktop menu: %s\n", name.c_str());
