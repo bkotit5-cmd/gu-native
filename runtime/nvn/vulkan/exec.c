@@ -1464,10 +1464,12 @@ static void enqueue(JobQueue *q, bool low, void (*fn)(void *), void *arg) {
     pthread_mutex_lock(&q->lock);
     if (!q->started) {
         q->started = true;
-        int n = q->threads ? q->threads : compile_workers();
-        for (int i = 0; i < n; i++) { pthread_t t; pthread_create(&t, NULL, worker, q); }
+        int n = q->threads ? q->threads : compile_workers(), made = 0;
+        for (int i = 0; i < n; i++) { pthread_t t; if (!pthread_create(&t, NULL, worker, q)) made++; }
+        if (!made) { q->started = false; pthread_mutex_unlock(&q->lock); fn(arg); return; }
     }
     Job *j = malloc(sizeof *j);
+    if (!j) { pthread_mutex_unlock(&q->lock); fn(arg); return; }
     j->fn = fn; j->arg = arg; j->next = NULL;
     Job **head = low ? &q->lhead : &q->head, **tail = low ? &q->ltail : &q->tail;
     if (*tail) (*tail)->next = j; else *head = j;

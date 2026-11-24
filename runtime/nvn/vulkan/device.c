@@ -1208,8 +1208,8 @@ static int swapchain_vsync = -1;
 static int configured_msaa = -1;
 static bool swapchain_paced;  // FIFO, its presents timed to the display's vsyncs (Android: present_pacing.c)
 #ifdef __ANDROID__
-// Should the swapchain be the timed one now? (MHGU_PERF_PRESENT_TIME, the settings' VSync on, the FPS limit a whole fraction
-// of the display's rate; never with MHGU_VK_PRESENT or MHGU_VSYNC given)
+// Should the swapchain be the timed one now? (MHGU_PERF_PRESENT_TIME, VSync on, a multi-vsync cadence or 120 FPS on a high-refresh
+// display; never with MHGU_VK_PRESENT or MHGU_VSYNC given)
 static bool paced_held;  // (paced_change: the plain swapchain for the rest of the session)
 static bool paced_wanted(void) {
     static int env = -1;

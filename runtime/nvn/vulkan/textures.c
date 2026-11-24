@@ -744,7 +744,7 @@ int vk_pages_changed(uint64_t addr, uint64_t size, uint32_t since, uint32_t *now
     uint64_t lo = (addr - HEAP_BASE) & ~(PT_PAGE - 1), hi = (addr - HEAP_BASE + size + PT_PAGE - 1) & ~(PT_PAGE - 1);
     static uint64_t pages[16384];
     uint64_t pg = PT_PAGE, host0 = (uint64_t)(uintptr_t)G2H(HEAP_BASE);
-    int n = plat_written_pages(host0 + lo, hi - lo, pages, 4096, &pg);
+    int n = plat_written_pages(host0 + lo, hi - lo, pages, 16384, &pg);
     if (n < 0) return -1;
     uint32_t g = ++pt_cur;
     if (n >= 16384) for (uint64_t p = lo / PT_PAGE; p < hi / PT_PAGE; p++) pt_gen[p] = g;

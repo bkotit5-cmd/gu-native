@@ -21,7 +21,7 @@
 // is measured from them: vkGetRefreshCycleDurationGOOGLE (asked every 2 s) said 16.68 ms on an Anbernic RG406V whose
 // vsyncs come every 16.667, and slots chained on it drifted half a period in 15 s, a frame shown a vsync late each time.
 // So every slot is also put on the grid of the newest vsync seen. A picture presented again (the settings menu holding the game)
-// takes the latest slot. Nothing changes at the refresh rate itself, at a limit that is no whole fraction of it, or with
+// takes the latest slot. 120 FPS at a 110+ Hz display also uses FIFO to collect actual present timestamps for adaptive fallback.
 // VSync Off or MHGU_VK_PRESENT / MHGU_VSYNC given.
 //   MHGU_PERF_PRESENT_TIME=1   on (read once at start; the default; 0 the old way)
 //   MHGU_PRESENT_MARGIN=<us>   a fixed margin instead (tests)
@@ -83,7 +83,7 @@ void vk_pacing_device(void) {
     pp.refresh = (PFN_vkGetRefreshCycleDurationGOOGLE)vkGetDeviceProcAddr(g_vk.dev, "vkGetRefreshCycleDurationGOOGLE");
     pp.past = (PFN_vkGetPastPresentationTimingGOOGLE)vkGetDeviceProcAddr(g_vk.dev, "vkGetPastPresentationTimingGOOGLE");
     if (!pp.refresh || !pp.past) pp.ext = false;
-    LOG("[vk] present timing: %s (MHGU_PERF_PRESENT_TIME)\n", pp.ext ? "on, at a whole fraction of the refresh rate" : "its functions are missing: off");
+    LOG("[vk] present timing: %s (MHGU_PERF_PRESENT_TIME)\n", pp.ext ? "on (timed cadence / high-refresh monitoring)" : "its functions are missing: off");
 }
 
 static void ask_period(int64_t now) {
@@ -140,7 +140,7 @@ int vk_pacing_cadence(void) {
 // which took the game frame's place in the cadence
 void vk_pacing_follow(int vsyncs) { pp.follow = vsyncs; }
 
-// Should the swapchain present FIFO with times (the switch on, the limit a whole fraction of the display's rate)?
+// Use timed FIFO for a whole-fraction cadence, or to observe actual 120 FPS presents on a 110+ Hz display.
 // (device.c present_mode, and frame_begin: a change makes the swapchain again, at a menu's change of the limit or when
 // the display changes its rate)
 bool vk_pacing_fifo(void) {
