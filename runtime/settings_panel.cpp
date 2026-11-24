@@ -2677,6 +2677,22 @@ void user_shader_rows(std::vector<Row> &r) {
                 else
                     LOG("[shader] could not select shader from in-game menu: %s\n", name.c_str());
             };
+            item.remove = [name]() {
+                if (active_user_shader_name() == name && !set_active_user_shader("")) {
+                    LOG("[shader] could not disable shader before removal: %s\n", name.c_str());
+                    return;
+                }
+                std::error_code ec;
+                std::filesystem::remove(user_shader_directory() / name, ec);
+                if (ec) {
+                    LOG("[shader] could not remove %s: %s\n", name.c_str(), ec.message().c_str());
+                    return;
+                }
+                ec.clear();
+                std::filesystem::remove(user_shader_directory() / (name + ".params"), ec);
+                g_user_shader_files_ready = false;
+                LOG("[shader] removed from in-game menu: %s\n", name.c_str());
+            };
             r.push_back(std::move(item));
         }
     }
