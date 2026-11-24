@@ -49,6 +49,7 @@
 #include "../platform.h"
 #include "../settings_panel.h"
 #include "../diag.h"
+#include "../nvn/vulkan/lossless_framegen.h"
 
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
@@ -63,6 +64,14 @@ JNIEXPORT void JNICALL Java_com_mhgu_recomp_ShaderImportActivity_nativeShaderFil
 JNIEXPORT void JNICALL Java_com_mhgu_recomp_LosslessDllImportActivity_nativeLosslessDllChanged(JNIEnv *env, jclass cls) {
     (void)env, (void)cls;
     diag_log_detail("[lossless][detail] User Lossless.dll imported into app-private storage; Vulkan/shader validation is deferred until Lossless FG initialization\\n");
+}
+
+JNIEXPORT void JNICALL Java_com_mhgu_recomp_GameActivity_nativeLosslessDllChanged(JNIEnv *env, jclass cls, jstring path) {
+    (void)cls;
+    const char *value = path ? (*env)->GetStringUTFChars(env, path, NULL) : NULL;
+    lossless_framegen_set_dll_path(value);
+    if (value) (*env)->ReleaseStringUTFChars(env, path, value);
+    diag_log_detail("[lossless][detail] Persisted Lossless.dll path delivered to Android native runtime; file/API readiness is checked lazily\\n");
 }
 
 // ---- guest address space
