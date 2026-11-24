@@ -36,12 +36,15 @@ cd "$HERE"
 "$CMAKE" --build "$(m "$OUT")" --parallel ${JOBS:-12} 2>&1 | grep -E "error|warning: implicit|FAILED|^ninja: build stopped" | head -60
 "$CMAKE" --build "$(m "$OUT")" --parallel ${JOBS:-12} > "$OUT.build.log" 2>&1 || { tail -40 "$OUT.build.log"; exit 1; }
 
+# MSYS2's host glslangValidator is used only to embed Bloodframe's optional experimental shader set.
+export PATH="/mingw64/bin:$PATH"
+
 # a jniLibs del proyecto Gradle
 J="$ROOT/android/app/src/main/jniLibs/$ABI"
 mkdir -p "$J"
 mkdir -p "$ROOT/android/app/src/main/assets"
 printf %s "$GAMELIB_ID" > "$ROOT/android/app/src/main/assets/gamelib_id.txt"  # (GameFolderActivity: which game code fits)
-cp "$OUT/libmain.so" "$OUT/libmhguffmpeg.so" "$ROOT/deps/out/$ABI/sdl3/lib/libSDL3.so" "$J/"
+cp "$OUT/libmain.so" "$OUT/libmhguffmpeg.so" "$OUT/libbloodframe.so" "$ROOT/deps/out/$ABI/sdl3/lib/libSDL3.so" "$J/"
 cp "$NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/$( [ $ABI = arm64-v8a ] && echo aarch64 || echo x86_64)-linux-android/libc++_shared.so" "$J/"
 # (a driver of the player's own: runtime/platform/android_gpu.c; these are found in the app's nativeLibraryDir)
 [ "$ABI" = arm64-v8a ] && cp "$OUT"/adrenotools/src/hook/lib*_hook.so "$OUT/adrenotools/src/hook/libhook_impl.so" "$J/"
