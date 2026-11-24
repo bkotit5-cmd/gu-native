@@ -2,6 +2,18 @@ plugins {
     id 'com.android.application'
 }
 
+// The repository root is the single source of truth for both visible and Android package versions.
+def appVersionFile = rootProject.file("../VERSION")
+def appVersionCodeFile = rootProject.file("../VERSION_CODE")
+if (!appVersionFile.isFile() || !appVersionCodeFile.isFile()) {
+    throw new GradleException("VERSION and VERSION_CODE must exist in the repository root")
+}
+def appVersionName = appVersionFile.getText("UTF-8").trim()
+def appVersionCode = appVersionCodeFile.getText("UTF-8").trim().toInteger()
+if (appVersionName.isEmpty() || appVersionCode < 1) {
+    throw new GradleException("Invalid app version in VERSION / VERSION_CODE")
+}
+
 // Las .so vienen ya compiladas de ../native/build_native.sh (jniLibs): Gradle solo empaqueta.
 // (la clave de firma: ../keystore.properties, fuera de git; sin ese archivo no se puede firmar)
 def signing = new Properties()
@@ -16,8 +28,8 @@ android {
         applicationId "com.abc.mhgu.recomp"
         minSdk 28
         targetSdk 35
-        versionCode 16
-        versionName "1.0.1.1"
+        versionCode appVersionCode
+        versionName appVersionName
         ndk {
             abiFilters 'arm64-v8a'
             if (project.hasProperty('emu')) abiFilters 'x86_64'  // (dev_emu.sh: el emulador de la PC)
