@@ -1837,9 +1837,15 @@ void backend_present(NvnTexture *t) {
     vk_lock();
     extern void vk_color_fill_flush(TexBackend *b);
     extern void vk_present_depth_capture(NvnTexture *colour);
+    extern void vk_present_depth_reset(void);
+    extern bool vk_present_shader_needs_depth(void);
     extern void vk_present_depth_resolve(void);
     extern void vk_present_shader_poll(void);
-    vk_present_depth_capture(t);  // capture matching scene depth before PS1/FSR may replace the colour target
+    const bool shader_needs_depth = vk_present_shader_needs_depth();
+    if (shader_needs_depth)
+        vk_present_depth_capture(t);  // capture matching scene depth before PS1/FSR may replace the colour target
+    else
+        vk_present_depth_reset();
     vk_color_fill_flush(NULL);  // (MHGU_PERF_HUDSTART_FUSE, MHGU_PERF_FXAA_COPYDRAW: a picture still to be drawn, now)
     if (g_fsr_on) t = vk_fsr_present(t);  // FSR: its output-size picture with the HUD (fsr.c)
     else vk_ps1_present(t);               // (the PS1 filter's 15-bit colour without FSR: ps1.c)
@@ -1848,7 +1854,8 @@ void backend_present(NvnTexture *t) {
     b->presented = true;
     vk_end_pass();
     vk_ms_resolve(b);
-    vk_present_depth_resolve();  // make the paired scene depth sampleable before presentation
+    if (shader_needs_depth)
+        vk_present_depth_resolve();  // make the paired scene depth sampleable before presentation
     vk_present_shader_poll();    // compile/switch GLSL before frame_begin opens the swapchain pass
     vk_user_shader_hud_mask_upload(b);  // rasterise/upload HUD bounds at the final image resolution
     overlay_user_textures_prepare(user_tex_view);
