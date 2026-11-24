@@ -1,6 +1,7 @@
 package com.mhgu.recomp;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.graphics.Color;
@@ -17,6 +18,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -80,61 +82,20 @@ public class SaveExportActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         es = "es".equals(Locale.getDefault().getLanguage());
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(24), dp(14), dp(24), dp(16));
-        box.setBackground(plate(WINE));
-        TextView title = text(es ? "EXPORTAR PARTIDA" : "EXPORT YOUR SAVE", 20, GOLD, true);
-        title.setGravity(Gravity.CENTER);
-        box.addView(title);
-        TextView body = text(es
-                ? "Elige una carpeta y ahí se crea otra con tus archivos system y system_backup. Se copia lo último que guardaste en el juego.\n\n"
-                  + "Para usarla en un emulador, pásala a tu PC y copia los dos archivos a la carpeta de partida del juego:\n"
-                  + "• Ryujinx: clic derecho en el juego, Open User Save Directory.\n"
-                  + "• yuzu: clic derecho en el juego, Open Save Data Location.\n"
-                  + "Antes, guarda una copia de lo que haya ahí."
-                : "Choose a folder and a new one is made there with your files system and system_backup. It copies what you last saved in the game.\n\n"
-                  + "To use it on an emulator, move it to your PC and copy both files to the game's save folder:\n"
-                  + "• Ryujinx: right-click the game, Open User Save Directory.\n"
-                  + "• yuzu: right-click the game, Open Save Data Location.\n"
-                  + "Keep a copy of what is there first.", 14, CREAM, false);
-        body.setPadding(0, dp(10), 0, dp(10));
-        body.setLineSpacing(dp(1), 1);
-        box.addView(body);
-        status = text("", 14, GOLD, true);
-        status.setGravity(Gravity.CENTER);
-        box.addView(status);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        row.setPadding(0, dp(12), 0, 0);
-        main = button(es ? "Elegir carpeta" : "Choose a folder", true);
-        main.setOnClickListener(v -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK));
-        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
-        size.setMargins(dp(8), 0, dp(8), 0);
-        row.addView(main, size);
-        Button close = button(es ? "Cerrar" : "Close", false);
-        close.setOnClickListener(v -> finish());
-        row.addView(close, new LinearLayout.LayoutParams(size));
-        box.addView(row);
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(PANEL);
-        scroll.setFillViewport(true);
-        LinearLayout page = new LinearLayout(this);
-        page.setGravity(Gravity.CENTER);
-        page.setPadding(dp(32), dp(10), dp(32), dp(10));
-        int room = getResources().getDisplayMetrics().widthPixels - dp(64);  // (never wider than the screen)
-        page.addView(box, new LinearLayout.LayoutParams(Math.min(dp(600), room), LinearLayout.LayoutParams.WRAP_CONTENT));
-        scroll.addView(page);
-        setContentView(scroll);
-
         if (!new File(saves(), FILES[0]).isFile()) {
-            main.setEnabled(false);
-            say(es ? "Todavía no hay ninguna partida guardada." : "There is no saved game yet.", true);
+            Toast.makeText(this, es ? "Todavía no hay ninguna partida guardada." : "There is no saved game yet.",
+                    Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+        // Open Android's system folder picker directly; no intermediate export screen.
+        try {
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, es ? "No se encontró un selector de carpetas." : "No folder picker is available.",
+                    Toast.LENGTH_LONG).show();
+            finish();
         }
     }
 
@@ -146,10 +107,12 @@ public class SaveExportActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request != PICK || result != RESULT_OK || data == null || data.getData() == null) return;
+        if (request != PICK) return;
+        if (result != RESULT_OK || data == null || data.getData() == null) {
+            finish();
+            return;
+        }
         Uri tree = data.getData();
-        main.setEnabled(false);
-        say(es ? "Copiando…" : "Copying…", false);
         new Thread(() -> {
             String folder = null, error = null;
             try {
@@ -160,9 +123,11 @@ public class SaveExportActivity extends Activity {
             }
             final String done = folder, why = error;
             runOnUiThread(() -> {
-                main.setEnabled(true);
-                if (done != null) say((es ? "Listo: carpeta " : "Done: folder ") + done, false);
-                else say((es ? "No se pudo copiar: " : "Could not copy it: ") + why, true);
+                String message = done != null
+                        ? (es ? "Partida exportada: " : "Save exported: ") + done
+                        : (es ? "No se pudo exportar: " : "Could not export save: ") + (why == null ? "unknown error" : why);
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                finish();
             });
         }).start();
     }
