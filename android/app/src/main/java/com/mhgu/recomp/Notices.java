@@ -29,10 +29,9 @@ import java.util.regex.Pattern;
  * file differ):
  *  - Unofficial build: the APK's signing certificate is not khorne-hub's (its SHA-256 is in the README's Official
  *    downloads). Once per version; Continue goes on to the game: it never stops it.
- *  - Update: at most once a day, in the background, one plain GET of GitHub's latest release of this repository (no
- *    other data is sent); a newer tag than this version is shown at the next start, at most once a day: View opens
- *    the release page, Later goes on. Settings -> Check for updates (mhgurecomp.ini [Application] Updates = Off)
- *    turns it off. Offline, or any error: nothing is said.
+ *  - Update notice: at most once a day, one plain GET of this fork's latest GitHub release; a newer tag is shown at the
+ *    next start. The System menu also has a manual updater which downloads and validates the APK before handing it to
+ *    Android's package installer. The background check sends no device information.
  */
 final class Notices {
     private static final String TAG = "MHGU";
@@ -40,6 +39,9 @@ final class Notices {
     // the release key's certificate (android/mhgu.keystore), as the README's Official downloads lists it
     private static final String OFFICIAL = "D72F6FF155E0312C9C7486C530646038E42494C0AD7CD65F4B19FF5D0F32B297";
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
+    private static final String UPDATE_API = "https://api.github.com/repos/bkotit5-cmd/gu-native/releases/latest";
+    private static final String UPDATE_PAGE = "https://github.com/bkotit5-cmd/gu-native/releases/latest";
+    private static final String LATEST_KEY = "latest_bkotit5";
     private static final Pattern TAG_NAME = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
 
     private Notices() {}
@@ -135,13 +137,13 @@ final class Notices {
         new Thread(() -> {
             HttpURLConnection http = null;
             try {
-                http = (HttpURLConnection) new URL("https://api.github.com/repos/khorne-hub/" + REPO + "/releases/latest").openConnection();
+                http = (HttpURLConnection) new URL(UPDATE_API).openConnection();
                 http.setConnectTimeout(8000);
                 http.setReadTimeout(8000);
                 http.setRequestProperty("Accept", "application/vnd.github+json");
                 // (GitHub wants a User-Agent, and Android's own names the phone's model, Android version and build: the
                 // repository's name instead, the same for every phone, so the request says nothing about the device)
-                http.setRequestProperty("User-Agent", REPO);
+                http.setRequestProperty("User-Agent", "bkotit5-cmd-gu-native");
                 if (http.getResponseCode() != 200) return;
                 StringBuilder body = new StringBuilder();
                 try (InputStream in = http.getInputStream()) {
@@ -151,7 +153,7 @@ final class Notices {
                 }
                 Matcher m = TAG_NAME.matcher(body);
                 if (m.find()) {
-                    p.edit().putString("latest", m.group(1)).apply();
+                    p.edit().putString(LATEST_KEY, m.group(1)).apply();
                     Log.i(TAG, "updates: the latest release is " + m.group(1));
                 }
             } catch (Exception e) {  // (offline, a time-out, anything: nothing to say)
@@ -186,7 +188,7 @@ final class Notices {
     private static void updateThen(Activity a, Runnable then) {
         boolean es = Look.es();
         SharedPreferences p = prefs(a);
-        String latest = p.getString("latest", null), mine = version(a);
+        String latest = p.getString(LATEST_KEY, null), mine = version(a);
         long now = System.currentTimeMillis(), shown = p.getLong("shown_at", 0);
         if (latest == null || !updatesOn(a) || !newer(latest, mine) || (now - shown < DAY_MS && now >= shown)) {
             then.run();
@@ -209,7 +211,7 @@ final class Notices {
                 new Look.Choice(es ? "Ver" : "View", true, () -> {
                     try {
                         a.startActivity(new Intent(Intent.ACTION_VIEW,
-                                Uri.parse("https://github.com/khorne-hub/" + REPO + "/releases/latest")));
+                                Uri.parse(UPDATE_PAGE)));
                         a.finish();
                     } catch (ActivityNotFoundException e) {
                         then.run();
