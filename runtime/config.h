@@ -224,6 +224,7 @@ typedef struct {
                               // screen's (exec.c vk_present_draw, shaders.c present.color)
     int text_outline;          // [Graphics] TextOutline: dark outline around quest dialogue/help text
     int hud_shrink;            // [Display] HUDSize: 0..40, 100 minus this value
+    int detailed_log;          // [Application] DetailedLog: additional shader, Vulkan, HUD and import diagnostics
 } Config;
 // The crossplay settings as the network threads read them (config_live_crossplay)
 typedef struct {
