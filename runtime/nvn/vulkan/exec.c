@@ -8223,6 +8223,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}
     };
     uint32_t write_count = 2;
+    VkDescriptorBufferInfo param_buffer = {0};
     if (kind == 3 && vk_user_shader_param_count() > 0) {
         float shader_values[USER_SHADER_PARAM_MAX][4];
         vk_user_shader_params_pack(shader_values);
@@ -8230,7 +8231,9 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         if (param_align < 16) param_align = 16;
         VkSpan param_span = vk_transient(sizeof shader_values, param_align);
         memcpy(param_span.ptr, shader_values, sizeof shader_values);
-        VkDescriptorBufferInfo param_buffer = {.buffer = param_span.buf, .offset = param_span.off, .range = sizeof shader_values};
+        param_buffer = (VkDescriptorBufferInfo){
+            .buffer = param_span.buf, .offset = param_span.off, .range = sizeof shader_values
+        };
         w[2] = (VkWriteDescriptorSet){
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 2, .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &param_buffer
