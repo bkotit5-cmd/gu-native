@@ -3778,6 +3778,11 @@ void rows_graphics_advanced_70(std::vector<Row> &r) {  // [Graphics] FrameGen (n
 }
 void reset_graphics_advanced_70() { s.draft.frame_gen = config_defaults().frame_gen; }
 MENU_ENTRY("graphics/advanced", 70, rows_graphics_advanced_70, reset_graphics_advanced_70);
+void rows_graphics_advanced_80(std::vector<Row> &r) {
+    action(r, "lossless.dll", "Import Lossless.dll", []() { ui_request_activity("showLosslessDllImport"); });
+    r.back().help = tr("Import your own 64-bit Lossless.dll from the Steam Lossless Scaling installation. Android does not execute the Windows DLL; the Lossless FG backend reads its shader resources. The file is kept in this app's private storage.");
+}
+MENU_ENTRY("graphics/advanced", 80, rows_graphics_advanced_80);
 #else
 void rows_graphics_advanced_30(std::vector<Row> &r) {  // [Display] GPU: Automatic, or a device by its name
     const Config &c = s.draft;                                  // (nvn/vulkan/device.c pick_device), at the next start
