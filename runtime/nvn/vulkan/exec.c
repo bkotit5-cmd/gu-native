@@ -7651,8 +7651,20 @@ static void user_shader_params_save(const char *path, const UserShaderParam *par
     if (fclose(f) != 0) ok = false;
     if (ok) {
         if (rename(tmp, path) != 0) {
-            LOG("[shader] could not save parameter values to %s\n", path);
-            remove(tmp);
+            /* Windows rename() does not replace an existing file; keep a backup while replacing it there. */
+            char backup[2120];
+            if (snprintf(backup, sizeof backup, "%s.previous", path) >= (int)sizeof backup) {
+                remove(tmp);
+                LOG("[shader] parameter path is too long: %s\n", path);
+                return;
+            }
+            remove(backup);
+            bool had_old = rename(path, backup) == 0;
+            if (rename(tmp, path) != 0) {
+                if (had_old) rename(backup, path);
+                remove(tmp);
+                LOG("[shader] could not save parameter values to %s\n", path);
+            } else if (had_old) remove(backup);
         }
     } else remove(tmp);
 }
