@@ -125,4 +125,13 @@ fetch_exact \
     "e1b562a8bed273a02f30b59b66a5d499793cede5" \
     "$SRC/shaderc/third_party/glslang"
 
+# Bloodframe: native Android Lossless Scaling FG (MIT), pinned rather than tracking its moving default branch.
+fetch_exact \
+    "Bloodframe LSFG Android" \
+    "https://github.com/ducvd89/bloodframe.git" \
+    "f4ac713aef58d9403a136e179b3b0d163d85eb66" \
+    "$SRC/bloodframe"
+git -C "$SRC/bloodframe" submodule sync --recursive
+git -C "$SRC/bloodframe" submodule update --init --depth 1 -- thirdparty/pe-parse thirdparty/volk
+
 printf '\nAll dependency sources are present at the pinned revisions.\n'
