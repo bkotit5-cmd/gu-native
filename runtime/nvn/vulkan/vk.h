@@ -44,6 +44,9 @@ typedef struct {
     uint32_t msaa_counts;      // the sample counts MSAA can use (bits 2, 4, 8)
     bool fsr_fp16, fsr_storage_wo_format;  // FSR (fsr.c): shaderFloat16 / shaderStorageImageWriteWithoutFormat enabled
     bool creation_feedback;    // VK_EXT_pipeline_creation_feedback: a pipeline build says whether the driver's cache had it
+#ifdef __ANDROID__
+    bool ahb_import;            // VK_ANDROID_external_memory_android_hardware_buffer: host side of Lossless FG interop
+#endif
     // window
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
