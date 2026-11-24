@@ -1,6 +1,7 @@
 package com.mhgu.recomp;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -20,6 +21,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -146,83 +148,8 @@ public class SaveImportActivity extends Activity {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         es = "es".equals(Locale.getDefault().getLanguage());
-        int pad = dp(14);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(pad * 2, dp(8), pad * 2, dp(6));
-
-        TextView title = text(es ? "IMPORTAR PARTIDA" : "IMPORT A SAVE", 20, GOLD, true);
-        title.setGravity(Gravity.CENTER);
-        page.addView(title);
-        TextView intro = text(es ? "Trae tu partida desde un emulador o desde otro dispositivo."
-                                 : "Bring your save from an emulator or another device.", 14, CREAM, false);
-        intro.setGravity(Gravity.CENTER);
-        intro.setPadding(0, dp(2), 0, dp(8));
-        page.addView(intro);
-
-        LinearLayout columns = new LinearLayout(this);
-        columns.setOrientation(LinearLayout.HORIZONTAL);
-        columns.addView(column(es ? "QUÉ ARCHIVO ELEGIR" : "WHICH FILE TO CHOOSE", es
-                ? "Es el archivo system, de unos 5 MB.\n"
-                  + "• Ryujinx: clic derecho en el juego, Open User Save Directory.\n"
-                  + "• yuzu: clic derecho en el juego, Open Save Data Location.\n"
-                  + "Cópialo aquí, por ejemplo a Descargas."
-                : "It is the file named system, about 5 MB.\n"
-                  + "• Ryujinx: right-click the game, Open User Save Directory.\n"
-                  + "• yuzu: right-click the game, Open Save Data Location.\n"
-                  + "Copy it here, for example to Downloads.", true),
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        columns.addView(column(es ? "QUÉ VA A PASAR" : "WHAT WILL HAPPEN", es
-                ? "• Se reemplazan todos los personajes de este dispositivo.\n"
-                  + "• Tu partida actual queda guardada en una copia, en MHGURecomp/save_backups.\n"
-                  + (SaveFolder.chosen(this) != null ? "• Va a tu carpeta de partidas: tus otros dispositivos también la reciben cuando se sincronicen.\n" : "")
-                  + "• El juego se reinicia: guarda antes lo que no quieras perder."
-                : "• All the characters on this device are replaced.\n"
-                  + "• Your current save is kept in a copy, in MHGURecomp/save_backups.\n"
-                  + (SaveFolder.chosen(this) != null ? "• It goes into your save folder: your other devices get it too once they sync.\n" : "")
-                  + "• The game restarts: save first if you have progress to keep.", false),
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        page.addView(columns);
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(page);
-        LinearLayout whole = new LinearLayout(this);
-        whole.setOrientation(LinearLayout.VERTICAL);
-        whole.setBackgroundColor(WINE);
-        whole.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        status = text("", 14, GOLD, false);
-        status.setGravity(Gravity.CENTER);
-        status.setPadding(pad * 2, dp(4), pad * 2, dp(4));
-        status.setVisibility(android.view.View.GONE);  // (no room to lose on a 4:3 screen until there is a message)
-        whole.addView(status);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        row.setPadding(0, 0, 0, dp(10));
-        main = button(es ? "Elegir archivo" : "Choose file", true);
-        main.setOnClickListener(v -> { if (ready) confirm(); else openPicker(); });
-        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(46));
-        size.setMargins(dp(8), 0, dp(8), 0);
-        row.addView(main, size);
-        leave = button(es ? "Cancelar" : "Cancel", false);
-        leave.setOnClickListener(v -> finish());
-        LinearLayout.LayoutParams size2 = new LinearLayout.LayoutParams(dp(120), dp(46));
-        size2.setMargins(dp(8), 0, dp(8), 0);
-        row.addView(leave, size2);
-        whole.addView(row);
-        whole.setOnApplyWindowInsetsListener((v, insets) -> {  // (the buttons stay above the system's bar)
-            v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetRight(),
-                    insets.getSystemWindowInsetBottom());
-            return insets;
-        });
-        setContentView(whole);
-        main.requestFocus();  // (a console's pad: A presses it)
-    }
-
-    private void say(String s, boolean bad) {
-        status.setTextColor(bad ? ALERT : GOLD);
-        status.setText(s);
-        status.setVisibility(android.view.View.VISIBLE);
+        // Open Android's system document picker immediately; no intermediate import screen.
+        openPicker();
     }
 
     private void openPicker() {
@@ -232,39 +159,46 @@ public class SaveImportActivity extends Activity {
         try {
             startActivityForResult(intent, PICK);
         } catch (ActivityNotFoundException e) {
-            say(es ? "Este dispositivo no tiene selector de archivos." : "This device has no file picker.", true);
+            Toast.makeText(this, es ? "No se encontró un selector de archivos." : "No file manager is available.", Toast.LENGTH_LONG).show();
+            finish();
         }
     }
 
     @Override
     protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
-        if (code != PICK || result != RESULT_OK || data == null || data.getData() == null) return;
+        if (code != PICK) return;
+        if (result != RESULT_OK || data == null || data.getData() == null) {
+            finish();
+            return;
+        }
         check(data.getData());
     }
 
     /** Copies the chosen file here (a picked document can only be read through its provider) and looks at it. */
     private void check(Uri uri) {
-        ready = false;
-        main.setEnabled(false);
-        leave.setEnabled(false);
-        say(es ? "Revisando la partida..." : "Checking the save...", false);
         new Thread(() -> {
             String wrong = problem(uri);
             runOnUiThread(() -> {
-                main.setEnabled(true);
-                leave.setEnabled(true);
                 if (wrong != null) {
                     tmpFile().delete();
-                    say(wrong, true);
-                    main.setText(es ? "Elegir archivo" : "Choose file");
+                    new AlertDialog.Builder(this)
+                            .setTitle(es ? "Archivo no válido" : "Invalid save file")
+                            .setMessage(wrong)
+                            .setPositiveButton(es ? "Aceptar" : "OK", (dialog, which) -> finish())
+                            .setOnCancelListener(dialog -> finish())
+                            .show();
                     return;
                 }
-                ready = true;
-                say(es ? "Partida correcta. Al continuar reemplaza la de este dispositivo."
-                       : "The save is good. Going on replaces the one on this device.", false);
-                main.setText(es ? "Importar y reiniciar" : "Import and restart");
-                main.requestFocus();
+                new AlertDialog.Builder(this)
+                        .setTitle(es ? "¿Importar partida?" : "Import this save?")
+                        .setMessage(es
+                                ? "Se reemplazarán los personajes de este dispositivo. La partida actual se guardará en una copia de seguridad. El juego se reiniciará para aplicar la nueva partida."
+                                : "The hunters on this device will be replaced. Your current save will first be copied to MHGURecomp/save_backups. The game will restart to apply the imported save.")
+                        .setPositiveButton(es ? "Importar y reiniciar" : "Import and restart", (dialog, which) -> confirm())
+                        .setNegativeButton(es ? "Cancelar" : "Cancel", (dialog, which) -> finish())
+                        .setOnCancelListener(dialog -> finish())
+                        .show();
             });
         }).start();
     }
@@ -299,18 +233,17 @@ public class SaveImportActivity extends Activity {
         File pending = new File(importDir(this), "system");
         pending.delete();
         if (!tmpFile().renameTo(pending)) {
-            say(es ? "No se pudo preparar la partida. No se cambió nada." : "The save could not be prepared. Nothing was changed.", true);
+            Toast.makeText(this, es ? "No se pudo preparar la partida; no se cambió nada." : "The save could not be prepared; nothing was changed.",
+                    Toast.LENGTH_LONG).show();
+            finish();
             return;
         }
         committed = true;
-        main.setEnabled(false);
-        leave.setEnabled(false);
-        say(es ? "Reiniciando..." : "Restarting...", false);
-        Intent intent = new Intent(this, PhoenixActivity.class);  // (waits for this process, then opens the app again)
+        Intent intent = new Intent(this, PhoenixActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra(PhoenixActivity.EXTRA_PID, Process.myPid());
         startActivity(intent);
-        // (killed: the game is paused behind this screen, and must not get to save over what comes next)
+        // The game is paused behind this activity; terminate this process so applyPending runs before the next launch.
         new Handler(Looper.getMainLooper()).postDelayed(() -> Process.killProcess(Process.myPid()), 200);
     }
 
