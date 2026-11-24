@@ -6317,8 +6317,12 @@ void credits_tapped(double now) {
 void draw_credits() {
     constexpr double kIn = .4;
     const double now = SDL_GetTicks() / 1000.0;
-    if (g_credits_at < 0)
+    if (g_credits_at < 0) {
+        // Startup credits are skipped; the Credits & Licenses action can still show them on request.
         g_credits_at = now;
+        g_credits_shown = 0;
+        return;
+    }
     credits_tapped(now);
     const double kShown = g_credits_shown, kFade = kShown < kCreditsShown ? kCreditsOut : .9;
     const double t = now - g_credits_at;
@@ -6434,11 +6438,11 @@ std::function<void()> g_online_then;  // (the menu's check, waiting for it: the 
 void thanks_decide() {
     if (g_thanks != Thanks::Unknown)
         return;
-    const char *env = getenv("MHGU_THANKS");  // (once: getenv walks the whole environment)
-    const bool every = env && *env == '1', never = (env && *env == '0') || getenv("MHGU_HIDDEN");
-    g_thanks = every || (!never && !config_editable().thanks_shown) ? Thanks::Wait : Thanks::Done;
-    if (g_thanks == Thanks::Wait)
-        fprintf(stderr, "[settings] the thank-you shows after the credits (%s)\n", every ? "MHGU_THANKS=1" : "ThanksShown = Off");
+    const char *env = getenv("MHGU_THANKS");  // (explicit developer test override only)
+    const bool every = env && *env == '1';
+    g_thanks = every ? Thanks::Wait : Thanks::Done;
+    if (every)
+        fprintf(stderr, "[settings] the thank-you shows after the credits (MHGU_THANKS=1)\n");
 }
 void thanks_open(double now, bool asked) {
     g_card = Card::Thanks;
