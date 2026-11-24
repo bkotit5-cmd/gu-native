@@ -6,7 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
+#include <thread>
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -17,6 +20,7 @@
 #endif
 
 #include "bcn.h"
+#include "logwriter.h"
 #include "Etc.h"
 #include "EtcImage.h"
 extern "C" {
@@ -36,9 +40,48 @@ struct CacheHeader {
 };
 
 std::mutex cache_mutex;
-std::mutex encode_mutex; // avoid several full-image float buffers competing for memory
+std::mutex encode_mutex;
+std::condition_variable encode_cv;
+unsigned int active_encoders;
 std::atomic<uint64_t> temp_serial{0};
+std::atomic<unsigned int> transcode_log_count{0};
 int cache_dir_state;
+
+unsigned int encoder_slots() {
+    static const unsigned int slots = std::thread::hardware_concurrency() >= 6 ? 2u : 1u;
+    return slots;
+}
+
+unsigned int encoder_jobs(uint64_t blocks) {
+    static const unsigned int cores = std::thread::hardware_concurrency();
+    // Two encoder tasks can run at once; on 8-core phones, give each a second worker for large tiles.
+    return cores >= 8 && blocks >= 4096 ? 2u : 1u;
+}
+
+class EncoderSlot {
+public:
+    EncoderSlot() {
+        std::unique_lock<std::mutex> lock(encode_mutex);
+        encode_cv.wait(lock, [] { return active_encoders < encoder_slots(); });
+        ++active_encoders;
+    }
+    ~EncoderSlot() {
+        std::lock_guard<std::mutex> lock(encode_mutex);
+        --active_encoders;
+        encode_cv.notify_one();
+    }
+    EncoderSlot(const EncoderSlot &) = delete;
+    EncoderSlot &operator=(const EncoderSlot &) = delete;
+};
+
+void log_transcode(int kind, uint32_t width, uint32_t height, bool cache_hit,
+                   std::chrono::steady_clock::time_point start) {
+    const unsigned int n = transcode_log_count.fetch_add(1, std::memory_order_relaxed);
+    if (n >= 24) return;
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    rt_logf("[tex] ETC2 BC%d %ux%u: %s in %.1f ms\\n", kind, width, height,
+            cache_hit ? "cache hit" : "encoded", ms);
+}
 
 bool cache_dirs() {
     if (cache_dir_state) return cache_dir_state > 0;
@@ -103,6 +146,7 @@ void cache_write(const char *path, const CacheHeader &header, const uint8_t *dat
 
 extern "C" bool nvn_transcode_bcn_etc2(int kind, const uint8_t *blocks, uint32_t width, uint32_t height,
                                        bool srgb, uint8_t *out, size_t out_size) {
+    const auto started = std::chrono::steady_clock::now();
     if (kind < BCN_BC1 || kind > BCN_BC3 || !blocks || !out || !width || !height) return false;
     const uint64_t block_count = ((static_cast<uint64_t>(width) + 3) / 4) *
                                  ((static_cast<uint64_t>(height) + 3) / 4);
@@ -127,11 +171,18 @@ extern "C" bool nvn_transcode_bcn_etc2(int kind, const uint8_t *blocks, uint32_t
     char path[160] = {};
     const int path_len = snprintf(path, sizeof(path), "cache/textranscode/%s.bin", header.digest);
     const bool have_path = path_len >= 0 && path_len < static_cast<int>(sizeof(path));
-    if (have_path && cache_read(path, header, out, expected_bytes)) return true;
+    if (have_path && cache_read(path, header, out, expected_bytes)) {
+        log_transcode(kind, width, height, true, started);
+        return true;
+    }
 
-    std::lock_guard<std::mutex> one_encoder(encode_mutex);
-    // A concurrent upload may have produced this exact transcode while we waited for the bounded-memory encoder.
-    if (have_path && cache_read(path, header, out, expected_bytes)) return true;
+    // The old single global encoder lock serialized every ETC2 texture and each Encode call used one thread.
+    // Two bounded tile encoders may now run together; float memory per encoder is still limited to TILE_HEIGHT rows.
+    EncoderSlot encoder_slot;
+    if (have_path && cache_read(path, header, out, expected_bytes)) {
+        log_transcode(kind, width, height, true, started);
+        return true;
+    }
 
     // Encode complete ETC2 block-row tiles. Temporary float memory is bounded independently of texture height.
     constexpr uint32_t TILE_HEIGHT = 64;  // whole 4x4 block rows
@@ -158,7 +209,9 @@ extern "C" bool nvn_transcode_bcn_etc2(int kind, const uint8_t *blocks, uint32_t
             const Etc::Image::Format format = kind == BCN_BC1
                 ? (srgb ? Etc::Image::Format::SRGB8A1 : Etc::Image::Format::RGB8A1)
                 : (srgb ? Etc::Image::Format::SRGBA8 : Etc::Image::Format::RGBA8);
-            const Etc::Image::EncodingStatus status = image.Encode(format, Etc::RGBA, 0.0f, 1, 1);
+            const uint64_t tile_blocks = static_cast<uint64_t>(block_width) * ((tile_height + 3) / 4);
+            const unsigned int jobs = encoder_jobs(tile_blocks);
+            const Etc::Image::EncodingStatus status = image.Encode(format, Etc::RGBA, 0.0f, jobs, jobs);
             bits = image.GetEncodingBits();
             const bool has_error =
                 (static_cast<unsigned>(status) & static_cast<unsigned>(Etc::Image::ERROR_THRESHOLD)) != 0;
@@ -174,8 +227,10 @@ extern "C" bool nvn_transcode_bcn_etc2(int kind, const uint8_t *blocks, uint32_t
 
     if (!ok) {
         memset(out, 0, expected_bytes);
+        log_transcode(kind, width, height, false, started);
         return false;
     }
     if (have_path) cache_write(path, header, out, expected_bytes);
+    log_transcode(kind, width, height, false, started);
     return true;
 }
