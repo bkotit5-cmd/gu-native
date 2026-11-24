@@ -2,25 +2,17 @@ package com.mhgu.recomp;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.database.Cursor;
-import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Process;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.Log;
-import android.util.TypedValue;
-import android.view.Gravity;
-import android.view.WindowManager;
-import android.widget.Button;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -29,7 +21,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -38,9 +29,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Settings -> Cheats / Mods: import cheats, mods and DLC using Android's system document picker.
- * Files and folders are staged privately, then passed to the existing validation and installation routines.
- * This screen remains only as an installed-content manager; it does not implement its own file browser.
+ * Settings -> Cheats / Mods: a no-screen import trampoline.
+ * Android's system document picker selects files/folders; staging, validation and installation stay in this activity.
+ * A native confirmation dialog is shown only after a successful import.
  */
 public class ImportActivity extends Activity {
     public static final String KIND = "kind";
@@ -53,10 +44,8 @@ public class ImportActivity extends Activity {
     private static final Pattern TITLE_ID = Pattern.compile("(?i)\\b(0100770008dd[9a-f][0-9a-f]{3})\\b");
 
     private int kind;
-    private boolean es, changed, busy;
-    private TextView status;
-    private LinearLayout list;
-    private Button add, closeButton;
+    private boolean es, busy;
+    private ProgressDialog progressDialog;
 
     private File home() { return AppHome.home(this); }
     private String sub() { return kind == CHEATS ? "cheats" : kind == MOD ? "mods" : "dlc"; }
@@ -86,163 +75,32 @@ public class ImportActivity extends Activity {
         return new File(home(), sub());
     }
 
-    private int dp(int v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
-    }
-
-    private TextView text(String s, int size, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
-        return t;
-    }
-
-    private GradientDrawable plate(int fill) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(fill);
-        d.setStroke(dp(2), EDGE);
-        d.setCornerRadius(dp(6));
-        return d;
-    }
-
-    private Button button(String s, boolean strong, int fill) {
-        Button b = new Button(this);
-        b.setText(s);
-        b.setAllCaps(false);
-        b.setTextColor(strong ? GOLD : CREAM);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        if (strong) b.setTypeface(Typeface.DEFAULT_BOLD);
-        b.setBackground(plate(fill));
-        b.setPadding(dp(14), 0, dp(14), 0);
-        return b;
-    }
-
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         es = "es".equals(Locale.getDefault().getLanguage());
         kind = getIntent().getIntExtra(KIND, CHEATS);
         if (kind < CHEATS || kind > DLC) kind = CHEATS;
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(24), dp(14), dp(24), dp(16));
-        box.setBackground(plate(WINE));
-        String[] titles = es ? new String[] {"TRUCOS", "MODS", "DLC"} : new String[] {"CHEATS", "MODS", "DLC"};
-        TextView title = text(titles[kind], 20, GOLD, true);
-        title.setGravity(Gravity.CENTER);
-        box.addView(title);
-        String[] bodies = es ? new String[] {
-            "Archivos .txt de trucos en el formato de Atmosphere, para la versión 1.4.0 (su id de compilación es "
-                + "FB08F1D20FD1204F). Después se activan uno por uno en la página Trucos. Los que cambian el código del juego "
-                + "funcionan, pero esa parte del juego corre más lenta.",
-            "Una carpeta de mod con romfs o exefs adentro, o un .zip de esa carpeta. Después se ordenan y se activan en la "
-                + "página Mods. Los parches del código (exefs) funcionan, pero esa parte del juego corre más lenta.",
-            "Tus propios DLC del juego: la carpeta de cada uno tiene un archivo DLC.dlcp. Elige una carpeta y se copian "
-                + "todos los que haya adentro. Después, en el juego: menú principal, Descarga. Es experimental."}
-            : new String[] {
-            "Cheat .txt files in Atmosphere's format, for version 1.4.0 (its build id is FB08F1D20FD1204F). Then turn them on "
-                + "one by one on the Cheats page. Those that change the game's code work, but that part of the game runs slower.",
-            "A mod's folder with romfs or exefs in it, or a .zip of that folder. Then order and turn them on on the Mods page. "
-                + "Code patches (exefs) work, but that part of the game runs slower.",
-            "Your own DLC of the game: each one's folder holds a DLC.dlcp file. Choose a folder and every one in it is copied. "
-                + "Then, in the game: main menu, Download. It is experimental."};
-        TextView body = text(bodies[kind], 14, CREAM, false);
-        body.setPadding(0, dp(10), 0, dp(6));
-        body.setLineSpacing(dp(1), 1);
-        box.addView(body);
-        // (where they go, which is also where they can be put by hand)
-        TextView where = text((es ? "También puedes copiarlos tú a esta carpeta del teléfono: "
-                                  : "You can also copy them yourself into this folder on the phone: ") + target().getAbsolutePath(),
-                13, GOLD, false);
-        where.setPadding(0, 0, 0, dp(10));
-        box.addView(where);
-        list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        box.addView(list);
-        status = text("", 14, GOLD, true);
-        status.setGravity(Gravity.CENTER);
-        status.setPadding(0, dp(8), 0, 0);
-        box.addView(status);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        row.setPadding(0, dp(12), 0, 0);
-        String[] adds = es ? new String[] {"Agregar trucos", "Agregar un mod", "Agregar DLC"}
-                           : new String[] {"Add cheats", "Add a mod", "Add DLC"};
-        add = button(adds[kind], true, BRONZE);
-        add.setOnClickListener(v -> chooseImportSource());
-        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
-        size.setMargins(dp(8), 0, dp(8), 0);
-        row.addView(add, size);
-        closeButton = button(es ? "Cerrar" : "Close", false, BRONZE);
-        closeButton.setOnClickListener(v -> {
-            if (busy) return;
-            if (changed) restart();
-            else finish();
-        });
-        row.addView(closeButton, new LinearLayout.LayoutParams(size));
-        box.addView(row);
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(PANEL);
-        scroll.setFillViewport(true);
-        LinearLayout page = new LinearLayout(this);
-        page.setGravity(Gravity.CENTER);
-        page.setPadding(dp(32), dp(10), dp(32), dp(10));
-        int room = getResources().getDisplayMetrics().widthPixels - dp(64);
-        page.addView(box, new LinearLayout.LayoutParams(Math.min(dp(640), room), LinearLayout.LayoutParams.WRAP_CONTENT));
-        scroll.addView(page);
-        setContentView(scroll);
-        refresh();
+        // No intermediate import page: launch Android's file/folder picker immediately.
+        chooseImportSource();
     }
 
-    private void say(String s, boolean bad) {
-        status.setText(s);
-        status.setTextColor(bad ? ALERT : GOLD);
+    private void say(String message, boolean bad) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        if (bad) Log.w(TAG, message);
     }
 
-    /** What is installed: each with its Remove. */
-    private void refresh() {
-        list.removeAllViews();
-        File[] all = target().listFiles(f -> !f.getName().startsWith("_") && !f.getName().startsWith(".")
-                && (kind == CHEATS ? f.isFile() && f.getName().toLowerCase(Locale.ROOT).endsWith(".txt") : f.isDirectory()));
-        if (all == null || all.length == 0) {
-            TextView none = text(es ? "(nada instalado todavía)" : "(nothing installed yet)", 13, CREAM, false);
-            none.setGravity(Gravity.CENTER);
-            list.addView(none);
-            return;
-        }
-        Arrays.sort(all);
-        for (File f : all) {
-            LinearLayout row = new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            TextView name = text("◆  " + f.getName(), 14, CREAM, false);
-            name.setSingleLine(true);
-            row.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-            Button remove = button(es ? "Quitar" : "Remove", false, BRONZE);
-            remove.setOnClickListener(v -> {
-                if (busy) return;
-                delete(f);
-                changed();
-                refresh();
-            });
-            row.addView(remove, new LinearLayout.LayoutParams(dp(92), dp(42)));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, dp(3), 0, dp(3));
-            list.addView(row, lp);
-        }
+    private void askRestart(String imported) {
+        new AlertDialog.Builder(this)
+                .setTitle(es ? "Importación completada" : "Import complete")
+                .setMessage((es ? "Importado: " : "Imported: ") + imported
+                        + (es ? ". Reinicia el juego para aplicar los cambios." : ". Restart the game to apply the changes."))
+                .setPositiveButton(es ? "Reiniciar ahora" : "Restart now", (dialog, which) -> restart())
+                .setNegativeButton(es ? "Más tarde" : "Later", (dialog, which) -> finish())
+                .setOnCancelListener(dialog -> finish())
+                .show();
     }
 
-    private void changed() {
-        changed = true;
-        closeButton.setText(es ? "Reiniciar el juego" : "Restart the game");
-    }
-
-    /** Back to the game through PhoenixActivity: these are read at the start. */
     private void restart() {
         Intent intent = new Intent(this, PhoenixActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -275,7 +133,8 @@ public class ImportActivity extends Activity {
                         else
                             openTreePicker();
                     })
-                    .setNegativeButton(es ? "Cancelar" : "Cancel", null)
+                    .setNegativeButton(es ? "Cancelar" : "Cancel", (dialog, which) -> finish())
+                    .setOnCancelListener(dialog -> finish())
                     .show();
         }
     }
@@ -292,6 +151,7 @@ public class ImportActivity extends Activity {
         } catch (ActivityNotFoundException e) {
             Log.e(TAG, "import file picker: " + e);
             say(es ? "Este dispositivo no tiene un selector de archivos." : "No file picker is available on this device.", true);
+            finish();
         }
     }
 
@@ -303,30 +163,44 @@ public class ImportActivity extends Activity {
         } catch (ActivityNotFoundException e) {
             Log.e(TAG, "import folder picker: " + e);
             say(es ? "Este dispositivo no tiene un selector de carpetas." : "No folder picker is available on this device.", true);
+            finish();
         }
     }
 
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (result != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
+        if (request != PICK_FILE && request != PICK_TREE) return;
+        if (result != RESULT_OK || data == null || data.getData() == null) {
+            finish();
+            return;
+        }
 
+        Uri uri = data.getData();
         if (request == PICK_FILE) {
             String name = displayName(uri, false);
             String lower = name.toLowerCase(Locale.ROOT);
             if (kind == CHEATS && !lower.endsWith(".txt")) {
-                say(es ? "Elige un archivo de trucos .txt." : "Choose a .txt cheat file.", true);
+                showError(es ? "Elige un archivo de trucos .txt." : "Choose a .txt cheat file.");
                 return;
             }
             if (kind == MOD && !lower.endsWith(".zip")) {
-                say(es ? "Elige un archivo de mod .zip." : "Choose a .zip mod file.", true);
+                showError(es ? "Elige un archivo de mod .zip." : "Choose a .zip mod file.");
                 return;
             }
             startImportFromPicker(uri, false, name);
-        } else if (request == PICK_TREE) {
+        } else {
             startImportFromPicker(uri, true, displayName(uri, true));
         }
+    }
+
+    private void showError(String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(es ? "No se pudo importar" : "Import failed")
+                .setMessage(message)
+                .setPositiveButton(es ? "Aceptar" : "OK", (dialog, which) -> finish())
+                .setOnCancelListener(dialog -> finish())
+                .show();
     }
 
     private String displayName(Uri uri, boolean tree) {
@@ -374,12 +248,18 @@ public class ImportActivity extends Activity {
     }
 
     private void startImportFromPicker(Uri uri, boolean tree, String selectedName) {
+        if (busy) return;
         busy = true;
-        add.setEnabled(false);
         copied = 0;
         total = 0;
         lastTick = 0;
-        say(es ? "Leyendo la selección…" : "Reading selection…", false);
+        lastProgressLog = 0;
+
+        progressDialog = new ProgressDialog(this);
+        progressDialog.setMessage(es ? "Importando contenido…" : "Importing content…");
+        progressDialog.setIndeterminate(true);
+        progressDialog.setCancelable(false);
+        progressDialog.show();
 
         new Thread(() -> {
             File staging = new File(getCacheDir(), "import-staging-" + System.nanoTime());
@@ -407,6 +287,7 @@ public class ImportActivity extends Activity {
                 copied = 0;
                 total = 0;
                 lastTick = 0;
+                lastProgressLog = 0;
                 done = kind == CHEATS ? importCheats(source) : kind == MOD ? importMod(source) : importDlc(source);
             } catch (Exception e) {
                 Log.e(TAG, "system-picker import: " + e);
@@ -418,14 +299,14 @@ public class ImportActivity extends Activity {
             final String ok = done, why = error;
             runOnUiThread(() -> {
                 busy = false;
-                add.setEnabled(true);
+                if (progressDialog != null && progressDialog.isShowing()) progressDialog.dismiss();
+                progressDialog = null;
                 if (ok != null) {
-                    changed();
-                    say((es ? "Listo: " : "Done: ") + ok + (es ? ". Se aplica al reiniciar el juego." : ". It applies when the game restarts."), false);
+                    askRestart(ok);
                 } else {
-                    say((es ? "No se pudo: " : "Import failed: ") + (why != null ? why : "unknown error"), true);
+                    showError((es ? "No se pudo: " : "Import failed: ")
+                            + (why != null ? why : "unknown error"));
                 }
-                refresh();
             });
         }).start();
     }
@@ -478,9 +359,14 @@ public class ImportActivity extends Activity {
     // ---- the copy (a background thread)
     private long copied, total;
 
+    private long lastProgressLog;
+
     private void progress() {
+        long now = System.currentTimeMillis();
+        if (now - lastProgressLog < 2000) return;
+        lastProgressLog = now;
         long c = copied, t = total;
-        runOnUiThread(() -> say((es ? "Copiando… " : "Copying… ") + (t > 0 ? (c * 100 / t) + " %" : (c >> 20) + " MB"), false));
+        Log.d(TAG, "import progress: " + (t > 0 ? (c * 100 / t) + "%" : (c >> 20) + " MiB"));
     }
 
     private void copyFile(File from, File to) throws IOException {
