@@ -2615,8 +2615,8 @@ static NvnTexture *mf_tex;        // the picture of the run of models open (NULL
 static uint64_t mf_frame;         // the frame it opened in
 static TexBackend mf_before, mf_after;
 static TexBackend user_hud_mask;
-static uint64_t user_hud_scene_frame, user_hud_mask_upload_frame;
-static bool user_hud_scene_valid;
+static uint64_t user_hud_mask_frame, user_hud_mask_upload_frame;
+static bool user_hud_mask_ready;
 static uint8_t *user_hud_mask_pixels;
 static size_t user_hud_mask_bytes;
 static uint32_t user_hud_mask_width, user_hud_mask_height, user_hud_mask_rects;
@@ -2655,15 +2655,15 @@ bool vk_user_shader_hud_capture_needed(void) {
     return atomic_load(&user_shader_hud_capture_enabled);
 }
 
-static bool user_hud_scene_current(void) {
-    return user_hud_scene_valid && user_hud_scene_frame == g_present_count;
+static bool user_hud_mask_current(void) {
+    return user_hud_mask_ready && user_hud_mask_frame == g_present_count;
 }
 
 // Prepare the HUD mask at the scene/HUD boundary. The custom shader still samples the
 // original final game image; the unmodified HUD is composited back over its processed result.
-void vk_user_shader_hud_scene_capture(NvnTexture *source) {
-    if (!source || !source->backend || !vk_user_shader_hud_capture_needed() || user_hud_scene_current()) return;
-    user_hud_scene_valid = false;
+void vk_user_shader_hud_mask_begin(NvnTexture *source) {
+    if (!source || !source->backend || !vk_user_shader_hud_capture_needed() || user_hud_mask_current()) return;
+    user_hud_mask_ready = false;
     TexBackend *src = source->backend;
     if (!src->image || src->stand_in || !(src->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
         LOG("[shader] HUD separation unavailable: no sampleable scene colour target\n");
@@ -2687,12 +2687,12 @@ void vk_user_shader_hud_scene_capture(NvnTexture *source) {
     user_hud_mask_rects = 0;
     user_hud_mask_upload_frame = UINT64_MAX;
     memset(user_hud_mask_pixels, 0, user_hud_mask_bytes);
-    user_hud_scene_frame = g_present_count;
-    user_hud_scene_valid = true;
+    user_hud_mask_frame = g_present_count;
+    user_hud_mask_ready = true;
 }
 
 static void user_hud_mask_mark_full(void) {
-    if (!user_hud_scene_current() || !user_hud_mask_pixels) return;
+    if (!user_hud_mask_current() || !user_hud_mask_pixels) return;
     memset(user_hud_mask_pixels, 255, user_hud_mask_bytes);
     user_hud_mask_rects++;
 }
@@ -2703,10 +2703,10 @@ static void user_hud_mask_add(const float m[16]) {
     if (!m || !vk_user_shader_hud_capture_needed()) return;
     // On the plain non-FSR/non-PS1 path, this first HUD quad is the boundary:
     // snapshot the scene before writing this quad into the mask.
-    if (!user_hud_scene_current() && st.rt.ncolor > 0 && st.rt.color[0] &&
+    if (!user_hud_mask_current() && st.rt.ncolor > 0 && st.rt.color[0] &&
         st.rt.color[0]->width >= 512 && st.rt.color[0]->height >= 288)
-        vk_user_shader_hud_scene_capture(st.rt.color[0]);
-    if (!user_hud_scene_current() || !user_hud_mask_pixels) return;
+        vk_user_shader_hud_mask_begin(st.rt.color[0]);
+    if (!user_hud_mask_current() || !user_hud_mask_pixels) return;
     const float w = (float)user_hud_mask_width, h = (float)user_hud_mask_height;
     const float cx = m[12], cy = m[13];
     // Axis-aligned bounds of the two transformed quad axes; sums also cover rotated UI elements.
@@ -2739,7 +2739,7 @@ static void user_hud_mask_add(const float m[16]) {
 
 // Called outside the swapchain pass, after all HUD quads have been recorded for this frame.
 void vk_user_shader_hud_mask_upload(void) {
-    if (!user_hud_scene_current() || !user_hud_mask_pixels || !vk_user_shader_hud_capture_needed()) return;
+    if (!user_hud_mask_current() || !user_hud_mask_pixels || !vk_user_shader_hud_capture_needed()) return;
     const uint32_t w = user_hud_mask_width, h = user_hud_mask_height;
     if (!w || !h || user_hud_mask_bytes != (size_t)w * h) return;
     // If this game screen did not expose individual HUD quads, fail closed: preserve the full original picture.
@@ -2790,7 +2790,7 @@ void vk_user_shader_hud_mask_upload(void) {
     vk_full_barrier(cb);
     vkCmdCopyBufferToImage(cb, pixels.buf, user_hud_mask.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
     vk_full_barrier(cb);
-    user_hud_mask_upload_frame = user_hud_scene_frame;
+    user_hud_mask_upload_frame = user_hud_mask_frame;
 }
 
 static void models_fxaa_begin(NvnTexture *t) {
@@ -7118,7 +7118,7 @@ static void draw(CmdRec *r, bool indexed) {
 
     // Fallback for a plain 2D HUD draw when neither FSR nor the PS1 hook captured H.
     // Exclude tiny fullscreen post passes that sample render targets.
-    if (!user_hud_scene_current() && vk_user_shader_hud_capture_needed() &&
+    if (!user_hud_mask_current() && vk_user_shader_hud_capture_needed() &&
         !st.ds[0] && st.rt.ncolor > 0 && st.rt.color[0]) {
         bool post = (uint32_t)r->x[2] <= 6;
         bool reads_rt = false;
@@ -7129,7 +7129,7 @@ static void draw(CmdRec *r, bool indexed) {
         }
         NvnTexture *scene = st.rt.color[0];
         if (!(post && reads_rt) && scene->width >= 512 && scene->height >= 288)
-            vk_user_shader_hud_scene_capture(scene);
+            vk_user_shader_hud_mask_begin(scene);
     }
 
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
@@ -8381,7 +8381,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     VkImageView hud_mask_view = VK_NULL_HANDLE;
     VkPipeline hud_overlay_pipeline = VK_NULL_HANDLE;
     if (!hdr && user_shader_module()) {
-        bool scene_pair = user_hud_scene_current() &&
+        bool scene_pair = user_hud_mask_current() &&
                           user_hud_mask_width == b->width && user_hud_mask_height == b->height &&
                           user_hud_mask.image && user_hud_mask_upload_frame == g_present_count;
         if (scene_pair) {
@@ -8396,7 +8396,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         } else {
             static uint64_t last_no_hud_scene_frame = UINT64_MAX;
             if (last_no_hud_scene_frame != g_present_count) {
-                LOG("[shader] pre-HUD scene/mask unavailable; custom GLSL bypassed this frame so depth cannot blur the HUD\n");
+                LOG("[shader] HUD mask unavailable; custom GLSL bypassed this frame so depth cannot blur the HUD\n");
                 last_no_hud_scene_frame = g_present_count;
             }
         }
