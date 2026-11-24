@@ -135,7 +135,7 @@ This should not be read as a guarantee that every Forge 2.0.0 plugin or every AP
 - **Texture packs:** treated as mods and loaded through the Mods page. Texture packs can increase memory use.
 - **Forge:** a Forge page/entry is shown when a Forge plugin is active.
 
-On Android, mod, cheat and DLC imports use the app's in-app folder browser in `ImportActivity`; shader and save imports use Android's system document picker. The `FolderBrowser` component is used to choose game and save directories. These are separate workflows today, not one shared file-manager interface. On Windows, the corresponding desktop import actions use native SDL file dialogs.
+On Android, all content imports use Android's system document picker: cheat `.txt` files and mod `.zip` archives are selected with `ACTION_OPEN_DOCUMENT`, while mod folders and DLC folders use `ACTION_OPEN_DOCUMENT_TREE`. Shader and save imports also use the system document picker. Selected documents and folder trees are copied into private temporary staging storage, then passed to the existing validators and installers. The themed `ImportActivity` screen remains as an installed-content list with Remove controls; its custom storage browser has been removed. `FolderBrowser` is still used for choosing the game and save directories, not for importing content. On Windows, import actions use native SDL file dialogs.
 
 Only install mods, cheats and plugins from sources you trust. Cheats and executable patches can change game state or affect online play. In multiplayer, use cheats only with the agreement of everyone in the lobby.
 
