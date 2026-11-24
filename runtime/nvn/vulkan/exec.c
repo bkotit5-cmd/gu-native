@@ -7530,6 +7530,7 @@ static TexBackend *user_depth_target;
 static NvnTexture *user_depth_colour, *user_depth_attachment, *user_depth_source;
 static uint32_t user_depth_level, user_depth_layer;
 static const char *user_depth_reason = "not_captured";
+static bool user_depth_msaa_pending;
 
 // Report only changes, so an active shader does not flood the log every frame. The active attachment set
 // matters more than the largest depth image elsewhere in memory.
@@ -7540,7 +7541,7 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     static uint32_t last_cw, last_ch, last_aw, last_ah, last_sw, last_sh, last_pw, last_ph;
     static uint32_t last_afmt, last_sfmt, last_dfmt, last_dsamples, last_daspect, last_dlevel, last_dlayer;
     static uint32_t last_ms_fmt, last_ms_samples;
-    static bool last_standin, last_ms_dirty;
+    static bool last_standin, last_ms_dirty, last_msaa_pending;
     static char last_slots[384];
 
     uint32_t cw = user_depth_colour ? user_depth_colour->width : 0;
@@ -7579,7 +7580,8 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
                 last_pw == pw && last_ph == ph && last_afmt == afmt && last_sfmt == sfmt && last_dfmt == dfmt &&
                 last_dsamples == dsamples && last_daspect == daspect && last_ms_fmt == ms_fmt &&
                 last_ms_samples == ms_samples && last_dlevel == user_depth_level && last_dlayer == user_depth_layer &&
-                last_standin == standin && last_ms_dirty == ms_dirty && !strcmp(last_slots, slots);
+                last_standin == standin && last_ms_dirty == ms_dirty &&
+                last_msaa_pending == user_depth_msaa_pending && !strcmp(last_slots, slots);
     if (same) return;
 
     LOG("[shader] depthTex: %s reason=%s capture_color=%p %ux%u nvn_fmt=%#x "
@@ -7596,8 +7598,8 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
             d->ms_dirty, d->ms_valid);
         if (d->ms) LOG(" ms_fmt=%d ms_samples=%u", d->ms->format, d->ms->samples);
     }
-    LOG(" presented=%p %ux%u pass_scale=%.3f rt_colors=%d [%s]\n",
-        (void *)presented, pw, ph, pass_sx, st.rt.ncolor, slots);
+    LOG(" presented=%p %ux%u pass_scale=%.3f msaa_pending_at_capture=%d rt_colors=%d [%s]\n",
+        (void *)presented, pw, ph, pass_sx, user_depth_msaa_pending, st.rt.ncolor, slots);
 
     last_state = state;
     last_reason = reason;
@@ -7610,7 +7612,7 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     last_cw = cw; last_ch = ch; last_aw = aw; last_ah = ah; last_sw = sw; last_sh = sh; last_pw = pw; last_ph = ph;
     last_afmt = afmt; last_sfmt = sfmt; last_dfmt = dfmt; last_dsamples = dsamples; last_daspect = daspect;
     last_ms_fmt = ms_fmt; last_ms_samples = ms_samples; last_dlevel = user_depth_level; last_dlayer = user_depth_layer;
-    last_standin = standin; last_ms_dirty = ms_dirty;
+    last_standin = standin; last_ms_dirty = ms_dirty; last_msaa_pending = user_depth_msaa_pending;
     snprintf(last_slots, sizeof last_slots, "%s", slots);
 }
 
@@ -7734,6 +7736,7 @@ void vk_present_depth_capture(NvnTexture *colour) {
     user_depth_source = NULL;
     user_depth_level = user_depth_layer = 0;
     user_depth_reason = "no_color";
+    user_depth_msaa_pending = false;
     if (!colour) return;
 
     if (!st.rt.depth) {
@@ -7784,6 +7787,7 @@ void vk_present_depth_capture(NvnTexture *colour) {
     // backend_present() captures before vk_end_pass() marks this pass's MSAA companions dirty.
     // Treat the currently open MSAA pass as pending too; a clean cached companion alone is harmless.
     bool pending_msaa_resolve = depth->ms && (depth->ms_dirty || (in_pass && pass_msaa));
+    user_depth_msaa_pending = pending_msaa_resolve;
     if (pending_msaa_resolve) {
         if (user_depth_level || user_depth_layer) {
             user_depth_reason = "unsupported_msaa_subview";
