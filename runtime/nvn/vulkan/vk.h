@@ -210,9 +210,8 @@ VkImageUsageFlags vk_usage_supported(VkFormat f, VkImageUsageFlags usage);  // (
 void vk_exec_mem(uint64_t *staging, int *chunks, uint64_t *vc);  // (exec.c: the staging ring's and vertex cache's bytes)
 void vk_save_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);
 // Begin a per-frame HUD mask at the boundary between the scene and the game's 2D HUD.
-void vk_user_shader_hud_mask_begin(NvnTexture *source);
 bool vk_user_shader_hud_capture_needed(void);
-void vk_user_shader_hud_mask_upload(void);
+void vk_user_shader_hud_mask_upload(TexBackend *presented);
 // The devices that can run the game (Vulkan 1.1; one per name, in the driver's order) and which of them runs it (-1:
 // none yet), for the settings' GPU row ([Display] GPU, settings_panel.cpp): their count, 0 before the device is made
 int vk_gpu_list(const char **names, int max, int *in_use);
