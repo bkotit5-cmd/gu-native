@@ -1,4 +1,5 @@
 #include "settings_panel.h"
+#include "logwriter.h"
 #include "config.h"
 #include "colour_filter.h"
 #include "menu_confirm.h"
@@ -2629,9 +2630,9 @@ void user_shader_rows(std::vector<Row> &r) {
             item.action = true;
             item.activate = [name]() {
                 if (set_active_user_shader(name))
-                    LOG("[shader] selected from in-game menu: %s\n", name.c_str());
+                    rt_logf("[shader] selected from in-game menu: %s\n", name.c_str());
                 else
-                    LOG("[shader] could not select shader from in-game menu: %s\n", name.c_str());
+                    rt_logf("[shader] could not select shader from in-game menu: %s\n", name.c_str());
             };
             r.push_back(std::move(item));
         }
@@ -2644,9 +2645,9 @@ void user_shader_rows(std::vector<Row> &r) {
     disable.action = true;
     disable.activate = []() {
         if (set_active_user_shader(""))
-            LOG("[shader] custom shader disabled from in-game menu\n");
+            rt_logf("[shader] custom shader disabled from in-game menu\n");
         else
-            LOG("[shader] could not disable custom shader from in-game menu\n");
+            rt_logf("[shader] could not disable custom shader from in-game menu\n");
     };
     r.push_back(std::move(disable));
 

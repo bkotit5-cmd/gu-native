@@ -947,7 +947,7 @@ static void frame_once(void *cpu) {
     // frames a minute drawn again, now ~3,300; the overlay's share of this thread 3.8 % -> 0.3 % (about 0.4 ms a frame);
     // =2 compared 6,659 such frames, none differed. MHGU_PERF_STATS_REUSE=0: frames with the plate built, as before
     bool alone = touch && !open && !free_render && !notice && !plate && !chat && !chat_over && !credits && !fading && !g_modal_open &&
-                 !g_settings_open && !g_forge_open && !settings_panel_confirming() && !tree;
+                 !g_settings_open && !g_forge_open && !settings_panel_confirming();
     bool same = g_perf_overlay_reuse && alone && g_reuse_last && g_snap.Valid && w == g_reuse_w && h == g_reuse_h &&
                 now - g_reuse_built_ns < 1000000000ull && (!stats || (g_perf_stats_reuse && perfstats_same((float)w, (float)h))) &&
                 hunt_overlay_unchanged((float)w, (float)h) && touch_draw_unchanged((float)w, (float)h);
