@@ -7688,18 +7688,15 @@ static NvnTexture *user_depth_colour, *user_depth_attachment, *user_depth_source
 static uint32_t user_depth_level, user_depth_layer;
 static const char *user_depth_reason = "not_captured";
 static bool user_depth_msaa_pending;
+static bool user_shader_uses_depth;
 
 // Report only changes, so an active shader does not flood the log every frame. The active attachment set
 // matters more than the largest depth image elsewhere in memory.
 static void user_depth_report(const char *state, const char *reason, TexBackend *presented) {
-    static const char *last_state, *last_reason;
-    static const NvnTexture *last_colour, *last_attachment, *last_source;
-    static const TexBackend *last_depth, *last_ms, *last_presented;
-    static uint32_t last_cw, last_ch, last_aw, last_ah, last_sw, last_sh, last_pw, last_ph;
-    static uint32_t last_afmt, last_sfmt, last_dfmt, last_dsamples, last_daspect, last_dlevel, last_dlayer;
-    static uint32_t last_ms_fmt, last_ms_samples;
-    static bool last_standin, last_ms_dirty, last_msaa_pending;
-    static char last_slots[384];
+    // Game colour buffers rotate every frame; pointer changes are not new depth failures.
+    // Log only when the state or reason changes. A later BOUND/fallback transition is still reported.
+    static char last_state[16], last_reason[64];
+    if (last_state[0] && !strcmp(last_state, state) && !strcmp(last_reason, reason)) return;
 
     uint32_t cw = user_depth_colour ? user_depth_colour->width : 0;
     uint32_t ch = user_depth_colour ? user_depth_colour->height : 0;
@@ -7709,13 +7706,6 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     uint32_t sh = user_depth_source ? user_depth_source->height : 0;
     uint32_t afmt = user_depth_attachment ? user_depth_attachment->format : 0;
     uint32_t sfmt = user_depth_source ? user_depth_source->format : 0;
-    uint32_t dfmt = user_depth_target ? user_depth_target->format : 0;
-    uint32_t dsamples = user_depth_target ? user_depth_target->samples : 0;
-    uint32_t ms_fmt = user_depth_target && user_depth_target->ms ? user_depth_target->ms->format : 0;
-    uint32_t ms_samples = user_depth_target && user_depth_target->ms ? user_depth_target->ms->samples : 0;
-    uint32_t daspect = user_depth_target ? user_depth_target->aspect : 0;
-    bool standin = user_depth_target ? user_depth_target->stand_in : false;
-    bool ms_dirty = user_depth_target ? user_depth_target->ms_dirty : false;
     uint32_t pw = presented ? presented->width : 0;
     uint32_t ph = presented ? presented->height : 0;
     char slots[384] = {0};
@@ -7729,24 +7719,12 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
         used += (size_t)n;
     }
 
-    bool same = last_state && last_reason && !strcmp(last_state, state) && !strcmp(last_reason, reason) &&
-                last_colour == user_depth_colour && last_attachment == user_depth_attachment &&
-                last_source == user_depth_source && last_depth == user_depth_target &&
-                last_ms == (user_depth_target ? user_depth_target->ms : NULL) && last_presented == presented &&
-                last_cw == cw && last_ch == ch && last_aw == aw && last_ah == ah && last_sw == sw && last_sh == sh &&
-                last_pw == pw && last_ph == ph && last_afmt == afmt && last_sfmt == sfmt && last_dfmt == dfmt &&
-                last_dsamples == dsamples && last_daspect == daspect && last_ms_fmt == ms_fmt &&
-                last_ms_samples == ms_samples && last_dlevel == user_depth_level && last_dlayer == user_depth_layer &&
-                last_standin == standin && last_ms_dirty == ms_dirty &&
-                last_msaa_pending == user_depth_msaa_pending && !strcmp(last_slots, slots);
-    if (same) return;
-
     LOG("[shader] depthTex: %s reason=%s capture_color=%p %ux%u nvn_fmt=%#x "
         "depth_attachment=%p %ux%u nvn_fmt=%#x depth_source=%p %ux%u nvn_fmt=%#x "
         "depth_backend=%p mip=%u layer=%u",
         state, reason, (void *)user_depth_colour, cw, ch, user_depth_colour ? user_depth_colour->format : 0,
-        (void *)user_depth_attachment, aw, ah, user_depth_attachment ? user_depth_attachment->format : 0,
-        (void *)user_depth_source, sw, sh, user_depth_source ? user_depth_source->format : 0,
+        (void *)user_depth_attachment, aw, ah, afmt,
+        (void *)user_depth_source, sw, sh, sfmt,
         (void *)user_depth_target, user_depth_level, user_depth_layer);
     if (user_depth_target) {
         TexBackend *d = user_depth_target;
@@ -7757,22 +7735,9 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     }
     LOG(" presented=%p %ux%u pass_scale=%.3f msaa_pending_at_capture=%d rt_colors=%d [%s]\n",
         (void *)presented, pw, ph, pass_sx, user_depth_msaa_pending, st.rt.ncolor, slots);
-
-    last_state = state;
-    last_reason = reason;
-    last_colour = user_depth_colour;
-    last_attachment = user_depth_attachment;
-    last_source = user_depth_source;
-    last_depth = user_depth_target;
-    last_ms = user_depth_target ? user_depth_target->ms : NULL;
-    last_presented = presented;
-    last_cw = cw; last_ch = ch; last_aw = aw; last_ah = ah; last_sw = sw; last_sh = sh; last_pw = pw; last_ph = ph;
-    last_afmt = afmt; last_sfmt = sfmt; last_dfmt = dfmt; last_dsamples = dsamples; last_daspect = daspect;
-    last_ms_fmt = ms_fmt; last_ms_samples = ms_samples; last_dlevel = user_depth_level; last_dlayer = user_depth_layer;
-    last_standin = standin; last_ms_dirty = ms_dirty; last_msaa_pending = user_depth_msaa_pending;
-    snprintf(last_slots, sizeof last_slots, "%s", slots);
+    snprintf(last_state, sizeof last_state, "%s", state);
+    snprintf(last_reason, sizeof last_reason, "%s", reason);
 }
-
 
 static UserShaderParam user_shader_params[USER_SHADER_PARAM_MAX];
 static int user_shader_params_n;
@@ -8053,6 +8018,36 @@ static char *user_shader_params_prepare(const char *source, size_t source_size, 
 }
 
 
+static bool user_shader_ident_char(unsigned char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+}
+static bool user_shader_source_uses_depth(const char *source) {
+    if (!source) return false;
+    const char *p = source;
+    while (*p) {
+        if (p[0] == '/' && p[1] == '/') {
+            p += 2;
+            while (*p && *p != '\n') p++;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            p += 2;
+            while (*p && !(p[0] == '*' && p[1] == '/')) p++;
+            if (*p) p += 2;
+            continue;
+        }
+        if (user_shader_ident_char((unsigned char)*p)) {
+            const char *start = p++;
+            while (user_shader_ident_char((unsigned char)*p)) p++;
+            if ((size_t)(p - start) == 8 && !memcmp(start, "depthTex", 8)) return true;
+            continue;
+        }
+        p++;
+    }
+    return false;
+}
+
 static uint64_t user_shader_hash(uint64_t h, const void *data, size_t size) {
     const uint8_t *p = data;
     for (size_t i = 0; i < size; i++) {
@@ -8123,23 +8118,27 @@ static VkShaderModule user_shader_module(void) {
         present_render_passes[3] = VK_NULL_HANDLE;
         if (user_shader) vkDestroyShaderModule(g_vk.dev, user_shader, NULL);
         user_shader = VK_NULL_HANDLE;
+        user_shader_uses_depth = false;
     }
     user_shader_file_key = key;
     user_shader_key_valid = true;
 
     if (!n) {
+        user_shader_uses_depth = false;
         user_shader_params_clear();
         vk_user_shader_hud_capture_enable(false);
         LOG("[shader] custom GLSL disabled; built-in presentation restored\n");
         return VK_NULL_HANDLE;
     }
     if (!valid_name) {
+        user_shader_uses_depth = false;
         user_shader_params_clear();
         vk_user_shader_hud_capture_enable(false);
         LOG("[shader] active GLSL marker has an invalid filename\n");
         return VK_NULL_HANDLE;
     }
     if (!shader_ok) {
+        user_shader_uses_depth = false;
         user_shader_params_clear();
         vk_user_shader_hud_capture_enable(false);
         LOG("[shader] selected GLSL file is missing, empty, or larger than 2 MB: %s\n", source_path);
@@ -8148,6 +8147,7 @@ static VkShaderModule user_shader_module(void) {
 
     f = fopen(source_path, "rb");
     if (!f) {
+        user_shader_uses_depth = false;
         user_shader_params_clear();
         vk_user_shader_hud_capture_enable(false);
         LOG("[shader] could not open selected GLSL file: %s\n", source_path);
@@ -8158,9 +8158,10 @@ static VkShaderModule user_shader_module(void) {
     if (!source) { fclose(f); user_shader_params_clear(); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
     bool read_ok = fread(source, 1, (size_t)bytes, f) == (size_t)bytes;
     fclose(f);
-    if (!read_ok) { free(source); user_shader_params_clear(); vk_user_shader_hud_capture_enable(false); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
+    if (!read_ok) { free(source); user_shader_uses_depth = false; user_shader_params_clear(); vk_user_shader_hud_capture_enable(false); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
     source[bytes] = 0;
 
+    bool source_uses_depth = user_shader_source_uses_depth(source);
     char params_path[1800];
     snprintf(params_path, sizeof params_path, "%s.params", source_path);
     char *compile_source = user_shader_params_prepare(source, (size_t)bytes, params_path);
@@ -8168,9 +8169,11 @@ static VkShaderModule user_shader_module(void) {
     free(compile_source);
     free(source);
     if (user_shader) {
+        user_shader_uses_depth = source_uses_depth;
         vk_user_shader_hud_capture_enable(true);
         LOG("[shader] user GLSL hot-loaded: %s\n", name);
     } else {
+        user_shader_uses_depth = false;
         user_shader_params_clear();
         vk_user_shader_hud_capture_enable(false);
         LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
@@ -8183,15 +8186,26 @@ void vk_present_shader_poll(void) {
     (void)user_shader_module();
 }
 
+// Clear the previous pair when the active shader no longer reads scene depth.
+void vk_present_depth_reset(void) {
+    user_depth_target = NULL;
+    user_depth_colour = user_depth_attachment = user_depth_source = NULL;
+    user_depth_level = user_depth_layer = 0;
+    user_depth_reason = "not_required";
+    user_depth_msaa_pending = false;
+}
+
+bool vk_present_shader_needs_depth(void) {
+    return user_shader != VK_NULL_HANDLE && user_shader_uses_depth;
+}
+
 // Capture only the depth attachment paired with the game colour image being presented.
 void vk_present_depth_capture(NvnTexture *colour) {
-    user_depth_target = NULL;
+    vk_present_depth_reset();
+    if (!vk_present_shader_needs_depth()) return;
     user_depth_colour = colour;
     user_depth_attachment = st.rt.depth;
-    user_depth_source = NULL;
-    user_depth_level = user_depth_layer = 0;
     user_depth_reason = "no_color";
-    user_depth_msaa_pending = false;
     if (!colour) return;
 
     if (!st.rt.depth) {
@@ -8259,7 +8273,7 @@ void vk_present_depth_capture(NvnTexture *colour) {
 
 // Called after the guest pass ends and before the swapchain render pass begins.
 void vk_present_depth_resolve(void) {
-    if (user_depth_target) vk_ms_resolve(user_depth_target);
+    if (vk_present_shader_needs_depth() && user_depth_target) vk_ms_resolve(user_depth_target);
 }
 
 // kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding;
@@ -8392,7 +8406,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     const bool sharp = !g_fsr_on && g_scaled_3d && config_live_upscale_sharp();
     VkImageView depth_view = vk_dummy_view(TEXTYPE_2D);
     bool has_depth_view = false;
-    if (user_depth_target && user_depth_target->image && !user_depth_target->stand_in) {
+    if (user_shader_uses_depth && user_depth_target && user_depth_target->image && !user_depth_target->stand_in) {
         static const VkComponentMapping identity = {0};
         VkImageView v = vk_image_view(user_depth_target, VK_IMAGE_VIEW_TYPE_2D, user_depth_target->format,
                                       user_depth_level, 1, user_depth_layer, 1, identity, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -8403,7 +8417,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
             user_depth_reason = "depth_view_creation_failed";
         }
     }
-    if (kind == 3)
+    if (kind == 3 && user_shader_uses_depth)
         user_depth_report(has_depth_view ? "BOUND" : "FALLBACK", has_depth_view ? "ok" : user_depth_reason, b);
     VkDescriptorImageInfo ii[2] = {
         {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
