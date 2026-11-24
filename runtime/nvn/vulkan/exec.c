@@ -7846,7 +7846,10 @@ static char *user_shader_params_prepare(const char *source, size_t source_size, 
             insert = pos;
             continue;
         }
-        if (!*q || !strncmp(q, "//", 2) || *q == '#') {
+        bool directive_before_declarations = *q == '#' &&
+            (!strncmp(q, "#version", 8) || !strncmp(q, "#extension", 10) ||
+             !strncmp(q, "#pragma", 7) || !strncmp(q, "#line", 5));
+        if (!*q || !strncmp(q, "//", 2) || directive_before_declarations) {
             pos += line_len + (nl != NULL);
             insert = pos;
             continue;
