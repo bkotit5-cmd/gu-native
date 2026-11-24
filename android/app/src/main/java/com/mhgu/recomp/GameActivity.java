@@ -49,7 +49,7 @@ public class GameActivity extends SDLActivity {
 
     @Override
     protected String[] getLibraries() {
-        return new String[] { "c++_shared", "SDL3", "mhguffmpeg", "bloodframe", "main" };
+        return new String[] { "c++_shared", "SDL3", "mhguffmpeg", "main" };
     }
 
     private boolean viaEntry;
