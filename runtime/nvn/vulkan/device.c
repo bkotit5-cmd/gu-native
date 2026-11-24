@@ -1850,7 +1850,7 @@ void backend_present(NvnTexture *t) {
     vk_ms_resolve(b);
     vk_present_depth_resolve();  // make the paired scene depth sampleable before presentation
     vk_present_shader_poll();    // compile/switch GLSL before frame_begin opens the swapchain pass
-    vk_user_shader_hud_mask_upload();  // upload the HUD geometry mask before opening the swapchain pass
+    vk_user_shader_hud_mask_upload(b);  // rasterise/upload HUD bounds at the final image resolution
     overlay_user_textures_prepare(user_tex_view);
 #ifdef __ANDROID__
     if (vk_framegen_enabled()) present_made(b, (double)t->width / t->height);  // FRAMEGEN: (framegen.c)
