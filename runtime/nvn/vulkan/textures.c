@@ -538,7 +538,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
                 VkFormat etc2 = bcn == BCN_BC1
                     ? (srgb ? VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK : VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK)
                     : (srgb ? VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK : VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK);
-                if (format_supports(etc2, need)) {
+                if (format_supports(etc2, need | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) {
                     b->bcn = (uint8_t)bcn;
                     b->bcn_etc2 = bcn == BCN_BC1 ? 1 : 2;
                     b->bcn_etc2_srgb = srgb;
@@ -1130,7 +1130,8 @@ static uint64_t plan(NvnTexture *t, TexBackend *b, const uint8_t *mem, int mode,
                                                                  l.h < level_h(b, lv) ? l.h : level_h(b, lv), 1}};
                     }
                 }
-            }                bool expand = mf.expand_rgb && fi->bpb == 3;  // RGB8 -> RGBA8
+            } else {
+                bool expand = mf.expand_rgb && fi->bpb == 3;  // RGB8 -> RGBA8
                 j.conv = expand ? CV_RGB8 : CV_NONE;
                 out_row = (uint64_t)l.wb * (expand ? 4 : fi->bpb);
                 if (linear) step = stride ? (BAND / stride ? BAND / stride : 1) : l.hb;

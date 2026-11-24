@@ -130,6 +130,8 @@ extern "C" bool nvn_transcode_bcn_etc2(int kind, const uint8_t *blocks, uint32_t
     if (have_path && cache_read(path, header, out, expected_bytes)) return true;
 
     std::lock_guard<std::mutex> one_encoder(encode_mutex);
+    // Another worker may have completed the same transcode while this one waited for the memory-limited encoder slot.
+    if (have_path && cache_read(path, header, out, expected_bytes)) return true;
     const size_t pixels = static_cast<size_t>(width) * height;
     float *rgba = static_cast<float *>(malloc(pixels * 4 * sizeof(float)));
     if (!rgba) {
