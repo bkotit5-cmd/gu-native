@@ -209,6 +209,9 @@ VkFormatFeatureFlags vk_format_features(VkFormat f);             // (textures.c:
 VkImageUsageFlags vk_usage_supported(VkFormat f, VkImageUsageFlags usage);  // (textures.c: usage the format has)
 void vk_exec_mem(uint64_t *staging, int *chunks, uint64_t *vc);  // (exec.c: the staging ring's and vertex cache's bytes)
 void vk_save_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);
+// Scene-only image captured immediately before the game's HUD draw; used by the user GLSL compositor.
+void vk_user_shader_hud_scene_capture(NvnTexture *source);
+bool vk_user_shader_hud_capture_needed(void);
 // The devices that can run the game (Vulkan 1.1; one per name, in the driver's order) and which of them runs it (-1:
 // none yet), for the settings' GPU row ([Display] GPU, settings_panel.cpp): their count, 0 before the device is made
 int vk_gpu_list(const char **names, int max, int *in_use);
