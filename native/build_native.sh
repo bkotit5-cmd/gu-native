@@ -8,6 +8,8 @@ API=28
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(dirname "$HERE")
 SRC="$ROOT"
+# Host glslangValidator is used while configuring Bloodframe's Android-only shader targets.
+export PATH="/mingw64/bin:$PATH"
 SDK=$(cygpath -u "$LOCALAPPDATA/Android/Sdk")
 NDK="$SDK/ndk/27.0.12077973"
 CMAKE="$SDK/cmake/3.22.1/bin/cmake.exe"
@@ -37,8 +39,6 @@ cd "$HERE"
 "$CMAKE" --build "$(m "$OUT")" --parallel ${JOBS:-12} > "$OUT.build.log" 2>&1 || { tail -40 "$OUT.build.log"; exit 1; }
 
 # MSYS2's host glslangValidator is used only to embed Bloodframe's optional experimental shader set.
-export PATH="/mingw64/bin:$PATH"
-
 # a jniLibs del proyecto Gradle
 J="$ROOT/android/app/src/main/jniLibs/$ABI"
 mkdir -p "$J"
