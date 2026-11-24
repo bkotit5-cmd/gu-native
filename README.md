@@ -119,7 +119,7 @@ A compile or pipeline failure falls back to the built-in presentation shader and
 
 **Not supported:** ReShade `.fx` / `.fxh` effects and `.ini` presets, RetroArch slang shaders, multipass chains, arbitrary uniform reflection and shader include files. ReShade requires a separate effect runtime or conversion to the supported single-pass GLSL interface.
 
-See [the GLSL shader guide](docs/USER_GLSL_SHADERS.md) and [the sample saturation shader](examples/glsl/saturation.glsl).
+See [the GLSL shader guide](docs/USER_GLSL_SHADERS.md), [the sample saturation shader](examples/glsl/saturation.glsl), and [the parameterized MHGU World-style DoF shader](examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). The DoF sample's HUD edge protection is approximate; the renderer does not currently provide a separate HUD mask.
 
 ## Forge plugin support
 
