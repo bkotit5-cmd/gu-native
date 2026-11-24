@@ -1,6 +1,9 @@
 name: Build Android debug APK
 
 on:
+  push:
+    branches:
+      - fallback/pre-texture-optimizations
   workflow_dispatch:
 
 permissions:
