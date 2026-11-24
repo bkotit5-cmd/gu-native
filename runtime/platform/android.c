@@ -67,9 +67,8 @@ JNIEXPORT void JNICALL Java_com_mhgu_recomp_GameActivity_nativeLosslessDllChange
     lossless_framegen_set_dll_path(value);
     if (value) (*env)->ReleaseStringUTFChars(env, path, value);
     const bool dll_ok = lossless_framegen_has_dll();
-    const bool api_ok = lossless_framegen_library_available();
-    diag_log_detail("[lossless][detail] Lossless FG prerequisites: user DLL %s, Android LSFG API %s; runtime/Vulkan support is checked when enabled\\n",
-                    dll_ok ? "present" : "missing", api_ok ? "present" : "unavailable");
+    diag_log_detail("[lossless][detail] User Lossless.dll path restored: %s; Bloodframe is loaded lazily when Lossless FG is enabled\\n",
+                    dll_ok ? "present" : "missing");
 }
 
 // ---- guest address space
