@@ -16,7 +16,7 @@ The settings interface is organized into seven main sections:
 | --- | --- |
 | **Controls** | Touch layout, controller mapping, combined buttons, keyboard and mouse settings, control profiles |
 | **Graphics & Audio** | Resolution, render scale, upscaling, anti-aliasing, performance options, HUD settings, sound |
-| **Shader** | Import a custom Vulkan GLSL fragment shader |
+| **Shader** | Installed GLSL shader selection and management, live parameters, depth input and shader import |
 | **Multiplayer** | Internet hubs, local network, emulator crossplay, chat and friends |
 | **Mods & Cheats** | Mod load order, conflicts, cheats, DLC/event content, Forge and texture-pack information |
 | **System** | App behaviour, game folder, save tools, game-file verification and game-code builder |
@@ -74,7 +74,7 @@ Upscaling and frame-generation paths are hardware/driver dependent. An option be
 
 ## Custom GLSL shaders
 
-The **Shader** page loads custom **single-pass Vulkan GLSL fragment shaders** from `.glsl` files. On Android, **Add shader file** opens the system document picker; there is no separate orange shader import/management screen. Select, disable or remove installed shaders from the monochrome in-game **Settings → Shader** page. Windows uses its file picker. Shader selection and replacement hot-reload on the next presented frame without restarting the game.
+The **Shader** page is the in-game manager for custom **single-pass Vulkan GLSL fragment shaders**. It lists installed `.glsl` files, marks the active shader, lets you select a shader, switch back to **Use built-in shader**, remove installed files, and edit any annotated parameters exposed by the active shader. **Add shader file** imports a `.glsl` file. On Android it opens Android's system document picker and copies the selected file into the app's `shaders/` directory; the picker is a small bridge activity, not a separate orange shader-management screen. Android shader imports are limited to 2 MiB. On Windows, the app uses the native SDL file dialog. Shader changes are detected by the render thread and applied by hot-reloading on the next presented frame, without restarting the game.
 
 The renderer expects Vulkan GLSL 450:
 
@@ -135,6 +135,8 @@ This should not be read as a guarantee that every Forge 2.0.0 plugin or every AP
 - **Texture packs:** treated as mods and loaded through the Mods page. Texture packs can increase memory use.
 - **Forge:** a Forge page/entry is shown when a Forge plugin is active.
 
+On Android, mod, cheat and DLC imports use the app's in-app folder browser in `ImportActivity`; shader and save imports use Android's system document picker. The `FolderBrowser` component is used to choose game and save directories. These are separate workflows today, not one shared file-manager interface. On Windows, the corresponding desktop import actions use native SDL file dialogs.
+
 Only install mods, cheats and plugins from sources you trust. Cheats and executable patches can change game state or affect online play. In multiplayer, use cheats only with the agreement of everyone in the lobby.
 
 ## Multiplayer
@@ -157,7 +159,7 @@ The default internet hub is a community-operated service, not a server operated 
 
 - Choose the game folder used by the app.
 - Verify game files against the version expected by the port. Verification reports missing, truncated, changed or mismatched files; it does not download or replace game files.
-- Import and export saves. The current save is backed up before an imported save is applied.
+- Import and export saves. On Android, save import opens the system document picker for the `system` save file, validates it and stages it for the next game launch. Before replacing the current save, the app backs up the existing `system` and `system_backup` files under `MHGURecomp/save_backups/`.
 - On Android, choose a save folder that can be shared with a sync service to move a save between devices.
 - The Android app includes a game-code builder workflow.
 
