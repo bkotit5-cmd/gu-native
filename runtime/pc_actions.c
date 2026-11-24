@@ -784,7 +784,7 @@ static void SDLCALL shader_picked(void *ud, const char *const *list, int filter)
         return;
     }
     char msg[420];
-    snprintf(msg, sizeof msg, "%s will be used after the game restarts.", name);
+    snprintf(msg, sizeof msg, "%s selected. It hot-reloads on the next presented frame.", name);
     notice("Load GLSL shader", msg);
 }
 

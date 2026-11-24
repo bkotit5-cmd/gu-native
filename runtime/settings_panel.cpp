@@ -41,6 +41,10 @@
 #include <strings.h>
 #include <thread>
 #include <vector>
+#include <filesystem>
+#include <system_error>
+#include <cctype>
+#include <cerrno>
 
 #ifndef __ANDROID__
 // (nvn/vulkan/device.c) the Vulkan devices that can run the game and the one in use, for the GPU row
@@ -2517,20 +2521,155 @@ void cache_clear_row(std::vector<Row> &r) {
         "primeras zonas pueden tironear o mostrar modelos tarde hasta que estén armados. Un segundo toque, antes de que "
         "el juego vuelva a empezar, conserva la caché.");
 }
-// User GLSL shaders: a single fullscreen fragment pass over the resolved game image.
+// Installed shaders are shown and selectable in the monochrome in-game menu; the orange Android screen only imports files.
+static std::filesystem::path user_shader_directory() {
+    const char *home = std::getenv("MHGU_HOME");
+    return home && *home ? std::filesystem::path(home) / "shaders" : std::filesystem::path("shaders");
+}
+
+static bool user_shader_filename(const std::string &name) {
+    if (name.size() < 5 || name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
+        return false;
+    std::string ext = name.substr(name.size() - 5);
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return ext == ".glsl";
+}
+
+static std::string active_user_shader_name() {
+    const auto marker = user_shader_directory() / "active.txt";
+    char name[256] = {0};
+    std::FILE *f = std::fopen(marker.string().c_str(), "rb");
+    if (!f) return {};
+    size_t n = std::fread(name, 1, sizeof name - 1, f);
+    std::fclose(f);
+    name[n] = 0;
+    while (n && (name[n - 1] == '\n' || name[n - 1] == '\r' || name[n - 1] == ' ' || name[n - 1] == '\t'))
+        name[--n] = 0;
+    return user_shader_filename(name) ? std::string(name) : std::string();
+}
+
+static std::vector<std::string> enumerate_user_shaders() {
+    std::vector<std::string> names;
+    std::error_code ec;
+    const auto dir = user_shader_directory();
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code file_ec;
+        if (!it->is_regular_file(file_ec) || file_ec) continue;
+        std::string name = it->path().filename().string();
+        if (user_shader_filename(name)) names.push_back(std::move(name));
+    }
+    auto lower = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
+        return s;
+    };
+    std::sort(names.begin(), names.end(), [&](const std::string &a, const std::string &b) {
+        return lower(a) < lower(b);
+    });
+    return names;
+}
+
+static std::vector<std::string> g_user_shader_files;
+static bool g_user_shader_files_ready;
+static const std::vector<std::string> &user_shader_files() {
+    if (!g_user_shader_files_ready) {
+        g_user_shader_files = enumerate_user_shaders();
+        g_user_shader_files_ready = true;
+    }
+    return g_user_shader_files;
+}
+
+static bool set_active_user_shader(const std::string &name) {
+    const auto dir = user_shader_directory();
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) return false;
+    const auto marker = dir / "active.txt";
+    if (name.empty()) {
+        if (std::remove(marker.string().c_str()) != 0 && errno != ENOENT) return false;
+        return true;
+    }
+    if (!user_shader_filename(name)) return false;
+    const auto tmp = dir / "active.txt.tmp";
+    std::FILE *f = std::fopen(tmp.string().c_str(), "wb");
+    if (!f) return false;
+    bool ok = std::fwrite(name.data(), 1, name.size(), f) == name.size();
+    if (std::fclose(f) != 0) ok = false;
+    if (!ok) { std::remove(tmp.string().c_str()); return false; }
+    // Replace safely on both Windows and Android.
+    if (std::remove(marker.string().c_str()) != 0 && errno != ENOENT) {
+        std::remove(tmp.string().c_str());
+        return false;
+    }
+    if (std::rename(tmp.string().c_str(), marker.string().c_str()) != 0) {
+        std::remove(tmp.string().c_str());
+        return false;
+    }
+    return true;
+}
+
 void user_shader_rows(std::vector<Row> &r) {
+    const std::string active = active_user_shader_name();
+    note(r, "shader.active",
+         active.empty() ? en_es("Active shader: Built-in", "Shader activo: integrado")
+                        : en_es("Active shader: ", "Shader activo: ") + active);
+    header(r, "shader.installed", en_es("Installed GLSL shaders", "Shaders GLSL instalados"));
+
+    const auto &shaders = user_shader_files();
+    if (shaders.empty()) {
+        note(r, "shader.none", en_es("No GLSL shaders found in the shaders folder.", "No hay shaders GLSL en la carpeta shaders."));
+    } else {
+        for (const auto &name : shaders) {
+            Row item;
+            item.id = "shader.file." + name;
+            item.title = name;
+            item.value = active == name ? en_es("ACTIVE", "ACTIVO") : "";
+            item.current = active == name;
+            item.action = true;
+            item.activate = [name]() {
+                if (set_active_user_shader(name))
+                    LOG("[shader] selected from in-game menu: %s\n", name.c_str());
+                else
+                    LOG("[shader] could not select shader from in-game menu: %s\n", name.c_str());
+            };
+            r.push_back(std::move(item));
+        }
+    }
+
+    Row disable;
+    disable.id = "shader.disable";
+    disable.title = en_es("Use built-in shader", "Usar shader integrado");
+    disable.current = active.empty();
+    disable.action = true;
+    disable.activate = []() {
+        if (set_active_user_shader(""))
+            LOG("[shader] custom shader disabled from in-game menu\n");
+        else
+            LOG("[shader] could not disable custom shader from in-game menu\n");
+    };
+    r.push_back(std::move(disable));
+
 #ifdef __ANDROID__
-    action(r, "shader.glsl", en_es("Load GLSL shader", "Cargar shader GLSL"), []() { ui_request_activity("showShaders"); });
+    action(r, "shader.import", en_es("Import / manage shaders", "Importar / gestionar shaders"),
+           []() { g_user_shader_files_ready = false; ui_request_activity("showShaders"); });
 #else
-    action(r, "shader.glsl", en_es("Load GLSL shader", "Cargar shader GLSL"), []() { pc_import_shader(); });
+    action(r, "shader.import", en_es("Import / add shader", "Importar / añadir shader"),
+           []() { g_user_shader_files_ready = false; pc_import_shader(); });
 #endif
+    note(r, "shader.depth", en_es("Custom GLSL can read scene depth as depthTex (binding 1).",
+                                  "GLSL personalizado puede leer profundidad de escena en depthTex (binding 1)."));
+    note(r, "shader.reshade", en_es("ReShade .fx / .ini presets and multi-pass techniques are not supported yet.",
+                                    "Los archivos ReShade .fx / presets .ini y técnicas multipase aún no son compatibles."));
     r.back().help = en_es(
-        "Loads a custom Vulkan GLSL fragment shader from a .glsl file. It runs as a fullscreen post-process after the game is drawn. "
-        "Use the supplied interface: set 0 binding 0 sampler2D t, location 0 vec2 uv input and location 0 vec4 o output. "
-        "Single-pass shaders only; custom shaders replace the Colour and PS1 presentation filters and are bypassed for HDR output.",
-        "Carga un shader de fragmento Vulkan GLSL desde un archivo .glsl. Se ejecuta como postproceso a pantalla completa después "
-        "del juego. Usa la interfaz indicada: sampler2D t en set 0 binding 0, entrada vec2 uv en location 0 y salida vec4 o "
-        "en location 0. Solo un pase; reemplaza los filtros de Color y PS1 y no se aplica a la salida HDR.");
+        "Vulkan GLSL 450 fullscreen fragment shader. Binding 0: sampler2D t (game image). Optional binding 1: "
+        "sampler2D depthTex (paired scene depth, raw 0..1 device depth). Selection and file changes hot-reload without "
+        "restarting. Still single-pass GLSL; ReShade .fx, .fxh, .ini presets and multi-pass techniques need a separate "
+        "effect runtime. HDR presentation bypasses custom GLSL.",
+        "Shader de fragmento Vulkan GLSL 450 a pantalla completa. Binding 0: sampler2D t (imagen del juego). Binding 1 opcional: "
+        "sampler2D depthTex (profundidad de escena, profundidad sin linealizar 0..1). La selección y los cambios se recargan "
+        "sin reiniciar. Sigue siendo GLSL de un pase; ReShade .fx, .fxh, presets .ini y multipase requieren otro runtime. "
+        "La salida HDR omite GLSL personalizado.");
 }
 MENU_ENTRY("shader", 10, user_shader_rows);
 

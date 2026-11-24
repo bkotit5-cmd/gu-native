@@ -7519,8 +7519,25 @@ static VkPipelineLayout present_fx_layout;
 #define PS1_SCAN 0.18f       // (the PS1 filter's scanlines: this much darker between lines, a quarter of it less on every
                              // other picture: 18 % and 13.5 %, as MH4U for Android's)
 
-// A user shader is a single Vulkan GLSL fragment pass. Android stores it under MHGU_HOME/shaders; on desktop
-// the same folder is relative to the app's working directory. active.txt is a basename written by the Shader page.
+// User presentation shader state. Polling and pipeline replacement happen on the render thread.
+// Keep the depth target paired with the exact colour image sent to presentation.
+static VkPipeline present_pipes[4];
+static VkRenderPass present_render_passes[4];
+static VkShaderModule user_shader;
+static uint64_t user_shader_file_key;
+static bool user_shader_key_valid;
+static TexBackend *user_depth_target;
+
+static uint64_t user_shader_hash(uint64_t h, const void *data, size_t size) {
+    const uint8_t *p = data;
+    for (size_t i = 0; i < size; i++) {
+        h ^= p[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+// Android stores shaders under MHGU_HOME/shaders; desktop uses shaders/ beside the app. active.txt stores a basename.
 static bool user_glsl_suffix(const char *name) {
     size_t n = strlen(name);
     if (n < 5 || name[n - 5] != '.') return false;
@@ -7529,72 +7546,128 @@ static bool user_glsl_suffix(const char *name) {
            (e[2] == 's' || e[2] == 'S') && (e[3] == 'l' || e[3] == 'L');
 }
 static VkShaderModule user_shader_module(void) {
-    static bool attempted;
-    static VkShaderModule module;
-    if (attempted) return module;
-    attempted = true;
-
     const char *home = getenv("MHGU_HOME");
-    char marker[1400], source_path[1600], name[256];
+    char marker[1400] = {0}, source_path[1600] = {0}, name[256] = {0};
     if (home && *home) snprintf(marker, sizeof marker, "%s/shaders/active.txt", home);
     else snprintf(marker, sizeof marker, "shaders/active.txt");
 
     FILE *f = fopen(marker, "rb");
-    if (!f) return VK_NULL_HANDLE;
-    size_t n = fread(name, 1, sizeof name - 1, f);
-    fclose(f);
+    size_t n = f ? fread(name, 1, sizeof name - 1, f) : 0;
+    if (f) fclose(f);
     name[n] = 0;
     while (n && (name[n - 1] == '\n' || name[n - 1] == '\r' || name[n - 1] == ' ' || name[n - 1] == '\t'))
         name[--n] = 0;
-    if (!n || !user_glsl_suffix(name)) {
+
+    bool valid_name = n > 0 && user_glsl_suffix(name);
+    for (size_t i = 0; valid_name && i < n; i++)
+        if (name[i] == '/' || name[i] == 92 || name[i] == ':' || name[i] == 0) valid_name = false;
+
+    struct stat marker_stat = {0}, shader_stat = {0};
+    bool marker_ok = stat(marker, &marker_stat) == 0;
+    bool shader_ok = false;
+    if (valid_name) {
+        if (home && *home) snprintf(source_path, sizeof source_path, "%s/shaders/%s", home, name);
+        else snprintf(source_path, sizeof source_path, "shaders/%s", name);
+        shader_ok = stat(source_path, &shader_stat) == 0 &&
+                    shader_stat.st_size > 0 && shader_stat.st_size <= (2L << 20);
+    }
+
+    // Size/time/inode detect source edits and Android's temp-file/rename import path.
+    uint64_t meta[7] = {
+        (uint64_t)(shader_ok ? shader_stat.st_size : 0),
+        (uint64_t)(shader_ok ? shader_stat.st_mtime : 0),
+        (uint64_t)(shader_ok ? shader_stat.st_ctime : 0),
+        (uint64_t)(shader_ok ? shader_stat.st_ino : 0),
+        (uint64_t)(marker_ok ? marker_stat.st_mtime : 0),
+        (uint64_t)(marker_ok ? marker_stat.st_size : 0),
+        (uint64_t)(marker_ok ? marker_stat.st_ino : 0)
+    };
+    uint64_t key = user_shader_hash(14695981039346656037ull, name, n);
+    key = user_shader_hash(key, meta, sizeof meta);
+    if (user_shader_key_valid && key == user_shader_file_key) return user_shader;
+
+    // Submitted frames may still reference the old pipeline/module. Drain GPU work only for a real shader change.
+    if (user_shader || present_pipes[3]) {
+        VkResult idle = vkDeviceWaitIdle(g_vk.dev);
+        if (idle != VK_SUCCESS) {
+            LOG("[shader] hot reload postponed: vkDeviceWaitIdle returned %d\n", idle);
+            return user_shader;
+        }
+        if (present_pipes[3]) vkDestroyPipeline(g_vk.dev, present_pipes[3], NULL);
+        present_pipes[3] = VK_NULL_HANDLE;
+        present_render_passes[3] = VK_NULL_HANDLE;
+        if (user_shader) vkDestroyShaderModule(g_vk.dev, user_shader, NULL);
+        user_shader = VK_NULL_HANDLE;
+    }
+    user_shader_file_key = key;
+    user_shader_key_valid = true;
+
+    if (!n) {
+        LOG("[shader] custom GLSL disabled; built-in presentation restored\n");
+        return VK_NULL_HANDLE;
+    }
+    if (!valid_name) {
         LOG("[shader] active GLSL marker has an invalid filename\n");
         return VK_NULL_HANDLE;
     }
-    for (size_t i = 0; i < n; i++) {
-        if (name[i] == '/' || name[i] == 92 || name[i] == ':' || name[i] == 0) {
-            LOG("[shader] active GLSL marker contains a path\n");
-            return VK_NULL_HANDLE;
-        }
+    if (!shader_ok) {
+        LOG("[shader] selected GLSL file is missing, empty, or larger than 2 MB: %s\n", source_path);
+        return VK_NULL_HANDLE;
     }
-    if (home && *home) snprintf(source_path, sizeof source_path, "%s/shaders/%s", home, name);
-    else snprintf(source_path, sizeof source_path, "shaders/%s", name);
 
     f = fopen(source_path, "rb");
     if (!f) {
-        LOG("[shader] selected GLSL file is missing: %s\n", source_path);
+        LOG("[shader] could not open selected GLSL file: %s\n", source_path);
         return VK_NULL_HANDLE;
     }
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return VK_NULL_HANDLE; }
-    long bytes = ftell(f);
-    if (bytes <= 0 || bytes > (2L << 20) || fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        LOG("[shader] %s: file must be between 1 byte and 2 MB\n", name);
-        return VK_NULL_HANDLE;
-    }
-    char *src = malloc((size_t)bytes + 1);
-    if (!src) { fclose(f); return VK_NULL_HANDLE; }
-    bool read_ok = fread(src, 1, (size_t)bytes, f) == (size_t)bytes;
+    long bytes = (long)shader_stat.st_size;
+    char *source = malloc((size_t)bytes + 1);
+    if (!source) { fclose(f); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
+    bool read_ok = fread(source, 1, (size_t)bytes, f) == (size_t)bytes;
     fclose(f);
-    if (!read_ok) { free(src); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
-    src[bytes] = 0;
+    if (!read_ok) { free(source); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
+    source[bytes] = 0;
 
-    module = vk_compile_glsl(src, STAGE_FRAGMENT, name);
-    free(src);
-    if (module) LOG("[shader] user GLSL ready: %s\n", name);
+    user_shader = vk_compile_glsl(source, STAGE_FRAGMENT, name);
+    free(source);
+    if (user_shader) LOG("[shader] user GLSL hot-loaded: %s\n", name);
     else LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
-    return module;
+    return user_shader;
+}
+
+// Poll before opening the swapchain pass: pipeline destruction never happens inside a render pass.
+void vk_present_shader_poll(void) {
+    (void)user_shader_module();
+}
+
+// Capture only the depth attachment paired with the game colour image being presented.
+void vk_present_depth_capture(NvnTexture *colour) {
+    user_depth_target = NULL;
+    if (!colour || !st.rt.depth || !renderer_format_is_depth(st.rt.depth->format)) return;
+    for (int i = 0; i < st.rt.ncolor; i++) {
+        if (st.rt.color[i] != colour) continue;
+        TexBackend *depth = vk_tex(st.rt.depth, true);
+        if (depth && depth->image && !depth->stand_in && (depth->aspect & VK_IMAGE_ASPECT_DEPTH_BIT))
+            user_depth_target = depth;
+        return;
+    }
+}
+
+// Called after the guest pass ends and before the swapchain render pass begins.
+void vk_present_depth_resolve(void) {
+    if (user_depth_target) vk_ms_resolve(user_depth_target);
 }
 
 // kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding; 3: user GLSL
 // fragment post-process (SDR only).
 static VkPipeline present_pipeline(int kind) {
-    static VkPipeline pipes[4];
-    static VkRenderPass made_for[4];
     VkRenderPass rp = vk_window_pass();
-    if (made_for[kind] == rp) return pipes[kind];
+    if (present_render_passes[kind] == rp) return present_pipes[kind];
     if (!present_layout) {
-        VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
-        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
+        VkDescriptorSetLayoutBinding b[2] = {
+            {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+            {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL}};
+        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = b};
         VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &present_set_layout));
         VkPushConstantRange r = {VK_SHADER_STAGE_VERTEX_BIT, 0, 32};
         VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
@@ -7607,7 +7680,7 @@ static VkPipeline present_pipeline(int kind) {
                                          .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 2, .pPushConstantRanges = r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_fx_layout));
     }
-    VkPipeline *pp = &pipes[kind];
+    VkPipeline *pp = &present_pipes[kind];
     VkShaderModule fragment = kind == 3 ? user_shader_module()
                               : vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag");
     if (!fragment) return VK_NULL_HANDLE;
@@ -7637,11 +7710,11 @@ static VkPipeline present_pipeline(int kind) {
                                        .layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout, .renderPass = rp};
     VkResult result = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, pp);
     if (result != VK_SUCCESS) {
-        made_for[kind] = rp;  // don't retry a broken user pipeline on every presented frame
+        present_render_passes[kind] = rp;  // don't retry a broken user pipeline on every presented frame
         LOG("[shader] presentation pipeline %d failed: %d\n", kind, result);
         return VK_NULL_HANDLE;
     }
-    made_for[kind] = rp;
+    present_render_passes[kind] = rp;
     return *pp;
 }
 
@@ -7681,10 +7754,24 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     // phone without Low-end mode, a smaller RenderResolution - scaled up by its nearest pixels. With the HUD's picture at
     // the screen's size over it, fsr.c's plain scaling did that and this stays linear; FSR: never)
     const bool sharp = !g_fsr_on && g_scaled_3d && config_live_upscale_sharp();
-    VkDescriptorImageInfo ii = {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
-                              .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
-    vkUpdateDescriptorSets(g_vk.dev, 1, &w, 0, NULL);
+    VkImageView depth_view = vk_dummy_view(TEXTYPE_2D);
+    if (user_depth_target && user_depth_target->image && !user_depth_target->stand_in) {
+        static const VkComponentMapping identity = {0};
+        VkImageView v = vk_image_view(user_depth_target, VK_IMAGE_VIEW_TYPE_2D, user_depth_target->format,
+                                      0, 1, 0, 1, identity, VK_IMAGE_ASPECT_DEPTH_BIT);
+        if (v) depth_view = v;
+    }
+    VkDescriptorImageInfo ii[2] = {
+        {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
+        {vk_default_sampler(false), depth_view, VK_IMAGE_LAYOUT_GENERAL}
+    };
+    VkWriteDescriptorSet w[2] = {
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[0]},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 1, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}
+    };
+    vkUpdateDescriptorSets(g_vk.dev, 2, w, 0, NULL);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &ds, 0, NULL);
     ss.known &= ~SS_SETS;  // (not draw's sets any more)

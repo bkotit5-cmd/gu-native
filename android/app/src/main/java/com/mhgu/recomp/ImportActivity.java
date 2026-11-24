@@ -150,9 +150,9 @@ public class ImportActivity extends Activity {
                 + "página Mods. Los parches del código (exefs) funcionan, pero esa parte del juego corre más lenta.",
             "Tus propios DLC del juego: la carpeta de cada uno tiene un archivo DLC.dlcp. Elige una carpeta y se copian "
                 + "todos los que haya adentro. Después, en el juego: menú principal, Descarga. Es experimental.",
-            "Un shader de fragmento Vulkan GLSL de un solo pase (.glsl). Debe leer la imagen del juego con sampler2D t en set 0, binding 0, "
-                + "recibir las coordenadas UV en location 0 y escribir vec4 o en location 0. Se compila al iniciar el juego. "
-                + "No es un preset de ReShade ni un shader de varios pases."}
+            "Un shader Vulkan GLSL de un solo pase (.glsl). Lee la imagen con sampler2D t en set 0, binding 0; puede leer la profundidad "
+                + "de escena con sampler2D depthTex en binding 1. Se recarga al volver al juego, sin reiniciar. "
+                + "Los efectos ReShade .fx y los presets multipase todavía no son compatibles."}
             : new String[] {
             "Cheat .txt files in Atmosphere's format, for version 1.4.0 (its build id is FB08F1D20FD1204F). Then turn them on "
                 + "one by one on the Cheats page. Those that change the game's code work, but that part of the game runs slower.",
@@ -160,9 +160,9 @@ public class ImportActivity extends Activity {
                 + "Code patches (exefs) work, but that part of the game runs slower.",
             "Your own DLC of the game: each one's folder holds a DLC.dlcp file. Choose a folder and every one in it is copied. "
                 + "Then, in the game: main menu, Download. It is experimental.",
-            "A single-pass Vulkan GLSL fragment shader (.glsl). It must sample the game image from set 0, binding 0 as sampler2D t, "
-                + "read the fullscreen UV input at location 0, and write vec4 o at location 0. It is compiled when the game starts. "
-                + "This is not a ReShade preset or a multi-pass shader."};
+            "A single-pass Vulkan GLSL shader (.glsl). Read the game image with sampler2D t at set 0, binding 0; optional sampler2D "
+                + "depthTex at binding 1 exposes the paired scene depth. Selection and file changes hot-reload when you return to "
+                + "the game, without restarting. ReShade .fx effects and multi-pass presets are not supported yet."};
         TextView body = text(bodies[kind], 14, CREAM, false);
         body.setPadding(0, dp(10), 0, dp(6));
         body.setLineSpacing(dp(1), 1);
@@ -194,7 +194,7 @@ public class ImportActivity extends Activity {
         closeButton = button(es ? "Cerrar" : "Close", false, BRONZE);
         closeButton.setOnClickListener(v -> {
             if (busy) return;
-            if (changed) restart();
+            if (changed && kind != SHADER) restart();
             else finish();
         });
         row.addView(closeButton, new LinearLayout.LayoutParams(size));
@@ -296,9 +296,9 @@ public class ImportActivity extends Activity {
                 if (busy) return;
                 try {
                     writeActiveShader(null);
-                    changed();
                     refreshShaders();
-                    say(es ? "Shader desactivado. Reinicia el juego." : "Shader disabled. Restart the game.", false);
+                    say(es ? "Shader desactivado. El filtro integrado se restaura al volver al juego."
+                           : "Shader disabled. The built-in filter returns when you go back to the game.", false);
                 } catch (IOException e) { say(e.getMessage(), true); }
             });
             current.addView(disable, new LinearLayout.LayoutParams(dp(112), dp(42)));
@@ -327,10 +327,9 @@ public class ImportActivity extends Activity {
                 if (busy) return;
                 try {
                     writeActiveShader(f.getName());
-                    changed();
                     refreshShaders();
                     say((es ? "Seleccionado: " : "Selected: ") + f.getName()
-                            + (es ? ". Reinicia el juego para aplicarlo." : ". Restart the game to apply it."), false);
+                            + (es ? ". Se recarga al volver al juego, sin reiniciar." : ". It hot-reloads when you return to the game; no restart needed."), false);
                 } catch (IOException e) { say(e.getMessage(), true); }
             });
             row.addView(use, new LinearLayout.LayoutParams(dp(88), dp(42)));
@@ -339,7 +338,7 @@ public class ImportActivity extends Activity {
             remove.setOnClickListener(v -> {
                 if (busy) return;
                 try {
-                    if (f.getName().equals(activeShaderName())) { writeActiveShader(null); changed(); }
+                    if (f.getName().equals(activeShaderName())) writeActiveShader(null);
                     delete(f);
                     refreshShaders();
                 } catch (Exception e) { say(e.getMessage(), true); }
@@ -514,8 +513,8 @@ public class ImportActivity extends Activity {
                 if (ok != null) {
                     if (kind == SHADER) {
                         if (ok.equals(activeShaderName())) {
-                            changed();
-                            say((es ? "Shader activo actualizado: " : "Updated active shader: ") + ok + (es ? ". Reinicia el juego para aplicarlo." : ". Restart the game to apply it."), false);
+                            say((es ? "Shader activo actualizado: " : "Updated active shader: ") + ok
+                                    + (es ? ". Se recarga al volver al juego." : ". It hot-reloads when you return to the game."), false);
                         } else {
                             say((es ? "Importado: " : "Imported: ") + ok + (es ? ". Pulsa Usar para activarlo." : ". Tap Use to activate it."), false);
                         }
