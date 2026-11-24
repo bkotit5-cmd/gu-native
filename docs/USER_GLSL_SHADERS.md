@@ -24,7 +24,7 @@ void main() {
 }
 ```
 
-- `t` is the resolved game image.
+- `t` is the resolved 3D scene image captured before the game's 2D HUD when a custom shader is active.
 - `depthTex` is optional scene depth paired with the presented colour target. It contains raw device depth in the range 0..1, not linearized eye-space distance. Sample its value from the `.r` component.
 - `uv` is the fullscreen texture coordinate shared by the colour and depth inputs.
 - `o` is the final output pixel colour.
@@ -32,7 +32,7 @@ void main() {
 
 When a matching scene depth target is available, the renderer binds it to `depthTex` and resolves supported multisampled depth before presentation. A 1×1 fallback texture is bound when depth capture or view creation is unavailable. With a custom GLSL shader active in SDR, the log reports `[shader] depthTex: BOUND` or `FALLBACK`, the rejection reason, target dimensions and formats, sample count, depth aspect, and active colour attachments. These diagnostic messages are emitted when the reported state changes, rather than every frame.
 
-Raw device depth must be linearized by the shader before using it as eye-space distance. Do not assume a near/far plane, forward/reversed-Z convention, or identical depth availability in every menu, loading, cutscene or gameplay scene. This input does not provide a dedicated UI mask, camera near/far uniforms, or a separate depth prepass. The presentation shader receives the final game colour image, so game HUD pixels already composited into `t` cannot be identified with certainty and may be blurred. The Forge overlay is drawn afterward. A reliable HUD exclusion feature requires a distinct UI mask/layer from the renderer; colour-edge detection is only a visual approximation and can also preserve edges in the 3D scene.
+Raw device depth must be linearized by the shader before using it as eye-space distance. Do not assume a near/far plane, forward/reversed-Z convention, or identical depth availability in every menu, loading, cutscene or gameplay scene. The renderer captures the scene before the game's non-depth-tested 2D HUD, runs the custom shader on that scene image, then composites the original HUD back using a mask built from the HUD quad transforms. The mask expands each quad's transformed bounds slightly to retain antialiased edges; transparent parts inside a quad's rectangle may also be preserved. If a compatible pre-HUD scene or mask cannot be captured for a frame, the custom shader is bypassed for that frame and the original game image is presented instead, so missing capture data does not cause the HUD to be depth-blurred. The Forge overlay is drawn afterward. The depth input remains the scene depth and does not provide camera near/far uniforms or a separate depth prepass.
 
 ## Editable shader parameters
 
@@ -78,7 +78,7 @@ Only annotated `float`, `int`, and `bool` values are exposed by this interface. 
 
 
 
-The repository includes [an MHGU World-style DoF example with 16 editable controls](../examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). Its `DOF_FALLBACK` option is off by default: when scene depth is unavailable, the example leaves the image sharp instead of applying a full-screen tilt-shift blur to the HUD. Its `HUD_EDGE_PROTECT` option reduces blur around strong local colour edges to help preserve text and icon outlines when depth-based DoF is active. This is an edge-aware approximation, not a true HUD mask; adjust it conservatively and expect some scene edges to be preserved as well.
+The repository includes [an MHGU World-style DoF example with 16 editable controls](../examples/glsl/mhgu_world_style_v5_3_dof_controls.glsl). Its `DOF_FALLBACK` option is off by default: when scene depth is unavailable, the example leaves the scene sharp instead of applying a full-screen tilt-shift blur. The renderer handles HUD exclusion separately; `SCENE_EDGE_PROTECT` is only an optional edge-aware safeguard for high-contrast edges in the 3D scene.
 
 ## ReShade compatibility status
 
