@@ -31,7 +31,7 @@ layout(location = 0) out vec4 o;
 // @param FOCUS_RANGE float 0.12 0.01 0.35 0.01 Sharp focus range
 // @param MAX_FAR float 0.012 0.0 0.03 0.001 Maximum far blur
 // @param MAX_NEAR float 0.007 0.0 0.02 0.001 Maximum near blur
-// @param HUD_EDGE_PROTECT float 0.90 0.0 1.0 0.05 Preserve high-contrast HUD-like edges
+// @param SCENE_EDGE_PROTECT float 0.90 0.0 1.0 0.05 Preserve high-contrast scene edges
 // @param SHARPEN float 0.50 0.0 1.5 0.05 Sharpen strength
 // @param BLOOM_STRENGTH float 0.45 0.0 1.5 0.05 Bloom strength
 // @param SATURATION float 0.78 0.0 1.5 0.02 Colour saturation
@@ -53,7 +53,7 @@ const vec2 FOCUS_POINT = vec2(0.5, 0.5);
 #define FOCUS_RANGE PARAM_FOCUS_RANGE
 #define MAX_FAR PARAM_MAX_FAR
 #define MAX_NEAR PARAM_MAX_NEAR
-#define HUD_EDGE_PROTECT PARAM_HUD_EDGE_PROTECT
+#define SCENE_EDGE_PROTECT PARAM_SCENE_EDGE_PROTECT
 // ---- Sharpen (0.0 = mati, hemat 4 fetch) ----
 #define SHARPEN PARAM_SHARPEN
 const float SHARPEN_LIMIT  = 0.10;
@@ -256,10 +256,9 @@ void main() {
             cc = cocScreen(uv);
         }
 
-        // Approximate HUD safeguard: reduce blur around strong local colour edges.
-        // The final game image contains both 3D and HUD pixels; this is not a true UI mask.
-        // The two-pixel neighbourhood aims to preserve thin text strokes and icon borders.
-        if (HUD_EDGE_PROTECT > 0.0 && abs(cc) >= 0.0004) {
+        // Optional scene-edge safeguard; the renderer restores HUD quads separately after this shader.
+        // This can also keep high-contrast world geometry sharper around its edges.
+        if (SCENE_EDGE_PROTECT > 0.0 && abs(cc) >= 0.0004) {
             float centerY = luma(orig);
             float edge = 0.0;
             const vec2 edgeDirs[4] = vec2[4](
@@ -271,7 +270,7 @@ void main() {
                 float farY = luma(textureLod(t, clamp(uv + delta * 2.0, vec2(0.0), vec2(1.0)), 0.0).rgb);
                 edge = max(edge, abs(centerY - farY));
             }
-            float edgeProtect = smoothstep(0.025, 0.18, edge) * clamp(HUD_EDGE_PROTECT, 0.0, 1.0);
+            float edgeProtect = smoothstep(0.025, 0.18, edge) * clamp(SCENE_EDGE_PROTECT, 0.0, 1.0);
             cc *= 1.0 - edgeProtect;
         }
 
