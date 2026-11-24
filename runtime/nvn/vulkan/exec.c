@@ -8423,10 +8423,10 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         detail_last_width != b->width || detail_last_height != b->height ||
         detail_last_hud != hud_separated || detail_last_depth != (kind == 3 && user_shader_uses_depth)) {
         static const char *const kinds[] = {"built-in", "colour/PS1", "HDR10", "user GLSL", "HUD restore"};
-        diag_log_detail("[vk][detail] presentation path=%s target=%ux%u format=%d HUD-separated=%s depth-input=%s\\n",
+        diag_log_detail("[vk][detail] presentation path=%s target=%ux%u format=%d HUD-separated=%s depth-input=%s\n",
                         kind >= 0 && kind < 5 ? kinds[kind] : "unknown", b->width, b->height, b->format,
                         hud_separated ? "yes" : "no",
-                        kind == 3 && user_shader_uses_depth ? (has_depth_view ? "bound" : "fallback") : "unused");
+                        kind == 3 && user_shader_uses_depth ? "requested" : "unused");
         detail_last_kind = kind; detail_last_format = (int)b->format;
         detail_last_width = b->width; detail_last_height = b->height;
         detail_last_hud = hud_separated; detail_last_depth = kind == 3 && user_shader_uses_depth;
