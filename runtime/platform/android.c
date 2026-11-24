@@ -47,10 +47,16 @@
 #include <unistd.h>
 
 #include "../platform.h"
+#include "../settings_panel.h"
 
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
 #endif
+
+JNIEXPORT void JNICALL Java_com_mhgu_recomp_ShaderImportActivity_nativeShaderFilesChanged(JNIEnv *env, jclass cls) {
+    (void)env, (void)cls;
+    settings_panel_shader_files_changed();
+}
 
 // ---- guest address space
 static uint64_t g_lo, g_hi;
