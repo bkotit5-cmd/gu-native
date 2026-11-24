@@ -8393,7 +8393,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         } else {
             static uint64_t last_no_hud_scene_frame = UINT64_MAX;
             if (last_no_hud_scene_frame != g_present_count) {
-                LOG("[shader] pre-HUD scene/mask unavailable; custom GLSL bypassed this frame so depth cannot blur the HUD\\n");
+                LOG("[shader] pre-HUD scene/mask unavailable; custom GLSL bypassed this frame so depth cannot blur the HUD\n");
                 last_no_hud_scene_frame = g_present_count;
             }
         }
@@ -8503,7 +8503,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
                  .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mask_ii}
             };
             vkUpdateDescriptorSets(g_vk.dev, 2, hud_w, 0, NULL);
-            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, overlay);
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, hud_overlay_pipeline);
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, present_layout, 0, 1, &hud_set, 0, NULL);
             vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
             vkCmdDraw(cb, 3, 1, 0, 0);
