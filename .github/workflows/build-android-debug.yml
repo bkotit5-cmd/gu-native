@@ -128,6 +128,7 @@ jobs:
             'libmhguffmpeg.so',
             'libSDL3.so',
             'libc++_shared.so',
+            'libbloodframe.so',
             'libpyrun.so',
             'libzigcc.so'
           )
