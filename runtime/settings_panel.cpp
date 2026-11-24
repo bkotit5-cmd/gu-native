@@ -61,7 +61,7 @@ extern "C" bool host_input_keyboard_mouse(void);  // (runtime/host_input.c: a ph
 namespace {
 // (Page: a page one level down from a section's, State::at; MENU.md)
 enum class View { Main, Page, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, TouchButtons,
-                  ComboEdit, PadList, PadMap, ImportSave, Licenses, Remove, OpenSite, OpenDiscord, Profiles, ProfileSlot,
+                  ComboEdit, PadList, PadMap, ImportSave, Licenses, Remove, ShaderParameters, ShaderRemove, OpenSite, OpenDiscord, Profiles, ProfileSlot,
                   Chat, Friends, ChatOn,  // (the chat's pages and its question: settings_chat.inc)
                   Verify,  // (Verify game files: runtime/verify.c)
                   BuildCode };  // (a desktop's Build the game code: the game closes into its builder, runtime/pc_builder.c)
@@ -82,6 +82,7 @@ struct Row {
     std::function<void(int)> adjust;
     std::function<void()> activate;
     std::function<void()> remove;          // (a picker's remembered choice: the x at its right takes it out of the list)
+    std::function<void()> long_press;      // (Android touch: held row action, e.g. open a delete confirmation)
 };
 struct Target {
     std::string id;
@@ -181,6 +182,10 @@ struct State {
     // A remembered choice taken out of a picker (its x): the picker of that row opened again, fresh, at that place
     std::string reopen;
     int reopen_at = 0;
+    std::string shader_remove_name;
+    ImGuiID long_press_id = 0;
+    double long_press_since = 0;
+    bool long_press_fired = false;
 } s;
 std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse, capture_wheel;
 std::atomic<int> request_view;  // (SETTINGS_VIEW_*: a desktop's dialog answered, settings_panel_request_view)
@@ -900,7 +905,8 @@ void draw_guides(ImGuiWindow *window, const GuideLayout &layout, float top) {
 }
 bool confirmation() {
     return s.view == View::CloseChanges || s.view == View::Exit || s.view == View::Restart ||
-           s.view == View::Reset || s.view == View::ImportSave || s.view == View::Remove || s.view == View::OpenSite ||
+           s.view == View::Reset || s.view == View::ImportSave || s.view == View::Remove ||
+           s.view == View::ShaderRemove || s.view == View::OpenSite ||
            s.view == View::OpenDiscord || s.view == View::ChatOn || s.view == View::BuildCode;
 }
 // The guides a desktop's view shows at its bottom (0: none): all four on the tabs, Confirm and Back on a dialog, and
@@ -1062,6 +1068,9 @@ double anim_now() { return SDL_GetTicksNS() / 1e9; }
 void push(View view, const std::string &first) {
     s.dropdown.open = false;
     s.drag = {};
+    s.long_press_id = 0;
+    s.long_press_since = 0;
+    s.long_press_fired = false;
     s.origins.push_back({s.view, s.focus, list_scroll(), s.at});
     s.view = view;
     s.help_open.clear();
@@ -1075,6 +1084,9 @@ void push(View view, const std::string &first) {
 void pop() {
     s.dropdown.open = false;
     s.drag = {};
+    s.long_press_id = 0;
+    s.long_press_since = 0;
+    s.long_press_fired = false;
     if (s.origins.empty()) {
         s.view = View::Main;
         s.focus.clear();
@@ -2524,6 +2536,26 @@ void cache_clear_row(std::vector<Row> &r) {
         "primeras zonas pueden tironear o mostrar modelos tarde hasta que estén armados. Un segundo toque, antes de que "
         "el juego vuelva a empezar, conserva la caché.");
 }
+static bool remove_user_shader_file(const std::string &name) {
+    if (!user_shader_filename(name)) return false;
+    if (active_user_shader_name() == name && !set_active_user_shader("")) {
+        LOG("[shader] could not disable shader before removal: %s\n", name.c_str());
+        return false;
+    }
+    std::error_code ec;
+    bool removed = std::filesystem::remove(user_shader_directory() / name, ec);
+    if (ec || !removed) {
+        LOG("[shader] could not remove %s: %s\n", name.c_str(), ec ? ec.message().c_str() : "file not found");
+        return false;
+    }
+    ec.clear();
+    std::filesystem::remove(user_shader_directory() / (name + ".params"), ec);
+    if (ec) LOG("[shader] could not remove parameters for %s: %s\n", name.c_str(), ec.message().c_str());
+    g_user_shader_files_ready = false;
+    LOG("[shader] removed from in-game menu: %s\n", name.c_str());
+    return true;
+}
+
 // Installed shaders are selected and managed in the in-game menu; Android imports a file through the system document picker.
 static std::filesystem::path user_shader_directory() {
     const char *home = std::getenv("MHGU_HOME");
@@ -2677,22 +2709,19 @@ void user_shader_rows(std::vector<Row> &r) {
                 else
                     LOG("[shader] could not select shader from in-game menu: %s\n", name.c_str());
             };
-            item.remove = [name]() {
-                if (active_user_shader_name() == name && !set_active_user_shader("")) {
-                    LOG("[shader] could not disable shader before removal: %s\n", name.c_str());
-                    return;
-                }
-                std::error_code ec;
-                std::filesystem::remove(user_shader_directory() / name, ec);
-                if (ec) {
-                    LOG("[shader] could not remove %s: %s\n", name.c_str(), ec.message().c_str());
-                    return;
-                }
-                ec.clear();
-                std::filesystem::remove(user_shader_directory() / (name + ".params"), ec);
-                g_user_shader_files_ready = false;
-                LOG("[shader] removed from in-game menu: %s\n", name.c_str());
+            item.help = en_es("Tap to activate. Press and hold this shader row to open its removal menu.",
+                               "Toca para activar. Mantén pulsada esta fila para abrir el menú para eliminarlo.");
+#ifdef __ANDROID__
+            item.long_press = [name]() {
+                s.shader_remove_name = name;
+                push(View::ShaderRemove, "dialog.cancel");
             };
+#else
+            item.remove = [name]() {
+                if (!remove_user_shader_file(name))
+                    LOG("[shader] removal failed from desktop menu: %s\n", name.c_str());
+            };
+#endif
             r.push_back(std::move(item));
         }
     }
@@ -2710,7 +2739,15 @@ void user_shader_rows(std::vector<Row> &r) {
     };
     r.push_back(std::move(disable));
 
-    if (!active.empty()) user_shader_parameter_rows(r);
+    if (!active.empty()) {
+        action(r, "shader.parameters.open", en_es("Edit shader parameters", "Editar parámetros del shader"), []() {
+            push(View::ShaderParameters, "shader.parameters.back");
+        });
+        const int parameter_count = vk_user_shader_param_count();
+        r.back().value = parameter_count > 0 ? std::to_string(parameter_count) : tr("No controls");
+        r.back().help = en_es("Open a separate page to adjust the active shader's exposed values.",
+                              "Abre una página aparte para ajustar los valores expuestos por el shader activo.");
+    }
 
 #ifdef __ANDROID__
     action(r, "shader.import", en_es("Add shader file", "Añadir archivo de shader"),
@@ -4596,6 +4633,11 @@ std::vector<Row> rows_for_view(bool *open) {
     if (s.view == View::Main || s.view == View::Page)
         return main_rows();
     std::vector<Row> r;
+    if (s.view == View::ShaderParameters) {
+        action(r, "shader.parameters.back", tr("Back"), []() { pop(); });
+        user_shader_parameter_rows(r);
+        return r;
+    }
     if (s.view == View::TouchButtons) { touch_button_rows(r); return r; }
     if (s.view == View::Chat) { chat_page_rows(r); return r; }
     if (s.view == View::Friends) { friends_page_rows(r); return r; }
@@ -4692,6 +4734,17 @@ std::vector<Row> rows_for_view(bool *open) {
 #endif
         if (s.view == View::Reset)
             action(r, "dialog.reset", tr("Reset"), []() { reset_section(); });
+        if (s.view == View::ShaderRemove)
+            action(r, "dialog.remove", tr("Remove shader"), []() {
+                const std::string name = s.shader_remove_name;
+                if (remove_user_shader_file(name)) {
+                    pop();
+                    focus("shader.file." + name);
+                    s.shader_remove_name.clear();
+                } else {
+                    s.error = fmt("Could not remove shader %s.", name.c_str());
+                }
+            });
         if (s.view == View::OpenSite)  // (back to where the button was, then the browser: a notice there without one)
             action(r, "dialog.open", tr("Open"), []() {
                 pop();
@@ -5228,6 +5281,7 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
         s.dropdown.anchored = false;
     }
     std::function<void()> activate;
+    std::function<void()> long_press;
     std::function<void(int)> adjust;  // (a - or + tapped: its row's, by step)
     std::function<void()> remove;     // (a remembered choice's x tapped)
     std::string help_tap;             // (a row's "?" tapped)
@@ -5360,6 +5414,26 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
             ImGui::SetNextItemAllowOverlap();  // (its - and +, or its x, are over it)
         bool clicked = ImGui::Button("###row", ImVec2(rw, h));
         bool held = ImGui::IsItemActive();
+        bool held_action = false;
+        if (touch && r.long_press && r.enabled) {
+            if (ImGui::IsItemActivated()) {
+                s.long_press_id = id;
+                s.long_press_since = ImGui::GetTime();
+                s.long_press_fired = false;
+            }
+            if (held && s.long_press_id == id && !s.long_press_fired &&
+                ImGui::GetTime() - s.long_press_since >= 0.70) {
+                s.long_press_fired = true;
+                long_press = r.long_press;
+            }
+            held_action = s.long_press_id == id && s.long_press_fired;
+            if (!held && s.long_press_id == id) {
+                s.long_press_id = 0;
+                s.long_press_since = 0;
+                s.long_press_fired = false;
+            }
+            if (held_action) clicked = false;  // a long press must never also activate the shader
+        }
         ImGui::EndDisabled();
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(4);
@@ -5489,6 +5563,10 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
             focus(r.id);
             activate = r.activate;
         }
+    }
+    if (long_press) {
+        long_press();
+        return;
     }
     if (remove) {  // (the list changes under it: the picker opens again, reopen_picker)
         remove();
@@ -5775,6 +5853,10 @@ void keyboard_keys() {
 std::string view_title() {
     if (s.view == View::Page)
         return page_path(s.at);
+    if (s.view == View::ShaderParameters)
+        return tr("Shader parameters");
+    if (s.view == View::ShaderRemove)
+        return fmt("Remove shader %s?", s.shader_remove_name.c_str());
 #ifndef __ANDROID__
     if (s.view == View::Remove)
         return removal_question();
@@ -5808,6 +5890,8 @@ std::string view_title() {
 }
 // What a dialog's question means, under it (empty: the question says it all)
 std::string view_detail() {
+    if (s.view == View::ShaderRemove)
+        return tr("This permanently deletes the GLSL file and its saved parameter values. Cancel to keep it.");
     return s.view == View::OpenSite
                ? tr("It opens in your browser. On phones with little memory, Android may close the game, so save in the game first.")
            : s.view == View::OpenDiscord
