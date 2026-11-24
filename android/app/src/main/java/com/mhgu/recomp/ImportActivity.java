@@ -1,20 +1,21 @@
 package com.mhgu.recomp;
 
 import android.app.Activity;
-import android.app.Dialog;
+import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Process;
-import android.util.DisplayMetrics;
+import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -37,15 +38,15 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Ajustes -> Trucos / Mods: importa trucos, mods y DLC desde el almacenamiento del jugador.
- * Estos archivos conservan sus carpetas y formatos de siempre. Los shaders se importan mediante la actividad del selector
- * de documentos del sistema; esta pantalla propia solo gestiona trucos, mods y DLC.
- * El navegador propio sirve para los archivos del juego que Android 11 o más no deja abrir con un explorador normal.
+ * Settings -> Cheats / Mods: import cheats, mods and DLC using Android's system document picker.
+ * Files and folders are staged privately, then passed to the existing validation and installation routines.
+ * This screen remains only as an installed-content manager; it does not implement its own file browser.
  */
 public class ImportActivity extends Activity {
     public static final String KIND = "kind";
     public static final int CHEATS = 0, MOD = 1, DLC = 2;
     private static final String TAG = "MHGU";
+    private static final int PICK_FILE = 41, PICK_TREE = 42;
     private static final int WINE = Color.rgb(38, 18, 14), PANEL = Color.rgb(26, 12, 9), CREAM = Color.rgb(240, 228, 200);
     private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
     private static final int ALERT = Color.rgb(255, 150, 120), LIT = Color.rgb(96, 62, 24);
@@ -56,7 +57,6 @@ public class ImportActivity extends Activity {
     private TextView status;
     private LinearLayout list;
     private Button add, closeButton;
-    private Dialog browser;
 
     private File home() { return AppHome.home(this); }
     private String sub() { return kind == CHEATS ? "cheats" : kind == MOD ? "mods" : "dlc"; }
@@ -174,7 +174,7 @@ public class ImportActivity extends Activity {
         String[] adds = es ? new String[] {"Agregar trucos", "Agregar un mod", "Agregar DLC"}
                            : new String[] {"Add cheats", "Add a mod", "Add DLC"};
         add = button(adds[kind], true, BRONZE);
-        add.setOnClickListener(v -> openBrowser(null));
+        add.setOnClickListener(v -> chooseImportSource());
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(190), dp(46));
         size.setMargins(dp(8), 0, dp(8), 0);
         row.addView(add, size);
@@ -257,142 +257,164 @@ public class ImportActivity extends Activity {
         f.delete();
     }
 
-    // ---- the browser (folders, and the files this kind takes)
-    private List<File> roots() {
-        List<File> out = new ArrayList<>();
-        out.add(Environment.getExternalStorageDirectory());
-        File[] mine = getExternalFilesDirs(null);
-        if (mine != null)
-            for (File f : mine) {
-                if (f == null) continue;
-                String p = f.getAbsolutePath();
-                int cut = p.indexOf("/Android/data/");
-                if (cut <= 0) continue;
-                File root = new File(p.substring(0, cut));
-                if (!root.equals(out.get(0)) && root.isDirectory()) out.add(root);
-            }
-        return out;
-    }
-
-    private boolean takes(File f) {
-        String n = f.getName().toLowerCase(Locale.ROOT);
-        return kind == CHEATS ? n.endsWith(".txt") : kind == MOD ? n.endsWith(".zip") : n.equals("dlc.dlcp");
-    }
-
-    private LinearLayout.LayoutParams rowParams() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
-        lp.setMargins(0, dp(3), 0, dp(3));
-        return lp;
-    }
-
-    private void openBrowser(File at) {
+    // ---- Android's system picker: files for cheats/ZIPs, document trees for mod/DLC folders
+    private void chooseImportSource() {
         if (busy) return;
-        if (browser != null) browser.dismiss();
-        List<File> roots = roots();
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setBackground(plate(PANEL));
-        box.setPadding(dp(12), dp(12), dp(12), dp(12));
-        String[] heads = es ? new String[] {"ELIGE UN ARCHIVO DE TRUCOS", "ELIGE LA CARPETA DEL MOD O SU .ZIP", "ELIGE LA CARPETA DE TUS DLC"}
-                            : new String[] {"CHOOSE A CHEAT FILE", "CHOOSE THE MOD'S FOLDER OR ITS .ZIP", "CHOOSE YOUR DLC'S FOLDER"};
-        TextView title = text(heads[kind], 16, GOLD, true);
-        title.setGravity(Gravity.CENTER);
-        box.addView(title);
-        LinearLayout tabs = new LinearLayout(this);
-        tabs.setGravity(Gravity.CENTER);
-        File dir = at != null ? at : roots.get(0);
-        File root = roots.get(0);
-        for (File r : roots) if (dir.getAbsolutePath().startsWith(r.getAbsolutePath())) root = r;
-        for (int i = 0; i < roots.size(); i++) {
-            File r = roots.get(i);
-            Button t = button(i == 0 ? (es ? "Memoria interna" : "Phone storage") : (es ? "Tarjeta SD" : "SD card"), r.equals(root), r.equals(root) ? LIT : BRONZE);
-            t.setOnClickListener(v -> openBrowser(r));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
-            lp.setMargins(dp(4), dp(6), dp(4), dp(4));
-            tabs.addView(t, lp);
+        if (kind == CHEATS) {
+            openFilePicker(new String[] {"text/plain"});
+        } else if (kind == DLC) {
+            openTreePicker();
+        } else {
+            String[] choices = es ? new String[] {"Archivo ZIP (.zip)", "Carpeta del mod"}
+                                  : new String[] {"ZIP file (.zip)", "Mod folder"};
+            new AlertDialog.Builder(this)
+                    .setTitle(es ? "Agregar un mod" : "Add a mod")
+                    .setItems(choices, (dialog, which) -> {
+                        if (which == 0)
+                            openFilePicker(new String[] {"application/zip", "application/x-zip-compressed", "application/octet-stream"});
+                        else
+                            openTreePicker();
+                    })
+                    .setNegativeButton(es ? "Cancelar" : "Cancel", null)
+                    .show();
         }
-        box.addView(tabs);
-        String shown = dir.getAbsolutePath().substring(root.getAbsolutePath().length());
-        TextView where = text(shown.isEmpty() ? "/" : shown, 13, CREAM, false);
-        where.setPadding(dp(4), dp(2), dp(4), dp(6));
-        box.addView(where);
-        LinearLayout items = new LinearLayout(this);
-        items.setOrientation(LinearLayout.VERTICAL);
-        final File here = dir;
-        if (!dir.equals(root)) {
-            Button up = button("⬑  " + (es ? "Subir" : "Up"), false, BRONZE);
-            up.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-            up.setOnClickListener(v -> openBrowser(here.getParentFile()));
-            items.addView(up, rowParams());
-        }
-        File[] kids = dir.listFiles(f -> !f.getName().startsWith(".") && (f.isDirectory() || takes(f)));
-        if (kids != null) {
-            Arrays.sort(kids, (a, b) -> a.isDirectory() != b.isDirectory() ? (a.isDirectory() ? -1 : 1)
-                                                                           : a.getName().compareToIgnoreCase(b.getName()));
-            for (File k : kids) {
-                boolean folder = k.isDirectory();
-                Button b = button((folder ? "▸  " : "◆  ") + k.getName(), !folder, folder ? BRONZE : LIT);
-                b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-                b.setOnClickListener(v -> {
-                    if (folder) { openBrowser(k); return; }
-                    browser.dismiss();
-                    start(k);
-                });
-                items.addView(b, rowParams());
-            }
-        }
-        if (kids == null || kids.length == 0) {
-            TextView none = text(es ? "(vacío)" : "(empty)", 13, CREAM, false);
-            none.setPadding(dp(6), dp(8), dp(6), dp(8));
-            items.addView(none);
-        }
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(items);
-        box.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        row.setPadding(0, dp(8), 0, 0);
-        if (kind == MOD || kind == DLC) {  // (a folder: the mod itself, or where the DLC are)
-            Button use = button(es ? "Usar esta carpeta" : "Use this folder", true, BRONZE);
-            use.setOnClickListener(v -> { browser.dismiss(); start(here); });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44));
-            lp.setMargins(dp(5), 0, dp(5), 0);
-            row.addView(use, lp);
-        }
-        Button cancel = button(es ? "Cancelar" : "Cancel", false, BRONZE);
-        cancel.setOnClickListener(v -> browser.dismiss());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44));
-        lp.setMargins(dp(5), 0, dp(5), 0);
-        row.addView(cancel, lp);
-        box.addView(row);
-        browser = new Dialog(this);
-        browser.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        browser.setContentView(box);
-        Window w = browser.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            DisplayMetrics m = getResources().getDisplayMetrics();
-            w.setLayout(Math.min(dp(640), (int) (m.widthPixels * .92f)), (int) (m.heightPixels * .92f));
-        }
-        browser.show();
     }
 
-    // ---- the copy (a background thread)
-    private long copied, total;
+    private void openFilePicker(String[] mimeTypes) {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("*/*");
+        if (mimeTypes != null && mimeTypes.length > 0)
+            pick.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
+        pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(pick, PICK_FILE);
+        } catch (ActivityNotFoundException e) {
+            Log.e(TAG, "import file picker: " + e);
+            say(es ? "Este dispositivo no tiene un selector de archivos." : "No file picker is available on this device.", true);
+        }
+    }
 
-    private void start(File from) {
+    private void openTreePicker() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(pick, PICK_TREE);
+        } catch (ActivityNotFoundException e) {
+            Log.e(TAG, "import folder picker: " + e);
+            say(es ? "Este dispositivo no tiene un selector de carpetas." : "No folder picker is available on this device.", true);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+
+        if (request == PICK_FILE) {
+            String name = displayName(uri, false);
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (kind == CHEATS && !lower.endsWith(".txt")) {
+                say(es ? "Elige un archivo de trucos .txt." : "Choose a .txt cheat file.", true);
+                return;
+            }
+            if (kind == MOD && !lower.endsWith(".zip")) {
+                say(es ? "Elige un archivo de mod .zip." : "Choose a .zip mod file.", true);
+                return;
+            }
+            startImportFromPicker(uri, false, name);
+        } else if (request == PICK_TREE) {
+            startImportFromPicker(uri, true, displayName(uri, true));
+        }
+    }
+
+    private String displayName(Uri uri, boolean tree) {
+        Uri queryUri = uri;
+        if (tree) {
+            String id = DocumentsContract.getTreeDocumentId(uri);
+            queryUri = DocumentsContract.buildDocumentUriUsingTree(uri, id);
+        }
+        try (Cursor c = getContentResolver().query(queryUri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int at = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (at >= 0) {
+                    String name = c.getString(at);
+                    if (name != null && !name.trim().isEmpty()) return name.trim();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "import picker: display name query failed: " + e);
+        }
+        String fallback = tree ? DocumentsContract.getTreeDocumentId(uri) : uri.getLastPathSegment();
+        if (fallback == null || fallback.trim().isEmpty()) return tree ? "Selected folder" : "selected_file";
+        int slash = fallback.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < fallback.length()) fallback = fallback.substring(slash + 1);
+        int colon = fallback.lastIndexOf(':');
+        if (colon >= 0 && colon + 1 < fallback.length()) fallback = fallback.substring(colon + 1);
+        return fallback;
+    }
+
+    private long documentSize(Uri uri) {
+        try (Cursor c = getContentResolver().query(uri, new String[] {OpenableColumns.SIZE}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int at = c.getColumnIndex(OpenableColumns.SIZE);
+                if (at >= 0 && !c.isNull(at)) return Math.max(0, c.getLong(at));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "import picker: size query failed: " + e);
+        }
+        return 0;
+    }
+
+    private static String stageName(String name) {
+        String safe = name == null ? "" : name.replace('/', '_').replace('\\', '_').trim();
+        if (safe.isEmpty() || safe.equals(".") || safe.equals("..")) return "selected";
+        return safe;
+    }
+
+    private void startImportFromPicker(Uri uri, boolean tree, String selectedName) {
         busy = true;
         add.setEnabled(false);
-        say(es ? "Copiando…" : "Copying…", false);
+        copied = 0;
+        total = 0;
+        lastTick = 0;
+        say(es ? "Leyendo la selección…" : "Reading selection…", false);
+
         new Thread(() -> {
-            String done, error = null;
+            File staging = new File(getCacheDir(), "import-staging-" + System.nanoTime());
+            String done = null, error = null;
             try {
-                done = kind == CHEATS ? importCheats(from) : kind == MOD ? importMod(from) : importDlc(from);
+                if (!staging.mkdirs()) throw new IOException("cannot create temporary import folder");
+                File source;
+                if (tree) {
+                    String documentId = DocumentsContract.getTreeDocumentId(uri);
+                    source = new File(staging, stageName(selectedName));
+                    int[] entries = {0};
+                    copyDocumentFolder(uri, documentId, source, 0, entries);
+                } else {
+                    source = new File(staging, stageName(selectedName));
+                    total = documentSize(uri);
+                    try (InputStream in = getContentResolver().openInputStream(uri);
+                         OutputStream out = new FileOutputStream(source)) {
+                        if (in == null) throw new IOException("cannot open the selected document");
+                        copyStream(in, out);
+                        out.flush();
+                    }
+                    if (source.length() <= 0) throw new IOException("the selected file is empty");
+                }
+
+                copied = 0;
+                total = 0;
+                lastTick = 0;
+                done = kind == CHEATS ? importCheats(source) : kind == MOD ? importMod(source) : importDlc(source);
             } catch (Exception e) {
-                Log.e(TAG, "import: " + e);
-                done = null;
-                error = e.getMessage();
+                Log.e(TAG, "system-picker import: " + e);
+                error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            } finally {
+                delete(staging);
             }
+
             final String ok = done, why = error;
             runOnUiThread(() -> {
                 busy = false;
@@ -401,12 +423,60 @@ public class ImportActivity extends Activity {
                     changed();
                     say((es ? "Listo: " : "Done: ") + ok + (es ? ". Se aplica al reiniciar el juego." : ". It applies when the game restarts."), false);
                 } else {
-                    say((es ? "No se pudo: " : "It couldn't be done: ") + why, true);
+                    say((es ? "No se pudo: " : "Import failed: ") + (why != null ? why : "unknown error"), true);
                 }
                 refresh();
             });
         }).start();
     }
+
+    private void copyDocumentFolder(Uri treeUri, String documentId, File destination, int depth, int[] entries) throws IOException {
+        if (depth > 32) throw new IOException("selected folder is nested too deeply");
+        if (!destination.isDirectory() && !destination.mkdirs())
+            throw new IOException("cannot create staging folder " + destination.getName());
+
+        Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId);
+        String[] columns = {
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        };
+        try (Cursor c = getContentResolver().query(childrenUri, columns, null, null, null)) {
+            if (c == null) throw new IOException("the selected folder cannot be listed by this document provider");
+            int idColumn = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+            int nameColumn = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            int typeColumn = c.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE);
+            if (idColumn < 0 || nameColumn < 0 || typeColumn < 0)
+                throw new IOException("the document provider returned incomplete folder information");
+
+            while (c.moveToNext()) {
+                if (++entries[0] > 100000) throw new IOException("selected folder contains too many entries");
+                String childId = c.getString(idColumn);
+                String childName = stageName(c.getString(nameColumn));
+                String mime = c.getString(typeColumn);
+                File child = new File(destination, childName);
+                if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
+                    copyDocumentFolder(treeUri, childId, child, depth + 1, entries);
+                } else {
+                    Uri childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId);
+                    File parent = child.getParentFile();
+                    if (parent != null && !parent.isDirectory() && !parent.mkdirs())
+                        throw new IOException("cannot create folder " + parent.getName());
+                    try (InputStream in = getContentResolver().openInputStream(childUri);
+                         OutputStream out = new FileOutputStream(child)) {
+                        if (in == null) throw new IOException("cannot read " + childName);
+                        copyStream(in, out);
+                        out.flush();
+                    }
+                }
+            }
+        } catch (SecurityException e) {
+            throw new IOException("permission to read the selected folder was denied", e);
+        }
+    }
+
+    // ---- the copy (a background thread)
+    private long copied, total;
 
     private void progress() {
         long c = copied, t = total;
