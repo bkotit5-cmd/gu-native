@@ -3938,8 +3938,8 @@ static void progcache_open(void) {
     progsrc_f = sf;
     progcache_rf = fopen(PROGSRC_PATH, "rb");
     progcache_on = true;
-    pipecache_init(&hdr);  // (attaches the recorded pipelines to their programs before these are built)
-    plist_load();          // (and the shipped list's whose programs are in programs.bin)
+    plist_load();          // load the learned list, or the shipped list on the first run
+    pipecache_init(&hdr);  // attach device cache entries and merge them into the learned list
     plist_export_finish();
     // Programs a draw has used (each has recorded pipelines) are built now; the others (the prewarm's) stay dormant
     // until a draw wants one (prog_want)
@@ -4316,6 +4316,7 @@ static void pipecache_store(const Pipe *pp) {
     r.k.rp = VK_NULL_HANDLE;
     fwrite(&r, sizeof r, 1, pipecache_f);
     fflush(pipecache_f);
+    plist_export_add(pp->k.prog, &r);
 }
 
 // ---- shipped pipeline list: pipelines.list beside the executable, the pipelines recorded while playing the common
@@ -4392,12 +4393,26 @@ static void plist_load(void) {
     if (e && *e) {
         snprintf(path, sizeof path, "%s", e);
     } else {
-        char exe[1024];
-        if (!plat_exe_path(exe, sizeof exe)) return;
-        char *s = strrchr(exe, '/'), *bs = strrchr(exe, '\\');
-        if (bs > s) s = bs;
-        if (s) s[1] = 0; else exe[0] = 0;
-        snprintf(path, sizeof path, "%spipelines.list", exe);
+        FILE *learned = fopen("cache/pipelines.learned.list", "rb");
+        bool learned_ok = false;
+        if (learned) {
+            ListHeader h;
+            learned_ok = fread(&h, sizeof h, 1, learned) == 1 &&
+                !memcmp(h.magic, "MHGUPL1", 8) && h.key_size == sizeof(ShaderKey) &&
+                h.pipe_size == sizeof(PipeKey) && h.rec_size == sizeof(ListRec) &&
+                h.count > 0 && h.count <= 1000000;
+            fclose(learned);
+        }
+        if (learned_ok) {
+            snprintf(path, sizeof path, "%s", "cache/pipelines.learned.list");
+        } else {
+            char exe[1024];
+            if (!plat_exe_path(exe, sizeof exe)) return;
+            char *s = strrchr(exe, '/'), *bs = strrchr(exe, '\\');
+            if (bs > s) s = bs;
+            if (s) s[1] = 0; else exe[0] = 0;
+            snprintf(path, sizeof path, "%spipelines.list", exe);
+        }
     }
     FILE *f = fopen(path, "rb");
     if (!f) return;
@@ -4469,29 +4484,109 @@ static void plist_drain(void) {
     if (!plist_left) LOG("[vk] pipeline list: every program met\n");
 }
 
-// MHGU_PIPELIST_EXPORT: pipelines.bin's records (as pipecache_init reads them) and the shipped list's
+// A learned pipeline list persists every pipeline seen by this installation. The first run seeds it
+// with the shipped list; later runs load it and append newly built pipelines while the game is running.
 static FILE *plist_ex;
+static pthread_mutex_t plist_ex_lock = PTHREAD_MUTEX_INITIALIZER;
+static char plist_ex_path[1024];
 static uint64_t *plist_ex_seen;
 static int plist_ex_n, plist_ex_cap;
-static void plist_export_rec(const ListRec *r) {
-    uint64_t h = hash_words(0xcbf29ce484222325ull, r, sizeof *r);
-    for (int i = 0; i < plist_ex_n; i++)
-        if (plist_ex_seen[i] == h) return;
-    if (plist_ex_n == plist_ex_cap) plist_ex_seen = realloc(plist_ex_seen, sizeof *plist_ex_seen * (size_t)(plist_ex_cap = plist_ex_cap ? plist_ex_cap * 2 : 4096));
-    plist_ex_seen[plist_ex_n++] = h;
-    fwrite(r, sizeof *r, 1, plist_ex);
+static bool plist_ex_live;
+
+static bool plist_export_remember(uint64_t hash) {
+    for (int i = 0; i < plist_ex_n; i++) if (plist_ex_seen[i] == hash) return true;
+    if (plist_ex_n == plist_ex_cap) {
+        int cap = plist_ex_cap ? plist_ex_cap * 2 : 4096;
+        uint64_t *v = realloc(plist_ex_seen, sizeof *plist_ex_seen * (size_t)cap);
+        if (!v) return false;
+        plist_ex_seen = v, plist_ex_cap = cap;
+    }
+    plist_ex_seen[plist_ex_n++] = hash;
+    return true;
 }
-static void plist_export_add(const Prog *p, const PipeRec *pr) {
-    static int tried;
-    if (!tried) {
-        tried = 1;
-        const char *e = getenv("MHGU_PIPELIST_EXPORT");
-        if (e && *e && (plist_ex = fopen(e, "wb"))) {
+
+static void plist_export_header(void) {
+    if (!plist_ex) return;
+    long end = ftell(plist_ex);
+    if (end < 0 || fseek(plist_ex, 0, SEEK_SET)) return;
+    ListHeader h = {"MHGUPL1", sizeof(ShaderKey), sizeof(PipeKey), sizeof(ListRec), (uint32_t)plist_ex_n};
+    if (fwrite(&h, sizeof h, 1, plist_ex) != 1) return;
+    fseek(plist_ex, end, SEEK_SET);
+    fflush(plist_ex);
+}
+
+static void plist_export_open(void) {
+    if (plist_ex) return;
+    const char *env = getenv("MHGU_PIPELIST_EXPORT");
+    bool keep_existing = !env || !*env;
+    const char *path = keep_existing ? "cache/pipelines.learned.list" : env;
+    snprintf(plist_ex_path, sizeof plist_ex_path, "%s", path);
+
+    if (!keep_existing) {
+        plist_ex = fopen(path, "w+b");
+        if (plist_ex) {
             ListHeader h = {"MHGUPL1", sizeof(ShaderKey), sizeof(PipeKey), sizeof(ListRec), 0};
             fwrite(&h, sizeof h, 1, plist_ex);
+            fflush(plist_ex);
         }
+        return;
     }
-    if (!plist_ex || !p) return;
+
+    plist_ex = fopen(path, "r+b");
+    bool valid = false;
+    if (plist_ex) {
+        ListHeader h;
+        valid = fread(&h, sizeof h, 1, plist_ex) == 1 && !memcmp(h.magic, "MHGUPL1", 8) &&
+                h.key_size == sizeof(ShaderKey) && h.pipe_size == sizeof(PipeKey) &&
+                h.rec_size == sizeof(ListRec) && h.count <= 1000000;
+        if (valid) {
+            for (uint32_t i = 0; i < h.count; i++) {
+                ListRec r;
+                if (fread(&r, sizeof r, 1, plist_ex) != 1 || r.magic != LISTREC_MAGIC || r.k.ncolor > 8 ||
+                    !plist_export_remember(hash_words(0xcbf29ce484222325ull, &r, sizeof r))) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid && fgetc(plist_ex) != EOF) valid = false;
+        }
+        if (!valid) fclose(plist_ex), plist_ex = NULL;
+    }
+    if (!plist_ex) {
+        free(plist_ex_seen), plist_ex_seen = NULL;
+        plist_ex_n = plist_ex_cap = 0;
+        plist_ex = fopen(path, "w+b");
+        if (!plist_ex) {
+            LOG("[vk] could not open learned pipeline list %s\n", path);
+            return;
+        }
+        ListHeader h = {"MHGUPL1", sizeof(ShaderKey), sizeof(PipeKey), sizeof(ListRec), 0};
+        fwrite(&h, sizeof h, 1, plist_ex);
+        fflush(plist_ex);
+    } else {
+        fseek(plist_ex, 0, SEEK_END);
+    }
+}
+
+static void plist_export_rec(const ListRec *r) {
+    if (!plist_ex || !r) return;
+    uint64_t hash = hash_words(0xcbf29ce484222325ull, r, sizeof *r);
+    int old_n = plist_ex_n;
+    if (!plist_export_remember(hash) || plist_ex_n == old_n) return;
+    if (fwrite(r, sizeof *r, 1, plist_ex) != 1) {
+        plist_ex_n--;
+        return;
+    }
+    if (plist_ex_live) plist_export_header();
+}
+
+static void plist_export_add(const Prog *p, const PipeRec *pr) {
+    pthread_mutex_lock(&plist_ex_lock);
+    plist_export_open();
+    if (!plist_ex || !p || !pr) {
+        pthread_mutex_unlock(&plist_ex_lock);
+        return;
+    }
     ListRec r;
     memset(&r, 0, sizeof r);
     r.magic = LISTREC_MAGIC;
@@ -4504,18 +4599,23 @@ static void plist_export_add(const Prog *p, const PipeRec *pr) {
     r.k.prog = NULL;
     r.k.rp = VK_NULL_HANDLE;
     plist_export_rec(&r);
+    pthread_mutex_unlock(&plist_ex_lock);
 }
+
 static void plist_export_finish(void) {
-    plist_export_add(NULL, NULL);  // (opens the file when pipelines.bin had nothing)
-    if (!plist_ex) return;
+    pthread_mutex_lock(&plist_ex_lock);
+    plist_export_open();
+    if (!plist_ex) {
+        pthread_mutex_unlock(&plist_ex_lock);
+        return;
+    }
     for (int i = 0; i < plist_n; i++)
         if (plist[i].magic == LISTREC_MAGIC) plist_export_rec(&plist[i]);
-    ListHeader h = {"MHGUPL1", sizeof(ShaderKey), sizeof(PipeKey), sizeof(ListRec), (uint32_t)plist_ex_n};
-    fseek(plist_ex, 0, SEEK_SET);
-    fwrite(&h, sizeof h, 1, plist_ex);
-    fclose(plist_ex);
-    plist_ex = NULL;
-    LOG("[vk] pipeline list exported: %s (%d pipelines)\n", getenv("MHGU_PIPELIST_EXPORT"), plist_ex_n);
+    plist_ex_live = true;
+    plist_export_header();
+    LOG("[vk] learned pipeline list: %s (%d pipelines; new builds are appended during play)\n",
+        plist_ex_path, plist_ex_n);
+    pthread_mutex_unlock(&plist_ex_lock);
 }
 
 #ifdef __ANDROID__
