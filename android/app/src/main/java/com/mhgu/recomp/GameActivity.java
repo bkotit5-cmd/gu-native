@@ -389,6 +389,12 @@ public class GameActivity extends SDLActivity {
         if (activity != null) activity.startActivity(new Intent(activity, SaveExportActivity.class));
     }
 
+    /** Settings -> System -> App version & updates. */
+    public static void showAppUpdate() {
+        SDLActivity activity = mSingleton;
+        if (activity != null) activity.startActivity(new Intent(activity, AppUpdateActivity.class));
+    }
+
     /** Ajustes -> Compartir registro. */
     public static void showShareLog() {
         SDLActivity activity = mSingleton;
