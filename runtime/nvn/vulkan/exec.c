@@ -7846,30 +7846,41 @@ static char *user_shader_params_prepare(const char *source, size_t source_size, 
     size_t insert = 0, pos = 0;
     bool block_comment = false;
     while (pos < source_size) {
-        const char *nl = memchr(source + pos, '\n', source_size - pos);
-        size_t line_len = nl ? (size_t)(nl - (source + pos)) : source_size - pos;
-        if (line_len >= 512) break;
-        char line[512];
-        memcpy(line, source + pos, line_len);
-        line[line_len] = 0;
-        char *q = line;
-        while (*q && isspace((unsigned char)*q)) q++;
+        const char *line = source + pos;
+        const char *nl = memchr(line, '\n', source_size - pos);
+        size_t line_len = nl ? (size_t)(nl - line) : source_size - pos;
+        size_t q = 0;
+        while (q < line_len && isspace((unsigned char)line[q])) q++;
+
         if (block_comment) {
-            if (strstr(q, "*/")) block_comment = false;
+            bool closed = false;
+            for (size_t i = q; i + 1 < line_len; i++)
+                if (line[i] == '*' && line[i + 1] == '/') { closed = true; break; }
+            block_comment = !closed;
             pos += line_len + (nl != NULL);
             insert = pos;
             continue;
         }
-        bool directive_before_declarations = *q == '#' &&
-            (!strncmp(q, "#version", 8) || !strncmp(q, "#extension", 10) ||
-             !strncmp(q, "#pragma", 7) || !strncmp(q, "#line", 5));
-        if (!*q || !strncmp(q, "//", 2) || directive_before_declarations) {
+        if (q == line_len || (q + 1 < line_len && line[q] == '/' && line[q + 1] == '/')) {
             pos += line_len + (nl != NULL);
             insert = pos;
             continue;
         }
-        if (!strncmp(q, "/*", 2)) {
-            if (!strstr(q + 2, "*/")) block_comment = true;
+        if (q + 1 < line_len && line[q] == '/' && line[q + 1] == '*') {
+            bool closed = false;
+            for (size_t i = q + 2; i + 1 < line_len; i++)
+                if (line[i] == '*' && line[i + 1] == '/') { closed = true; break; }
+            block_comment = !closed;
+            pos += line_len + (nl != NULL);
+            insert = pos;
+            continue;
+        }
+        bool directive_before_declarations = line[q] == '#' &&
+            ((line_len - q >= 8 && !memcmp(line + q, "#version", 8)) ||
+             (line_len - q >= 10 && !memcmp(line + q, "#extension", 10)) ||
+             (line_len - q >= 7 && !memcmp(line + q, "#pragma", 7)) ||
+             (line_len - q >= 5 && !memcmp(line + q, "#line", 5)));
+        if (directive_before_declarations) {
             pos += line_len + (nl != NULL);
             insert = pos;
             continue;
