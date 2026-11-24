@@ -77,7 +77,8 @@ typedef struct {
     int kind;
     const uint8_t *blocks;
     uint8_t *pad;
-    uint32_t bw, bh, bb, pitch, tb;
+    uint32_t bw, bh, bb, pitch, tb, width, height;
+    float *fout;
     atomic_uint next;
 } BcnJob;
 
@@ -87,9 +88,25 @@ static void bcn_rows(BcnJob *j) {
         if (by >= j->bh) return;
         uint32_t end = by + BCN_ROWS < j->bh ? by + BCN_ROWS : j->bh;
         for (; by < end; by++)
-            for (uint32_t bx = 0; bx < j->bw; bx++)
-                block(j->kind, j->blocks + ((size_t)by * j->bw + bx) * j->bb,
-                      j->pad + (size_t)by * 4 * j->pitch + (size_t)bx * 4 * j->tb, (int)j->pitch, j->tb);
+            for (uint32_t bx = 0; bx < j->bw; bx++) {
+                const uint8_t *src = j->blocks + ((size_t)by * j->bw + bx) * j->bb;
+                if (j->fout) {
+                    uint8_t rgba[64];
+                    block(j->kind, src, rgba, 16, 4);
+                    for (uint32_t y = 0; y < 4 && by * 4 + y < j->height; y++)
+                        for (uint32_t x = 0; x < 4 && bx * 4 + x < j->width; x++) {
+                            const uint8_t *p = rgba + (y * 4 + x) * 4;
+                            float *d = j->fout + ((size_t)(by * 4 + y) * j->width + bx * 4 + x) * 4;
+                            d[0] = p[0] * (1.0f / 255.0f);
+                            d[1] = p[1] * (1.0f / 255.0f);
+                            d[2] = p[2] * (1.0f / 255.0f);
+                            d[3] = p[3] * (1.0f / 255.0f);
+                        }
+                } else {
+                    block(j->kind, src, j->pad + (size_t)by * 4 * j->pitch + (size_t)bx * 4 * j->tb,
+                          (int)j->pitch, j->tb);
+                }
+            }
     }
 }
 
@@ -180,4 +197,14 @@ void bcn_decode(int kind, const uint8_t *blocks, uint32_t width, uint32_t height
     }
     for (uint32_t y = 0; y < height; y++) memcpy(out + (size_t)y * width * tb, pad + (size_t)y * pitch, (size_t)width * tb);
     free(pad);
+}
+
+
+void bcn_decode_float_rgba(int kind, const uint8_t *blocks, uint32_t width, uint32_t height, float *out) {
+    if (kind < BCN_BC1 || kind > BCN_BC3 || !blocks || !out || !width || !height) return;
+    uint32_t bw = (width + 3) / 4, bh = (height + 3) / 4;
+    BcnJob job = {.kind = kind, .blocks = blocks, .pad = NULL, .bw = bw, .bh = bh,
+                  .bb = bcn_block_bytes(kind), .pitch = 0, .tb = 4, .width = width, .height = height, .fout = out};
+    atomic_init(&job.next, 0);
+    bcn_rows(&job);
 }

@@ -40,6 +40,7 @@ typedef struct {
     bool mirror_clamp;         // the mirror-clamp sampler mode can be used
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
+    bool texture_etc2;
     volatile uint32_t msaa;    // samples for the 3D scene's passes (settings MSAA, as far as the GPU allows): 1 = off
     uint32_t msaa_counts;      // the sample counts MSAA can use (bits 2, 4, 8)
     bool fsr_fp16, fsr_storage_wo_format;  // FSR (fsr.c): shaderFloat16 / shaderStorageImageWriteWithoutFormat enabled
@@ -137,6 +138,8 @@ typedef struct TexBackend {
     bool astc_srgb;
     uint8_t bcn;               // BCn without GPU support (phones): decoded on upload (runtime/nvn/bcn.c), BCN_* kind
     uint8_t bcn_tb;            // the bytes of its decoded texels
+    uint8_t bcn_etc2;
+    bool bcn_etc2_srgb;
     uint8_t mip_skip;          // top levels not kept (low_memory_textures): width, height and levels stay the game's
     struct TexBackend *ms;  // MSAA: the multisampled image this one is rendered through (textures.c vk_tex_ms)
     bool ms_valid;          // ms holds this image's contents (its last write was a pass through ms)

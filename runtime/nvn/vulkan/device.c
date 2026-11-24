@@ -888,7 +888,9 @@ static void create_device(void) {
     b->fillModeNonSolid = h->fillModeNonSolid;
     b->samplerAnisotropy = h->samplerAnisotropy;
     b->textureCompressionBC = h->textureCompressionBC;
+    b->textureCompressionETC2 = h->textureCompressionETC2;
     b->textureCompressionASTC_LDR = h->textureCompressionASTC_LDR;
+    g_vk.texture_etc2 = h->textureCompressionETC2;
     b->shaderInt64 = !maxwell_no_int64;
     b->depthBiasClamp = h->depthBiasClamp;
     b->depthClamp = h->depthClamp;
@@ -950,8 +952,8 @@ static void create_device(void) {
     }
 #endif
     vkGetDeviceQueue(g_vk.dev, g_vk.qfam, 0, &g_vk.queue);
-    LOG("[vk] features: divisor %d, custom border %d, BC %d, ASTC %d, exclusive full screen off %d\n", g_vk.divisor,
-        g_vk.custom_border, h->textureCompressionBC, h->textureCompressionASTC_LDR, no_exclusive);
+    LOG("[vk] features: divisor %d, custom border %d, BC %d, ETC2 %d, ASTC %d, exclusive full screen off %d\n", g_vk.divisor,
+        g_vk.custom_border, h->textureCompressionBC, h->textureCompressionETC2, h->textureCompressionASTC_LDR, no_exclusive);
     {   // (a player's log tells what the GPU allows: no PowerVR here to read it from, #100)
         const VkPhysicalDeviceLimits *l = &g_vk.props.limits;
         LOG("[vk] limits: vertex streams %u, inputs %u; a stage: uniform buffers %u, storage buffers %u, textures %u, samplers %u, "

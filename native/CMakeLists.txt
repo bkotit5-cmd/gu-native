@@ -51,8 +51,12 @@ set(FSR_CXX ${FSR}/src/ffx_vk_fsr3_portable.cpp ${FSR}/src/ffx_fsr3_shaderblobs.
             ${FFX}/src/shared/ffx_breadcrumbs_list.cpp ${FFX}/src/components/fsr3upscaler/ffx_fsr3upscaler.cpp
             ${FFX}/src/backends/vk/ffx_vk.cpp ${FFX}/src/backends/shared/ffx_shader_blobs.cpp)
 
+set(ETC2_DIR ${S}/third_party/etc2comp/EtcLib)
+file(GLOB ETC2_SRC ${ETC2_DIR}/Etc/*.cpp ${ETC2_DIR}/EtcCodec/*.cpp)
+set_source_files_properties(${ETC2_SRC} ${S}/runtime/nvn/etc2_transcode.cpp PROPERTIES COMPILE_OPTIONS "-O2;-w;-std=c++17")
 set(RT_ALL ${RT_SRC} ${S}/runtime/overlay.cpp ${S}/runtime/settings_panel.cpp ${S}/runtime/touch.cpp
-           ${S}/runtime/perfstats.cpp ${S}/runtime/hunt_overlay.cpp ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp ${FSR_C} ${FSR_CXX})
+           ${S}/runtime/perfstats.cpp ${S}/runtime/hunt_overlay.cpp ${IMGUI_SRC} ${S}/runtime/nvn/vulkan/vma.cpp
+           ${S}/runtime/nvn/etc2_transcode.cpp ${ETC2_SRC} ${FSR_C} ${FSR_CXX})
 # The port's chat (runtime/chat, the same files as the MH4U port's app_native/chat; runtime/chat_port.cpp is MHGU's side of
 # it): its keys and signatures with libsecp256k1 (third_party/secp256k1, MIT), its relays through the system's TLS
 set(CHAT_DIR ${S}/runtime/chat)
@@ -92,8 +96,8 @@ if(WIN32)
   # (XeSS-SR: the SDK's headers, MIT; libxess.dll is loaded at run time, nothing to link: runtime/nvn/vulkan/xess.c)
   list(APPEND LIB_INC ${S}/third_party/xess/inc)
 endif()
-target_include_directories(main PRIVATE ${S}/runtime ${S}/third_party/vk_mem_alloc ${IMGUI} ${IMGUI}/imgui
-                           ${FSR}/include ${S}/third_party/ffx-api ${LIB_INC})
+target_include_directories(main PRIVATE ${S}/runtime ${S}/runtime/nvn ${S}/third_party/vk_mem_alloc ${IMGUI} ${IMGUI}/imgui
+                           ${FSR}/include ${S}/third_party/ffx-api ${ETC2_DIR}/Etc ${ETC2_DIR}/EtcCodec ${LIB_INC})
 
 # Crossplay with the yuzu family's rooms (runtime/net/xroom.c): ENet 1.3.18 (MIT), the rooms' transport, and the decoder of
 # zstd 1.5.6 (BSD), for the game packets those rooms carry in zstd frames. Unmodified upstream files (THIRD_PARTY_NOTICES),

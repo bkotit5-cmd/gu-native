@@ -9,3 +9,4 @@ uint32_t bcn_texel_bytes(int kind);  // of the output: 4 (RGBA8 / RGBA8 SNORM), 
 // Blocks in rows (ceil(width/4) per row) -> width x height texels of tb bytes each, tightly packed: bcn_texel_bytes,
 // or for BC4 and BC5 as well 1 (R8) and 2 (RG8), a quarter and a half of the memory, sampled the same
 void bcn_decode(int kind, const uint8_t *blocks, uint32_t width, uint32_t height, uint8_t *out, uint32_t tb);
+void bcn_decode_float_rgba(int kind, const uint8_t *blocks, uint32_t width, uint32_t height, float *out);

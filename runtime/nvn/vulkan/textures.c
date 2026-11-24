@@ -15,6 +15,7 @@
 #include <SDL3/SDL_cpuinfo.h>  // (no sysconf)
 #endif
 #include "../bcn.h"
+#include "../etc2_transcode.h"
 
 // ================================================================== formats
 typedef struct { VkFormat vf; uint8_t expand_rgb, alpha_one; } VkFmt;
@@ -384,6 +385,10 @@ static VkFormat srgb_twin(VkFormat f) {
     case VK_FORMAT_R8G8B8A8_SRGB: return VK_FORMAT_R8G8B8A8_UNORM;
     case VK_FORMAT_B8G8R8A8_UNORM: return VK_FORMAT_B8G8R8A8_SRGB;
     case VK_FORMAT_B8G8R8A8_SRGB: return VK_FORMAT_B8G8R8A8_UNORM;
+    case VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK: return VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK;
+    case VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK: return VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK;
+    case VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK: return VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK;
+    case VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK: return VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
     default: return VK_FORMAT_UNDEFINED;
     }
 }
@@ -440,7 +445,8 @@ static void stand_in(NvnTexture *t, TexBackend *b, const char *why) {
     if (nlog++ < 20)
         LOG("[vk] texture nvn fmt %#x %ux%ux%u target %u, %u levels: %s, an empty 1x1 image stands in\n", t->format, t->width,
             t->height, t->depth, t->target, t->levels, why);
-    b->bcn = BCN_NONE, b->astc_bw = b->astc_bh = 0, b->mip_skip = 0, b->wide = false;
+    b->bcn = BCN_NONE, b->bcn_etc2 = 0, b->bcn_etc2_srgb = false;
+    b->astc_bw = b->astc_bh = 0, b->mip_skip = 0, b->wide = false;
     VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {1, 1, 1}, .mipLevels = 1, .arrayLayers = 1,
                             .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
@@ -505,7 +511,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkFormat vf = mf.vf;
     VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     b->astc_bw = b->astc_bh = 0;
-    b->bcn = BCN_NONE;
+    b->bcn = BCN_NONE, b->bcn_etc2 = 0, b->bcn_etc2_srgb = false;
     b->mip_skip = 0;
     bool depthfmt = renderer_format_is_depth(t->format);
     if (depthfmt) vf = depth_format(t->format, vf);  // (a depth format stays one: below, only what it can do is asked)
@@ -523,29 +529,48 @@ static void create_image(NvnTexture *t, TexBackend *b) {
                 : vf == VK_FORMAT_BC6H_SFLOAT_BLOCK                                           ? BCN_BC6HS
                 : vf == VK_FORMAT_BC6H_UFLOAT_BLOCK                                           ? BCN_BC6HU
                                                                                               : BCN_NONE;
-        if (bcn && fi && fi->bw == 4 && fi->bh == 4) {  // decoded on the CPU (bcn.c) into a plain format
+        if (bcn && fi && fi->bw == 4 && fi->bh == 4) {
             bool srgb = vf == VK_FORMAT_BC1_RGBA_SRGB_BLOCK || vf == VK_FORMAT_BC2_SRGB_BLOCK ||
                         vf == VK_FORMAT_BC3_SRGB_BLOCK || vf == VK_FORMAT_BC7_SRGB_BLOCK;
-            b->bcn = (uint8_t)bcn;
-            vf = bcn == BCN_BC6HS || bcn == BCN_BC6HU ? VK_FORMAT_R16G16B16A16_SFLOAT
-               : bcn == BCN_BC4S || bcn == BCN_BC5S   ? VK_FORMAT_R8G8B8A8_SNORM
-               : srgb                                 ? VK_FORMAT_R8G8B8A8_SRGB
-                                                      : VK_FORMAT_R8G8B8A8_UNORM;
-            b->bcn_tb = (uint8_t)bcn_texel_bytes(bcn);
-            // one and two channels in their own size (sampled the same: the missing ones read 0, alpha 1)
-            VkFormat narrow = bcn == BCN_BC4U ? VK_FORMAT_R8_UNORM : bcn == BCN_BC4S ? VK_FORMAT_R8_SNORM
-                            : bcn == BCN_BC5U ? VK_FORMAT_R8G8_UNORM : bcn == BCN_BC5S ? VK_FORMAT_R8G8_SNORM : VK_FORMAT_UNDEFINED;
-            if (narrow != VK_FORMAT_UNDEFINED && format_supports(narrow, need)) {
-                vf = narrow;
-                b->bcn_tb = bcn == BCN_BC4U || bcn == BCN_BC4S ? 1 : 2;
+            bool transcode = false;
+            if (g_vk.texture_etc2 && bcn >= BCN_BC1 && bcn <= BCN_BC3 && type == VK_IMAGE_TYPE_2D &&
+                depth == 1 && samples == 1 && tw == t->width && th == t->height) {
+                VkFormat etc2 = bcn == BCN_BC1
+                    ? (srgb ? VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK : VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK)
+                    : (srgb ? VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK : VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK);
+                if (format_supports(etc2, need)) {
+                    b->bcn = (uint8_t)bcn;
+                    b->bcn_etc2 = bcn == BCN_BC1 ? 1 : 2;
+                    b->bcn_etc2_srgb = srgb;
+                    b->bcn_tb = 0;
+                    vf = etc2;
+                    transcode = true;
+                    static int nlog;
+                    if (nlog++ < 8)
+                        LOG("[vk] BC format %d: transcode to GPU ETC2 (%s)\n", mf.vf, bcn == BCN_BC1 ? "RGBA1" : "RGBA8");
+                }
             }
-            if (levels >= 4 && layers == 1 && depth == 1 && samples == 1 && type == VK_IMAGE_TYPE_2D && t->target != 8 &&
-                t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 && (low_memory_textures() || g_config.low_end))
-                b->mip_skip = (g_config.low_end || very_low_memory_textures()) && levels >= 5 && (tw >= 512 || th >= 512) ? 2
-                            : g_config.low_end >= LOW_END_TOASTER && levels >= 5 ? 2  // (Toaster, Brick: the 256s too)
-                                                                                 : 1;
-            static int nlog;
-            if (nlog++ < 4) LOG("[vk] BC format %d not supported by the GPU: decoded on the CPU\n", mf.vf);
+            if (!transcode) {
+                b->bcn = (uint8_t)bcn;
+                vf = bcn == BCN_BC6HS || bcn == BCN_BC6HU ? VK_FORMAT_R16G16B16A16_SFLOAT
+                   : bcn == BCN_BC4S || bcn == BCN_BC5S   ? VK_FORMAT_R8G8B8A8_SNORM
+                   : srgb                                 ? VK_FORMAT_R8G8B8A8_SRGB
+                                                          : VK_FORMAT_R8G8B8A8_UNORM;
+                b->bcn_tb = (uint8_t)bcn_texel_bytes(bcn);
+                VkFormat narrow = bcn == BCN_BC4U ? VK_FORMAT_R8_UNORM : bcn == BCN_BC4S ? VK_FORMAT_R8_SNORM
+                                : bcn == BCN_BC5U ? VK_FORMAT_R8G8_UNORM : bcn == BCN_BC5S ? VK_FORMAT_R8G8_SNORM : VK_FORMAT_UNDEFINED;
+                if (narrow != VK_FORMAT_UNDEFINED && format_supports(narrow, need)) {
+                    vf = narrow;
+                    b->bcn_tb = bcn == BCN_BC4U || bcn == BCN_BC4S ? 1 : 2;
+                }
+                if (levels >= 4 && layers == 1 && depth == 1 && samples == 1 && type == VK_IMAGE_TYPE_2D && t->target != 8 &&
+                    t->target != 9 && (tw >= 256 || th >= 256) && tw >= 4 && th >= 4 &&
+                    (low_memory_textures() || g_config.low_end))
+                    b->mip_skip = (g_config.low_end || very_low_memory_textures()) && levels >= 5 && (tw >= 512 || th >= 512) ? 2
+                                : g_config.low_end >= LOW_END_TOASTER && levels >= 5 ? 2 : 1;
+                static int nlog;
+                if (nlog++ < 4) LOG("[vk] BC format %d not supported: CPU decode fallback\n", mf.vf);
+            }
         } else if (astc && fi && fi->bpb == 16) {  // decoded on the CPU into an RGBA8 image of the same colour space
             b->astc_bw = fi->bw;
             b->astc_bh = fi->bh;
@@ -584,7 +609,14 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkResult r = vk_create_image(&ci, &b->image, &b->mem);
     if (r != VK_SUCCESS) {
         LOG("[vk] image creation failed (%d): nvn fmt %#x %ux%ux%u target %u\n", r, t->format, t->width, t->height, t->depth, t->target);
-        ci.format = vf = VK_FORMAT_R8G8B8A8_UNORM;
+        if (b->bcn_etc2) {
+            vf = b->bcn_etc2_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+            b->bcn_etc2 = 0, b->bcn_etc2_srgb = false, b->bcn_tb = 4;
+            LOG("[vk] ETC2 image creation failed: using CPU RGBA8 decode for this texture\n");
+        } else {
+            vf = VK_FORMAT_R8G8B8A8_UNORM;
+        }
+        ci.format = vf;
         ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         ci.flags &= ~VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
@@ -597,7 +629,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         depthfmt = false;
     }
     b->format = vf;
-    if (b->bcn != BCN_NONE) {
+    if (b->bcn != BCN_NONE && !b->bcn_etc2) {
         VmaAllocationInfo info;
         vmaGetAllocationInfo(g_vk.vma, b->mem, &info);
         atomic_fetch_add_explicit(&bcn_bytes, (int64_t)info.size, memory_order_relaxed);
@@ -631,7 +663,7 @@ static void destroy_image(TexBackend *b) {
     if (b->ms) { destroy_image(b->ms); free(b->ms); b->ms = NULL; }
     b->ms_valid = b->ms_dirty = false;
     views_forget(b);
-    if (b->image || b->mem) defer((Dead){.img = b->image, .mem = b->mem, .bcn = b->bcn != BCN_NONE});
+    if (b->image || b->mem) defer((Dead){.img = b->image, .mem = b->mem, .bcn = b->bcn != BCN_NONE && !b->bcn_etc2});
     b->image = VK_NULL_HANDLE;
     b->mem = VK_NULL_HANDLE;
 }
@@ -817,7 +849,7 @@ static void upload_pending(TexBackend *b) {
 // hashed right before it is copied: a write the game makes meanwhile can only make the next check see a change (one
 // upload too many), never leave a hash of data that was not copied.
 #define BAND (1u << 20)
-enum { CV_NONE, CV_RGB8, CV_BCN, CV_ASTC };  // what a band's rows become: themselves, RGBA8 from RGB8, decoded texels
+enum { CV_NONE, CV_RGB8, CV_BCN, CV_ASTC, CV_BCN_ETC2 };  // what a band's rows become: themselves, RGBA8 from RGB8, decoded texels
 typedef struct UpRec {  // a first upload's band hashes (filled by its jobs), made its texture's at the submission
     TexBackend *b;
     struct UpRec *next;
@@ -828,7 +860,7 @@ typedef struct {
     UpRec *rec;          // the band's hash goes to rec->h[band] (NULL: copied only)
     const uint8_t *src;  // guest memory: rows of blocks, block-linear (stride 0) or linear (stride bytes apart)
     uint8_t *dst;        // staging memory (NULL: hashed only)
-    uint64_t len;        // the guest bytes hashed
+    uint64_t len, out_bytes; // guest bytes hashed; compressed ETC2 output size
     uint32_t band, wb, hb, d, bpb, bh, bd, stride, w, h;  // (w, h: a decoded level's texels)
     uint8_t conv, bcn, tb, abw, abh, srgb;
 } UpJob;
@@ -864,6 +896,11 @@ static void run_job(const UpJob *j) {
         for (uint64_t i = 0; i < n; i++) { o[i * 4] = lin[i * 3]; o[i * 4 + 1] = lin[i * 3 + 1]; o[i * 4 + 2] = lin[i * 3 + 2]; o[i * 4 + 3] = 255; }
     } else if (j->conv == CV_BCN) {
         bcn_decode(j->bcn, lin, j->w, j->h, j->dst, j->tb);
+    } else if (j->conv == CV_BCN_ETC2) {
+        if (!nvn_transcode_bcn_etc2(j->bcn, lin, j->w, j->h, j->srgb != 0, j->dst, (size_t)j->out_bytes)) {
+            static int nlog;
+            if (nlog++ < 8) LOG("[tex] BC -> ETC2 encoder failed for %ux%u; zero ETC2 blocks used\n", j->w, j->h);
+        }
     } else if (j->conv == CV_ASTC) {
         astc_decode_ldr(lin, j->w, j->h, j->abw, j->abh, j->srgb, j->dst);
     }
@@ -1068,19 +1105,32 @@ static uint64_t plan(NvnTexture *t, TexBackend *b, const uint8_t *mem, int mode,
             VkSpan s = {0};
             uint64_t out_row = 0;
             VkBufferImageCopy rg = {0};
-            if (b->bcn || b->astc_bw) {  // blocks -> rows of blocks -> texels (bcn.c, astc.c): the level in one band
-                j.conv = b->bcn ? CV_BCN : CV_ASTC;
+            if (b->bcn || b->astc_bw) {  // compressed blocks -> ETC2/native CPU decode, or ASTC CPU decode
+                bool to_etc2 = b->bcn_etc2 != 0;
+                j.conv = to_etc2 ? CV_BCN_ETC2 : b->bcn ? CV_BCN : CV_ASTC;
                 j.bpb = b->bcn ? bcn_block_bytes(b->bcn) : 16, j.d = 1;
-                j.bcn = b->bcn, j.tb = b->bcn_tb, j.abw = b->astc_bw, j.abh = b->astc_bh, j.srgb = b->astc_srgb;
-                if (cb) {
-                    s = vk_transient((uint64_t)l.w * l.h * (b->bcn ? b->bcn_tb : 4), 64);
-                    rg = (VkBufferImageCopy){.bufferOffset = s.off, .bufferRowLength = l.w, .bufferImageHeight = l.h,
-                                             .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, b->bcn ? lv - b->mip_skip : lv, layer, 1},
-                                             .imageExtent = {l.w < level_w(b, lv) ? l.w : level_w(b, lv),
-                                                             l.h < level_h(b, lv) ? l.h : level_h(b, lv), 1}};
+                j.bcn = b->bcn, j.tb = b->bcn_tb, j.abw = b->astc_bw, j.abh = b->astc_bh;
+                j.srgb = to_etc2 ? b->bcn_etc2_srgb : b->astc_srgb;
+                if (to_etc2) {
+                    uint64_t blocks = ((uint64_t)l.w + 3) / 4 * (((uint64_t)l.h + 3) / 4);
+                    j.out_bytes = blocks * (b->bcn_etc2 == 1 ? 8u : 16u);
                 }
-            } else {
-                bool expand = mf.expand_rgb && fi->bpb == 3;  // RGB8 -> RGBA8
+                if (cb) {
+                    if (to_etc2) {
+                        s = vk_transient(j.out_bytes, 64);
+                        rg = (VkBufferImageCopy){.bufferOffset = s.off,
+                                                 .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, layer, 1},
+                                                 .imageExtent = {l.w < level_w(b, lv) ? l.w : level_w(b, lv),
+                                                                 l.h < level_h(b, lv) ? l.h : level_h(b, lv), 1}};
+                    } else {
+                        s = vk_transient((uint64_t)l.w * l.h * (b->bcn ? b->bcn_tb : 4), 64);
+                        rg = (VkBufferImageCopy){.bufferOffset = s.off, .bufferRowLength = l.w, .bufferImageHeight = l.h,
+                                                 .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, b->bcn ? lv - b->mip_skip : lv, layer, 1},
+                                                 .imageExtent = {l.w < level_w(b, lv) ? l.w : level_w(b, lv),
+                                                                 l.h < level_h(b, lv) ? l.h : level_h(b, lv), 1}};
+                    }
+                }
+            }                bool expand = mf.expand_rgb && fi->bpb == 3;  // RGB8 -> RGBA8
                 j.conv = expand ? CV_RGB8 : CV_NONE;
                 out_row = (uint64_t)l.wb * (expand ? 4 : fi->bpb);
                 if (linear) step = stride ? (BAND / stride ? BAND / stride : 1) : l.hb;
@@ -1106,7 +1156,7 @@ static uint64_t plan(NvnTexture *t, TexBackend *b, const uint8_t *mem, int mode,
                 j.rec = rec, j.band = nb;
                 j.dst = s.ptr ? (uint8_t *)s.ptr + y0 * out_row : NULL;
                 if (!j.rec && !j.dst) continue;
-                if (async && j.len >= UP_BAND_MIN) {
+                if (async && (b->bcn_etc2 || j.len >= UP_BAND_MIN)) {
                     up_push(&j);
                     uintptr_t a = (uintptr_t)j.src;
                     if (!qhi || a < qlo) qlo = a;
@@ -1115,8 +1165,9 @@ static uint64_t plan(NvnTexture *t, TexBackend *b, const uint8_t *mem, int mode,
             }
             if (s.ptr) {
                 vkCmdCopyBufferToImage(cb, s.buf, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
-                vk_lost_upload(true, (uint64_t)rg.imageExtent.width * rg.imageExtent.height * (b->bcn ? b->bcn_tb : 4),
-                               rg.imageExtent.width, rg.imageExtent.height, b->format);
+                uint64_t uploaded_bytes = b->bcn_etc2 ? j.out_bytes
+                    : (uint64_t)rg.imageExtent.width * rg.imageExtent.height * (b->bcn ? b->bcn_tb : 4);
+                vk_lost_upload(true, uploaded_bytes, rg.imageExtent.width, rg.imageExtent.height, b->format);
             }
         }
     }
@@ -1319,7 +1370,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     b->full_t = tex_t, b->hash_gen = b->wgen;
     if (!tex_sample_once || (!b->uploaded && !b->dynamic)) b->sample_hash = fnv_sample(mem, total), stat_tex_samples++;
     bool fmt_ok = b->format == fmt_of(t->format).vf || b->astc_bw || b->bcn;
-    bool async = fmt_ok && !b->bcn && !b->astc_bw && total >= UP_ASYNC && up_workers();
+    bool async = fmt_ok && (!b->bcn || b->bcn_etc2) && !b->astc_bw && total >= UP_ASYNC && up_workers();
     if (b->uploaded && tex_stream && fmt_ok && ch && b->chg_run >= TEX_STREAM_RUN) {  // (MHGU_PERF_TEXSTREAM) see above
         uint32_t n = (uint32_t)plan(t, b, mem, P_COUNT, NULL, false);
         UpRec *rec = malloc(sizeof *rec + (n ? n : 1) * sizeof *rec->h);
@@ -1440,7 +1491,7 @@ void vk_rt_widen(NvnTexture *t, bool on) {
     }
     vkCmdBlitImage(cb, old.image, VK_IMAGE_LAYOUT_GENERAL, b->image, VK_IMAGE_LAYOUT_GENERAL, n, r, VK_FILTER_NEAREST);
     vk_full_barrier(cb);
-    defer((Dead){.img = old.image, .mem = old.mem, .bcn = old.bcn != BCN_NONE});
+    defer((Dead){.img = old.image, .mem = old.mem, .bcn = old.bcn != BCN_NONE && !old.bcn_etc2});
     static int nlog;
     if (nlog++ < 40) LOG("[vk] render target %ux%u (%u levels) %s\n", b->width, b->height, b->levels, b->wide ? "wide" : "RGBA8");
 }
