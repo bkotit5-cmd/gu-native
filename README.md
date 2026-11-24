@@ -19,7 +19,7 @@ The settings interface is organized into seven main sections:
 | **Shader** | Installed GLSL shader selection and management, live parameters, depth input and shader import |
 | **Multiplayer** | Internet hubs, local network, emulator crossplay, chat and friends |
 | **Mods & Cheats** | Mod load order, conflicts, cheats, DLC/event content, Forge and texture-pack information |
-| **System** | App behaviour, game folder, save tools, game-file verification and game-code builder |
+| **System** | App behaviour, app version and updates, game folder, save tools, game-file verification and game-code builder |
 | **Credits & Licenses** | Project credits and third-party licenses |
 
 Some settings and implementation code remain in the runtime but are not separate top-level pages in the current menu. This guide describes the current menu and active integrations, not every internal configuration field.
@@ -183,3 +183,21 @@ For the upstream project and its history, see [khorne-hub/gu-native](https://git
 ## Legal
 
 You must supply your own copy of Monster Hunter Generations Ultimate and all game files required by the port. This repository does not distribute game code, ROMs, encryption keys or other copyrighted game assets. Monster Hunter, Capcom and Nintendo are trademarks of their respective owners. This project is not affiliated with or endorsed by Capcom or Nintendo.
+
+
+## Android app version and updates
+
+The repository-root `VERSION` file is the source of the app's visible version and Android `versionName`. `VERSION_CODE` is the Android package version code and must increase for every published update. The current source version is **1.0.1.2** (version code **17**).
+
+On Android, open **Settings → System → Your game → App version & updates** to see the installed version and check the latest stable release from this repository. When a newer release contains an APK, the updater downloads it, checks the package ID, version name/code, file size and the release SHA-256 digest when GitHub provides one, then compares the APK signing certificate with the installed app. Only a compatible APK is handed to Android's package installer. Android still asks the player to approve installation; the app does not install updates silently.
+
+The start-up notice also checks this repository's latest stable release at most once per day. It only announces a newer version and opens the release page; use the System updater to download and install the APK.
+
+### Publishing an Android update
+
+1. Set the new dotted version in `VERSION` and increase `VERSION_CODE`. The Android package version code must always be greater than the previously published one.
+2. Add these GitHub Actions repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+3. Make sure the keystore is the same one used to sign the already-installed APK when users should be able to update in place. Encode the existing `android/mhgu.keystore` file as Base64 for `ANDROID_KEYSTORE_BASE64`.
+4. Push a tag matching the version, for example `v1.0.1.2`. The `Release Android APK` workflow builds the signed arm64-v8a APK and attaches it to a GitHub Release. The updater reads the latest stable release and its APK asset.
+
+Android rejects an APK signed with a different key as an in-place update. The updater checks for this before opening the installer and explains the conflict; switching signing keys requires exporting the save, uninstalling the old app, installing the new build and importing the save. The release workflow intentionally fails when its signing secrets are missing rather than publishing an APK with a temporary signing key.
