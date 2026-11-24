@@ -79,7 +79,7 @@ void log_transcode(int kind, uint32_t width, uint32_t height, bool cache_hit,
     const unsigned int n = transcode_log_count.fetch_add(1, std::memory_order_relaxed);
     if (n >= 24) return;
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-    rt_logf("[tex] ETC2 BC%d %ux%u: %s in %.1f ms\\n", kind, width, height,
+    rt_logf("[tex] ETC2 BC%d %ux%u: %s in %.1f ms\n", kind, width, height,
             cache_hit ? "cache hit" : "encoded", ms);
 }
 
