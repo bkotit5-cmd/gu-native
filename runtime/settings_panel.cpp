@@ -18,6 +18,7 @@
 #include "modorder.h"
 #include "net/net.h"
 #include "platform.h"
+#include "rt.h"
 #include "textinput.h"
 #include "touch.h"
 #include "verify.h"
