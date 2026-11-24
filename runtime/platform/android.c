@@ -48,6 +48,7 @@
 
 #include "../platform.h"
 #include "../settings_panel.h"
+#include "../diag.h"
 
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
@@ -56,6 +57,7 @@
 JNIEXPORT void JNICALL Java_com_mhgu_recomp_ShaderImportActivity_nativeShaderFilesChanged(JNIEnv *env, jclass cls) {
     (void)env, (void)cls;
     settings_panel_shader_files_changed();
+    diag_log_detail("[shader][detail] Android shader import completed; refresh request sent to the game thread\n");
 }
 
 // ---- guest address space
