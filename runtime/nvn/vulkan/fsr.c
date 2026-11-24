@@ -50,6 +50,7 @@
 #include "../../camera_jitter.h"
 #include "../../kernel.h"
 #include "fsr.h"
+#include "vk.h"
 #include "fsr4.h"
 #include "shaders.h"
 #include "xess.h"
