@@ -33,7 +33,7 @@ jobs:
           $version = (Get-Content VERSION -Raw).Trim()
           $code = [int](Get-Content VERSION_CODE -Raw).Trim()
 
-          if ($version -notmatch '^\\d+(\\.\\d+)*$') {
+          if ($version -notmatch '^\d+(\.\d+)*$') {
             throw "VERSION must be a dotted numeric version."
           }
           if ($code -lt 1) {
@@ -76,11 +76,11 @@ jobs:
             throw "ANDROID_KEYSTORE_BASE64 decoded to an empty file."
           }
 
-          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\\mhgu.keystore'
+          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'
           [IO.File]::WriteAllBytes($keystorePath, $keystore)
 
           $properties = "storePassword=$env:ANDROID_KEYSTORE_PASSWORD`nkeyAlias=$env:ANDROID_KEY_ALIAS`nkeyPassword=$env:ANDROID_KEY_PASSWORD`n"
-          $propertiesPath = Join-Path $env:GITHUB_WORKSPACE 'android\\keystore.properties'
+          $propertiesPath = Join-Path $env:GITHUB_WORKSPACE 'android\keystore.properties'
           [IO.File]::WriteAllText($propertiesPath, $properties, [Text.Encoding]::ASCII)
 
       - name: Set up Java 17
@@ -96,7 +96,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\\mhgu.keystore'
+          $keystorePath = Join-Path $env:GITHUB_WORKSPACE 'android\mhgu.keystore'
           & keytool -list -keystore $keystorePath -storetype PKCS12 -storepass $env:ANDROID_KEYSTORE_PASSWORD -alias $env:ANDROID_KEY_ALIAS
           if ($LASTEXITCODE -ne 0) {
             throw "The configured fork signing key could not be opened."
@@ -115,7 +115,7 @@ jobs:
       - name: Install Android SDK packages at the path expected by Khorne build scripts
         shell: pwsh
         run: |
-          $sdk = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'
+          $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
           New-Item -ItemType Directory -Force -Path $sdk | Out-Null
 
           $toolsRoot = $env:ANDROID_SDK_ROOT
@@ -138,10 +138,10 @@ jobs:
           "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
 
           foreach ($required in @(
-            (Join-Path $sdk 'platforms\\android-35'),
-            (Join-Path $sdk 'ndk\\27.0.12077973'),
-            (Join-Path $sdk 'cmake\\3.22.1\\bin\\cmake.exe'),
-            (Join-Path $sdk 'cmake\\3.22.1\\bin\\ninja.exe')
+            (Join-Path $sdk 'platforms\android-35'),
+            (Join-Path $sdk 'ndk\27.0.12077973'),
+            (Join-Path $sdk 'cmake\3.22.1\bin\cmake.exe'),
+            (Join-Path $sdk 'cmake\3.22.1\bin\ninja.exe')
           )) {
             if (-not (Test-Path $required)) {
               throw "Android build component is missing: $required"
@@ -182,7 +182,7 @@ jobs:
         shell: pwsh
         run: |
           $root = $env:GITHUB_WORKSPACE
-          $native = Join-Path $root 'android\\app\\src\\main\\jniLibs\\arm64-v8a'
+          $native = Join-Path $root 'android\app\src\main\jniLibs\arm64-v8a'
           foreach ($name in @('libmain.so', 'libmhguffmpeg.so', 'libSDL3.so', 'libc++_shared.so', 'libpyrun.so', 'libzigcc.so')) {
             $file = Join-Path $native $name
             if (-not (Test-Path $file)) {
@@ -190,7 +190,7 @@ jobs:
             }
           }
 
-          $builderTools = Join-Path $root 'android\\app\\src\\main\\assets\\builder\\tools.zip'
+          $builderTools = Join-Path $root 'android\app\src\main\assets\builder\tools.zip'
           if (-not (Test-Path $builderTools)) {
             throw "Phone Builder bundle is missing: $builderTools"
           }
@@ -200,7 +200,7 @@ jobs:
         run: |
           Push-Location android
           try {
-            .\\gradlew.bat --no-daemon --max-workers=4 assembleRelease
+            .\gradlew.bat --no-daemon --max-workers=4 assembleRelease
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           finally {
