@@ -1857,7 +1857,7 @@ void backend_present(NvnTexture *t) {
     static int detail_last_present_format = -1;
     if (detail_last_present_w != t->width || detail_last_present_h != t->height ||
         detail_last_present_format != (int)b->format) {
-        diag_log_detail("[vk][detail] final game image changed: %ux%u Vulkan format=%d FSR=%s\\n",
+        diag_log_detail("[vk][detail] final game image changed: %ux%u Vulkan format=%d FSR=%s\n",
                         t->width, t->height, b->format, g_fsr_on ? "on" : "off");
         detail_last_present_w = t->width; detail_last_present_h = t->height;
         detail_last_present_format = (int)b->format;
