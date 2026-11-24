@@ -2614,9 +2614,12 @@ static void snapshots_invalidate(NvnTexture *t);
 static NvnTexture *mf_tex;        // the picture of the run of models open (NULL none)
 static uint64_t mf_frame;         // the frame it opened in
 static TexBackend mf_before, mf_after;
-static TexBackend user_hud_scene_copy;
-static uint64_t user_hud_scene_frame;
+static TexBackend user_hud_scene_copy, user_hud_mask;
+static uint64_t user_hud_scene_frame, user_hud_mask_upload_frame;
 static bool user_hud_scene_valid;
+static uint8_t *user_hud_mask_pixels;
+static size_t user_hud_mask_bytes;
+static uint32_t user_hud_mask_width, user_hud_mask_height, user_hud_mask_rects;
 static _Atomic bool user_shader_hud_capture_enabled = true;
 
 static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (made as b's size and format)
@@ -2672,8 +2675,116 @@ void vk_user_shader_hud_scene_capture(NvnTexture *source) {
         LOG("[shader] HUD separation unavailable: could not copy the pre-HUD scene\n");
         return;
     }
+    const uint64_t mask_bytes = (uint64_t)user_hud_scene_copy.width * user_hud_scene_copy.height;
+    if (!mask_bytes || mask_bytes > SIZE_MAX) {
+        LOG("[shader] HUD separation unavailable: invalid mask dimensions\n");
+        return;
+    }
+    uint8_t *mask = (uint8_t *)realloc(user_hud_mask_pixels, (size_t)mask_bytes);
+    if (!mask) {
+        LOG("[shader] HUD separation unavailable: mask allocation failed\n");
+        return;
+    }
+    user_hud_mask_pixels = mask;
+    user_hud_mask_bytes = (size_t)mask_bytes;
+    user_hud_mask_width = user_hud_scene_copy.width;
+    user_hud_mask_height = user_hud_scene_copy.height;
+    user_hud_mask_rects = 0;
+    user_hud_mask_upload_frame = UINT64_MAX;
+    memset(user_hud_mask_pixels, 0, user_hud_mask_bytes);
     user_hud_scene_frame = g_present_count;
     user_hud_scene_valid = true;
+}
+
+static void user_hud_mask_mark_full(void) {
+    if (!user_hud_scene_current() || !user_hud_mask_pixels) return;
+    memset(user_hud_mask_pixels, 255, user_hud_mask_bytes);
+    user_hud_mask_rects++;
+}
+
+// Rasterise a HUD quad's transformed bounds into the pre-HUD image's pixel coordinates.
+// The 2-pixel expansion retains the antialiased outside edge of text and icons.
+static void user_hud_mask_add(const float m[16]) {
+    if (!user_hud_scene_current() || !user_hud_mask_pixels || !m) return;
+    const float w = (float)user_hud_mask_width, h = (float)user_hud_mask_height;
+    const float cx = m[12], cy = m[13];
+    const float hx = hypotf(m[0], m[1]), hy = hypotf(m[4], m[5]);
+    if (!isfinite(cx) || !isfinite(cy) || !isfinite(hx) || !isfinite(hy) || hx < 0.25f || hy < 0.25f)
+        return;
+    if (hx >= 640.0f || hy >= 360.0f) {
+        user_hud_mask_mark_full();
+        return;
+    }
+
+    float x0f = (cx - hx) * (w / 1280.0f), x1f = (cx + hx) * (w / 1280.0f);
+    float y0f = (cy - hy) * (h / 720.0f), y1f = (cy + hy) * (h / 720.0f);
+    if (nvn_window_origin() == 0) {
+        float top = h - y1f;
+        y1f = h - y0f;
+        y0f = top;
+    }
+    int x0 = (int)floorf(x0f) - 2, x1 = (int)ceilf(x1f) + 2;
+    int y0 = (int)floorf(y0f) - 2, y1 = (int)ceilf(y1f) + 2;
+    if (x1 <= 0 || y1 <= 0 || x0 >= (int)user_hud_mask_width || y0 >= (int)user_hud_mask_height) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)user_hud_mask_width) x1 = (int)user_hud_mask_width;
+    if (y1 > (int)user_hud_mask_height) y1 = (int)user_hud_mask_height;
+    for (int y = y0; y < y1; y++)
+        memset(user_hud_mask_pixels + (size_t)y * user_hud_mask_width + x0, 255, (size_t)(x1 - x0));
+    user_hud_mask_rects++;
+}
+
+// Called outside the swapchain pass, after all HUD quads have been recorded for this frame.
+void vk_user_shader_hud_mask_upload(void) {
+    if (!user_hud_scene_current() || !user_hud_mask_pixels || !vk_user_shader_hud_capture_needed()) return;
+    const uint32_t w = user_hud_mask_width, h = user_hud_mask_height;
+    if (!w || !h || user_hud_mask_bytes != (size_t)w * h) return;
+    // If this game screen did not expose individual HUD quads, fail closed: preserve the full original picture.
+    if (!user_hud_mask_rects) user_hud_mask_mark_full();
+
+    const VkFormat format = VK_FORMAT_R8_UNORM;
+    const VkImageUsageFlags want = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (user_hud_mask.image && (user_hud_mask.width != w || user_hud_mask.height != h || user_hud_mask.format != format)) {
+        vk_views_forget(&user_hud_mask);
+        vk_defer_image(user_hud_mask.image, user_hud_mask.mem);
+        user_hud_mask = (TexBackend){0};
+    }
+    if (!user_hud_mask.image) {
+        VkImageUsageFlags usage = vk_usage_supported(format, want);
+        if ((usage & want) != want) {
+            LOG("[shader] HUD separation unavailable: R8 mask sampling/copy is unsupported\n");
+            return;
+        }
+        VkImageCreateInfo ci = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = format,
+            .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage
+        };
+        if (vk_create_image(&ci, &user_hud_mask.image, &user_hud_mask.mem) != VK_SUCCESS) {
+            user_hud_mask.image = VK_NULL_HANDLE;
+            LOG("[shader] HUD separation unavailable: could not create R8 mask image\n");
+            return;
+        }
+        user_hud_mask.format = format;
+        user_hud_mask.width = w; user_hud_mask.height = h;
+        user_hud_mask.depth = user_hud_mask.layers = user_hud_mask.levels = user_hud_mask.samples = 1;
+        user_hud_mask.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        user_hud_mask.base_type = VK_IMAGE_VIEW_TYPE_2D;
+        vk_image_init_layout(vk_cmd(), user_hud_mask.image, user_hud_mask.aspect);
+    }
+
+    VkSpan pixels = vk_transient_copy(user_hud_mask_pixels, user_hud_mask_bytes, 16);
+    VkBufferImageCopy copy = {
+        .bufferOffset = pixels.off, .bufferRowLength = w, .bufferImageHeight = h,
+        .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .imageOffset = {0, 0, 0}, .imageExtent = {w, h, 1}
+    };
+    VkCommandBuffer cb = vk_cmd();
+    vk_full_barrier(cb);
+    vkCmdCopyBufferToImage(cb, pixels.buf, user_hud_mask.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
+    vk_full_barrier(cb);
+    user_hud_mask_upload_frame = user_hud_scene_frame;
 }
 
 static void models_fxaa_begin(NvnTexture *t) {
