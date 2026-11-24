@@ -2672,6 +2672,7 @@ static void user_hud_mask_frame_begin(void) {
 }
 
 static void user_hud_mask_mark_full(void) {
+    if (!vk_user_shader_hud_capture_needed()) return;
     user_hud_mask_frame_begin();
     if (user_hud_mask_frame_valid && user_hud_mask_frame == g_present_count)
         user_hud_mask_full = true;
@@ -2680,7 +2681,7 @@ static void user_hud_mask_mark_full(void) {
 // Keep transformed HUD bounds in logical game coordinates. The final image dimensions are
 // only known at present time, after FSR/PS1 have selected their output-size target.
 static void user_hud_mask_add(const float m[16]) {
-    if (!m) return;
+    if (!m || !vk_user_shader_hud_capture_needed()) return;
     user_hud_mask_frame_begin();
     if (!user_hud_mask_frame_valid || user_hud_mask_frame != g_present_count || user_hud_mask_full) return;
     const float cx = m[12], cy = m[13];
