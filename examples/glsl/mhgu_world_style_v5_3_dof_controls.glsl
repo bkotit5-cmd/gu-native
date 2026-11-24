@@ -268,9 +268,8 @@ void main() {
             );
             for (int j = 0; j < 4; ++j) {
                 vec2 delta = edgeDirs[j] * px;
-                float nearY = luma(textureLod(t, clamp(uv + delta, vec2(0.0), vec2(1.0)), 0.0).rgb);
                 float farY = luma(textureLod(t, clamp(uv + delta * 2.0, vec2(0.0), vec2(1.0)), 0.0).rgb);
-                edge = max(edge, max(abs(centerY - nearY), abs(centerY - farY)));
+                edge = max(edge, abs(centerY - farY));
             }
             float edgeProtect = smoothstep(0.025, 0.18, edge) * clamp(HUD_EDGE_PROTECT, 0.0, 1.0);
             cc *= 1.0 - edgeProtect;
