@@ -7781,9 +7781,10 @@ void vk_present_depth_capture(NvnTexture *colour) {
     user_depth_level = st.rt.has_dview && (st.rt.dview.setmask & 1) ? st.rt.dview.base_level : 0;
     user_depth_layer = st.rt.has_dview && (st.rt.dview.setmask & 2) ? st.rt.dview.min_layer : 0;
 
-    // Only reject unsupported subviews when the multisampled companion is newer and must be resolved.
-    // A cached companion that is clean does not invalidate the already-resolved base image.
-    if (depth->ms && depth->ms_dirty) {
+    // backend_present() captures before vk_end_pass() marks this pass's MSAA companions dirty.
+    // Treat the currently open MSAA pass as pending too; a clean cached companion alone is harmless.
+    bool pending_msaa_resolve = depth->ms && (depth->ms_dirty || (in_pass && pass_msaa));
+    if (pending_msaa_resolve) {
         if (user_depth_level || user_depth_layer) {
             user_depth_reason = "unsupported_msaa_subview";
             return;
