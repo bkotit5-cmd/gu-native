@@ -33,12 +33,15 @@ Some settings and implementation code remain in the runtime but are not separate
 - A menu navigation pad for operating the game's menus by touch.
 - Lock-on control and target switching, where the game state allows it.
 - A touch-layout editor to move, resize, hide and customize controls and HUD elements.
-- Control profiles, floating-stick behaviour, touch opacity, camera speed/smoothing and optional vibration.
-- Long-press hiding and slide-between-buttons behaviour can be configured.
+- Ten saved control-profile slots for complete touch-control and HUD layouts, including the app's layout and an emulator-style layout.
+- Floating-stick behaviour, touch opacity, camera speed and smoothing, optional vibration, and a configurable lock-on control.
+- Gyroscope aiming for bows and bowguns when a phone or connected controller provides a gyro.
+- Camera shake strength, long-press hiding and slide-between-buttons behaviour.
+- Custom button pictures: add PNG, JPG or WebP images and assign them to touch controls in the layout editor.
 
 ### Controllers, keyboard and mouse
 
-- Gamepad support with configurable face-button presentation and controller mapping.
+- Gamepad support with configurable face-button presentation, editable mappings and a guided controller-mapping page.
 - Keyboard and mouse support on Windows PC, with editable keybinds.
 - Controller and keyboard bindings for custom combined inputs.
 
@@ -56,6 +59,22 @@ A touch button can show or hide the in-game minimap during a hunt. Its visibilit
 
 - **HUD Size:** global quest-HUD scaling from 100% down to 60%, in 5% steps.
 - **Text Outline:** adds a dark outline to quest dialogue and help-box text to improve readability. It does not outline every UI label or every piece of game text.
+
+### Hunting Aids
+
+Optional hunting aids are available under **Graphics & Audio → Screen and HUD**. They are off by default:
+
+- **Monsters always on the map:** shows large monsters on the in-game map from the start of a solo quest, as though they had been marked. Multiplayer maps retain the game's normal behaviour.
+- **Damage numbers:** displays damage from hits on large monsters; size and colour can be adjusted.
+- **Monster health bars:** shows each large monster's name and current/maximum health. The bars can be moved and resized with the HUD editor.
+
+These are presentation overlays or map aids; they do not add new monsters or change the damage dealt by the game.
+
+### Quest quality-of-life options
+
+- **Gather everything in one press:** one gathering action or carve collects the remaining available items at once, subject to the game's gathering rules, tool durability and pouch capacity.
+- **Send all to the box:** the quest-reward screen sends all rewards that fit in the item box at once.
+- **Move to skip the flex:** moving or taking another action after a potion, drink or meal ends the flex animation early; the item's effect remains.
 
 ## Graphics and performance
 
@@ -133,11 +152,11 @@ This should not be read as a guarantee that every Forge 2.0.0 plugin or every AP
 
 - **Mods:** import mod folders or ZIP archives containing supported `romfs`, `exefs`, `cheats` or native-NX content. Mods can be enabled, disabled and ordered. Later mods win when they replace the same file; the app can identify conflicts and lets you choose which mod takes precedence.
 - **Cheats:** import Atmosphère-style `.txt` cheat files and toggle supported codes in the Cheats page. Files for another game build are left out. Use files matching MHGU 1.4.0 / build ID `FB08F1D20FD1204F`.
-- **DLC and event content:** the app includes an importer for folders containing `DLC.dlcp` files. The importer is experimental; verify imported content in-game.
+- **DLC and event quests (Android):** the normal menu action imports event quests and downloads that you already own from a save or backup made by an emulator or console. The app supplies no DLC, event quests or other game content. A separate raw `DLC.dlcp` folder-import path is development-gated and is not presented as a normal public-release feature.
 - **Texture packs:** treated as mods and loaded through the Mods page. Texture packs can increase memory use.
 - **Forge:** a Forge page/entry is shown when a Forge plugin is active.
 
-On Android, content imports open Android's system document picker directly; there is no intermediate custom import or installed-content browser. Cheat `.txt` files use `ACTION_OPEN_DOCUMENT`. For mods, a small native dialog lets you choose a `.zip` file or a mod folder, then opens the corresponding Android picker. DLC folders use `ACTION_OPEN_DOCUMENT_TREE`. The selected file or folder is copied into private temporary staging, validated, and passed to the existing installer. A native confirmation dialog appears after a successful import and lets you restart the game immediately or later. Shader and save imports also open Android's system document picker directly. `FolderBrowser` remains for choosing the game and save directories, not for importing content. On Windows, import actions use native SDL file dialogs.
+On Android, ordinary cheat, mod, shader and save imports use Android's system document picker; there is no intermediate custom import browser or installed-content browser. Cheat `.txt` files use `ACTION_OPEN_DOCUMENT`. For mods, a small native dialog lets you choose a `.zip` file or a mod folder, then opens the corresponding Android picker. The selected file or folder is copied into private temporary staging, validated, and passed to the existing installer. A native confirmation dialog appears after a successful mod import and lets you restart the game immediately or later. The DLC/event-quest import is a separate Android activity for importing content already present in one of your own saves. `FolderBrowser` remains for choosing the game and save directories, not for importing content. On Windows, import actions use native SDL file dialogs.
 
 Only install mods, cheats and plugins from sources you trust. Cheats and executable patches can change game state or affect online play. In multiplayer, use cheats only with the agreement of everyone in the lobby.
 
@@ -147,7 +166,7 @@ The app includes:
 
 - Local-network play and internet hubs.
 - Hub discovery, server selection and optional matchmaking keys.
-- Chat and friends features.
+- Chat and friends features, plus optional Discord Rich Presence.
 - Crossplay options for supported yuzu-family emulator rooms and Ryujinx LDN servers.
 - Hub monster-HP scaling and Village-quest options.
 
@@ -166,6 +185,19 @@ The default internet hub is a community-operated service, not a server operated 
 - The Android app includes a game-code builder workflow.
 
 Keep independent backups of important saves before changing game files, importing saves or installing mods.
+
+## Diagnostics and Detailed Log
+
+The shared `log.txt` includes a session-relative clock, a record of settings that differ from their defaults, settings changes made during the session, and periodic frame-interval summaries. The summaries include p50, p90 and p99 frame intervals, the longest interval, and the count of intervals over 100 ms.
+
+On Android, open **Settings → System → Your game → Detailed log** and enable it before reproducing a problem. It is **off by default**. When enabled, it adds extra diagnostic records for:
+
+- Shader discovery, selection, compilation and shader-list refresh.
+- Shader import completion and refresh requests.
+- HUD-mask capture and upload state.
+- Vulkan presentation path, image target and relevant format/resolution changes.
+
+The detailed traces are intended to record useful operations and state changes rather than repeatedly printing an unchanged status every frame. Important normal error messages remain available when Detailed Log is off. Use **Share log** on the same **Your game** page to send the log for troubleshooting. The log writer also limits log growth so long sessions do not create an unbounded log file.
 
 ## Compatibility and safety notes
 
@@ -189,7 +221,7 @@ You must supply your own copy of Monster Hunter Generations Ultimate and all gam
 
 ## Android app version and updates
 
-The repository-root `VERSION` file is the source of the app's visible version and Android `versionName`. `VERSION_CODE` is the Android package version code and must increase for every published update. The current source version is **1.0.1.2** (version code **17**).
+The repository-root `VERSION` file is the source of the app's visible version and Android `versionName`. `VERSION_CODE` is the Android package version code and must increase for every published update. The current source version is **1.0.1.3** (version code **18**).
 
 On Android, open **Settings → System → Your game → App version & updates** to see the installed version and check the latest stable release from this repository. When a newer release contains an APK, the updater downloads it, checks the package ID, version name/code, file size and the release SHA-256 digest when GitHub provides one, then compares the APK signing certificate with the installed app. Only a compatible APK is handed to Android's package installer. Android still asks the player to approve installation; the app does not install updates silently.
 
