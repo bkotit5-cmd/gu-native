@@ -130,7 +130,7 @@ final class AppHome {
 
     // (the folders the app itself writes in: only these are repaired, with the files at the top. Anything else a player or
     // adb put there - a backup, a test folder - is never touched)
-    private static final String[] OWNED = {"MHGURecomp", "save_import", "cheats", "cache", "shots"};
+    private static final String[] OWNED = {"MHGURecomp", "save_import", "cheats", "cache", "shots", "lossless"};
 
     private static boolean owned(String name) {
         for (String s : OWNED) if (s.equals(name)) return true;
