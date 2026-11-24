@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+#include <stdatomic.h>
 
 #include "config.h"
 #include "rt.h"
@@ -18,6 +20,23 @@ extern char **environ;
 #endif
 
 static uint64_t g_start_ns;
+static atomic_bool g_detailed_log;
+
+void diag_detailed_log_set(bool enabled) {
+    bool previous = atomic_exchange_explicit(&g_detailed_log, enabled, memory_order_acq_rel);
+    if (previous != enabled)
+        LOG("[diag] detailed logging %s\n", enabled ? "enabled" : "disabled");
+}
+bool diag_detailed_log_enabled(void) {
+    return atomic_load_explicit(&g_detailed_log, memory_order_acquire);
+}
+void diag_log_detail(const char *fmt, ...) {
+    if (!diag_detailed_log_enabled() || !fmt) return;
+    va_list ap;
+    va_start(ap, fmt);
+    rt_vlogf(fmt, ap);
+    va_end(ap);
+}
 
 void diag_start(void) {
     if (!g_start_ns) g_start_ns = plat_now_ns();
