@@ -38,9 +38,6 @@ public class ImportActivity extends Activity {
     public static final int CHEATS = 0, MOD = 1, DLC = 2;
     private static final String TAG = "MHGU";
     private static final int PICK_FILE = 41, PICK_TREE = 42;
-    private static final int WINE = Color.rgb(38, 18, 14), PANEL = Color.rgb(26, 12, 9), CREAM = Color.rgb(240, 228, 200);
-    private static final int GOLD = Color.rgb(226, 182, 92), BRONZE = Color.rgb(62, 38, 22), EDGE = Color.rgb(196, 150, 70);
-    private static final int ALERT = Color.rgb(255, 150, 120), LIT = Color.rgb(96, 62, 24);
     private static final Pattern TITLE_ID = Pattern.compile("(?i)\\b(0100770008dd[9a-f][0-9a-f]{3})\\b");
 
     private int kind;
