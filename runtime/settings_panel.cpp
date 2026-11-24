@@ -2587,8 +2587,13 @@ static std::vector<std::string> enumerate_user_shaders() {
 
 static std::vector<std::string> g_user_shader_files;
 static bool g_user_shader_files_ready;
+static std::atomic<bool> g_user_shader_files_refresh_requested{false};
+extern "C" void settings_panel_shader_files_changed(void) {
+    g_user_shader_files_refresh_requested.store(true, std::memory_order_release);
+}
 static const std::vector<std::string> &user_shader_files() {
-    if (!g_user_shader_files_ready) {
+    const bool refresh = g_user_shader_files_refresh_requested.exchange(false, std::memory_order_acq_rel);
+    if (!g_user_shader_files_ready || refresh) {
         g_user_shader_files = enumerate_user_shaders();
         g_user_shader_files_ready = true;
     }
@@ -2755,10 +2760,10 @@ void user_shader_rows(std::vector<Row> &r) {
 
 #ifdef __ANDROID__
     action(r, "shader.import", en_es("Add shader file", "Añadir archivo de shader"),
-           []() { g_user_shader_files_ready = false; ui_request_activity("showShaders"); });
+           []() { ui_request_activity("showShaders"); });
 #else
     action(r, "shader.import", en_es("Add shader file", "Añadir archivo de shader"),
-           []() { g_user_shader_files_ready = false; pc_import_shader(); });
+           []() { pc_import_shader(); g_user_shader_files_ready = false; });
 #endif
     r.back().help = en_es(
         "Opens the file picker to copy a Vulkan GLSL 450 fragment shader (.glsl) into the app. Binding 0: sampler2D t. "
