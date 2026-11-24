@@ -37,6 +37,8 @@
 #include "../../diag.h"
 #include "../../colour_filter.h"
 #include "../../kernel.h"
+#include "../../user_shader_params.h"
+#include <ctype.h>
 #include "fsr.h"
 #include "shaders.h"
 #include "vk.h"
@@ -7615,6 +7617,257 @@ static void user_depth_report(const char *state, const char *reason, TexBackend 
     last_standin = standin; last_ms_dirty = ms_dirty; last_msaa_pending = user_depth_msaa_pending;
     snprintf(last_slots, sizeof last_slots, "%s", slots);
 }
+
+
+static UserShaderParam user_shader_params[USER_SHADER_PARAM_MAX];
+static int user_shader_params_n;
+static char user_shader_params_path[2048];
+static pthread_mutex_t user_shader_params_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static bool user_shader_param_name_ok(const char *s) {
+    if (!s || !(isalpha((unsigned char)*s) || *s == '_')) return false;
+    for (s++; *s; s++)
+        if (!(isalnum((unsigned char)*s) || *s == '_')) return false;
+    return true;
+}
+
+static float user_shader_param_clamp(const UserShaderParam *p, float v) {
+    if (!isfinite(v)) v = p->initial;
+    v = fminf(p->maximum, fmaxf(p->minimum, v));
+    if (p->type == USER_SHADER_PARAM_BOOL) return v >= 0.5f ? 1.0f : 0.0f;
+    if (p->type == USER_SHADER_PARAM_INT) return roundf(v);
+    return v;
+}
+
+static void user_shader_params_save(const char *path, const UserShaderParam *params, int count) {
+    if (!path || !*path) return;
+    char tmp[2112];
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return;
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return;
+    bool ok = true;
+    for (int i = 0; i < count; i++)
+        if (fprintf(f, "%s=%.9g\n", params[i].name, params[i].value) < 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    if (ok) {
+        if (rename(tmp, path) != 0) {
+            remove(path);
+            if (rename(tmp, path) != 0) remove(tmp);
+        }
+    } else remove(tmp);
+}
+
+int vk_user_shader_param_count(void) {
+    pthread_mutex_lock(&user_shader_params_mutex);
+    int n = user_shader_params_n;
+    pthread_mutex_unlock(&user_shader_params_mutex);
+    return n;
+}
+
+bool vk_user_shader_param_get(int index, UserShaderParam *out) {
+    if (!out) return false;
+    pthread_mutex_lock(&user_shader_params_mutex);
+    bool ok = index >= 0 && index < user_shader_params_n;
+    if (ok) *out = user_shader_params[index];
+    pthread_mutex_unlock(&user_shader_params_mutex);
+    return ok;
+}
+
+bool vk_user_shader_param_set(int index, float value) {
+    UserShaderParam snapshot[USER_SHADER_PARAM_MAX];
+    char path[sizeof user_shader_params_path];
+    int n = 0;
+    pthread_mutex_lock(&user_shader_params_mutex);
+    if (index < 0 || index >= user_shader_params_n) {
+        pthread_mutex_unlock(&user_shader_params_mutex);
+        return false;
+    }
+    user_shader_params[index].value = user_shader_param_clamp(&user_shader_params[index], value);
+    n = user_shader_params_n;
+    memcpy(snapshot, user_shader_params, (size_t)n * sizeof snapshot[0]);
+    snprintf(path, sizeof path, "%s", user_shader_params_path);
+    pthread_mutex_unlock(&user_shader_params_mutex);
+    user_shader_params_save(path, snapshot, n);
+    return true;
+}
+
+void vk_user_shader_params_reset(void) {
+    UserShaderParam snapshot[USER_SHADER_PARAM_MAX];
+    char path[sizeof user_shader_params_path];
+    int n = 0;
+    pthread_mutex_lock(&user_shader_params_mutex);
+    n = user_shader_params_n;
+    for (int i = 0; i < n; i++) user_shader_params[i].value = user_shader_params[i].initial;
+    memcpy(snapshot, user_shader_params, (size_t)n * sizeof snapshot[0]);
+    snprintf(path, sizeof path, "%s", user_shader_params_path);
+    pthread_mutex_unlock(&user_shader_params_mutex);
+    user_shader_params_save(path, snapshot, n);
+}
+
+void vk_user_shader_params_pack(float values[USER_SHADER_PARAM_MAX][4]) {
+    if (!values) return;
+    memset(values, 0, sizeof(float) * USER_SHADER_PARAM_MAX * 4);
+    pthread_mutex_lock(&user_shader_params_mutex);
+    for (int i = 0; i < user_shader_params_n; i++) values[i][0] = user_shader_params[i].value;
+    pthread_mutex_unlock(&user_shader_params_mutex);
+}
+
+static void user_shader_params_clear(void) {
+    pthread_mutex_lock(&user_shader_params_mutex);
+    memset(user_shader_params, 0, sizeof user_shader_params);
+    user_shader_params_n = 0;
+    user_shader_params_path[0] = 0;
+    pthread_mutex_unlock(&user_shader_params_mutex);
+}
+
+/* Parses: // @param <name> <float|int|bool> <default> <min> <max> <step> <display label> */
+static char *user_shader_params_prepare(const char *source, size_t source_size, const char *params_path) {
+    UserShaderParam parsed[USER_SHADER_PARAM_MAX] = {0};
+    int count = 0;
+    const char *p = source, *end = source + source_size;
+    while (p < end) {
+        const char *nl = memchr(p, '\n', (size_t)(end - p));
+        size_t len = nl ? (size_t)(nl - p) : (size_t)(end - p);
+        if (len < 512) {
+            char line[512];
+            memcpy(line, p, len);
+            line[len] = 0;
+            char *tag = strstr(line, "@param");
+            if (tag && count < USER_SHADER_PARAM_MAX) {
+                UserShaderParam item = {0};
+                char type[12] = {0}, label[80] = {0};
+                int got = sscanf(tag + 6, "%47s %11s %f %f %f %f %79[^\r\n]",
+                                 item.name, type, &item.initial, &item.minimum, &item.maximum, &item.step, label);
+                if (got >= 6 && user_shader_param_name_ok(item.name) &&
+                    isfinite(item.initial) && isfinite(item.minimum) && isfinite(item.maximum) &&
+                    isfinite(item.step) && item.minimum <= item.initial && item.initial <= item.maximum &&
+                    item.minimum < item.maximum && item.step > 0.0f) {
+                    item.type = !strcmp(type, "float") ? USER_SHADER_PARAM_FLOAT :
+                                !strcmp(type, "int") ? USER_SHADER_PARAM_INT :
+                                !strcmp(type, "bool") ? USER_SHADER_PARAM_BOOL : -1;
+                    bool duplicate = false;
+                    for (int i = 0; i < count; i++) if (!strcmp(parsed[i].name, item.name)) duplicate = true;
+                    if (item.type >= 0 && !duplicate) {
+                        if (got >= 7) {
+                            char *label_start = label;
+                            while (*label_start && isspace((unsigned char)*label_start)) label_start++;
+                            size_t label_len = strlen(label_start);
+                            if (label_len >= 2 && label_start[0] == '"' && label_start[label_len - 1] == '"') {
+                                label_start[label_len - 1] = 0;
+                                label_start++;
+                            }
+                            snprintf(item.label, sizeof item.label, "%s", *label_start ? label_start : item.name);
+                        } else snprintf(item.label, sizeof item.label, "%s", item.name);
+                        if (item.type == USER_SHADER_PARAM_INT) {
+                            item.initial = roundf(item.initial);
+                            item.minimum = ceilf(item.minimum);
+                            item.maximum = floorf(item.maximum);
+                            item.step = fmaxf(1.0f, roundf(item.step));
+                        } else if (item.type == USER_SHADER_PARAM_BOOL) {
+                            item.minimum = 0.0f;
+                            item.maximum = 1.0f;
+                            item.step = 1.0f;
+                            item.initial = item.initial >= 0.5f ? 1.0f : 0.0f;
+                        }
+                        item.value = user_shader_param_clamp(&item, item.initial);
+                        parsed[count++] = item;
+                    }
+                }
+            }
+        }
+        p += len + (nl != NULL);
+    }
+
+    if (params_path && *params_path) {
+        FILE *f = fopen(params_path, "rb");
+        if (f) {
+            char line[160];
+            while (fgets(line, sizeof line, f)) {
+                char *eq = strchr(line, '=');
+                if (!eq) continue;
+                *eq++ = 0;
+                char *tail = eq + strlen(eq);
+                while (tail > eq && isspace((unsigned char)tail[-1])) *--tail = 0;
+                char *name_end = line + strlen(line);
+                while (name_end > line && isspace((unsigned char)name_end[-1])) *--name_end = 0;
+                char *value_end = NULL;
+                float value = strtof(eq, &value_end);
+                if (value_end == eq || !isfinite(value)) continue;
+                for (int i = 0; i < count; i++)
+                    if (!strcmp(parsed[i].name, line)) parsed[i].value = user_shader_param_clamp(&parsed[i], value);
+            }
+            fclose(f);
+        }
+    }
+
+    pthread_mutex_lock(&user_shader_params_mutex);
+    memcpy(user_shader_params, parsed, sizeof parsed);
+    user_shader_params_n = count;
+    snprintf(user_shader_params_path, sizeof user_shader_params_path, "%s", params_path ? params_path : "");
+    pthread_mutex_unlock(&user_shader_params_mutex);
+
+    char generated[4096] = {0};
+    size_t used = 0;
+    if (count) {
+        int n = snprintf(generated + used, sizeof generated - used,
+                         "\nlayout(set = 0, binding = 2, std140) uniform MHGU_UserShaderParams { vec4 value[16]; } mhguUserParams;\n");
+        if (n < 0 || (size_t)n >= sizeof generated - used) return NULL;
+        used += (size_t)n;
+        for (int i = 0; i < count; i++) {
+            if (parsed[i].type == USER_SHADER_PARAM_BOOL)
+                n = snprintf(generated + used, sizeof generated - used,
+                             "#define PARAM_%s (mhguUserParams.value[%d].x >= 0.5)\n", parsed[i].name, i);
+            else if (parsed[i].type == USER_SHADER_PARAM_INT)
+                n = snprintf(generated + used, sizeof generated - used,
+                             "#define PARAM_%s int(mhguUserParams.value[%d].x)\n", parsed[i].name, i);
+            else
+                n = snprintf(generated + used, sizeof generated - used,
+                             "#define PARAM_%s mhguUserParams.value[%d].x\n", parsed[i].name, i);
+            if (n < 0 || (size_t)n >= sizeof generated - used) return NULL;
+            used += (size_t)n;
+        }
+    }
+
+    size_t insert = 0, pos = 0;
+    bool block_comment = false;
+    while (pos < source_size) {
+        const char *nl = memchr(source + pos, '\n', source_size - pos);
+        size_t line_len = nl ? (size_t)(nl - (source + pos)) : source_size - pos;
+        if (line_len >= 512) break;
+        char line[512];
+        memcpy(line, source + pos, line_len);
+        line[line_len] = 0;
+        char *q = line;
+        while (*q && isspace((unsigned char)*q)) q++;
+        if (block_comment) {
+            if (strstr(q, "*/")) block_comment = false;
+            pos += line_len + (nl != NULL);
+            insert = pos;
+            continue;
+        }
+        if (!*q || !strncmp(q, "//", 2) || *q == '#') {
+            pos += line_len + (nl != NULL);
+            insert = pos;
+            continue;
+        }
+        if (!strncmp(q, "/*", 2)) {
+            if (!strstr(q + 2, "*/")) block_comment = true;
+            pos += line_len + (nl != NULL);
+            insert = pos;
+            continue;
+        }
+        break;
+    }
+    if (!count) used = 0;
+    char *out = malloc(source_size + used + 2);
+    if (!out) return NULL;
+    memcpy(out, source, insert);
+    memcpy(out + insert, generated, used);
+    memcpy(out + insert + used, source + insert, source_size - insert);
+    out[source_size + used] = 0;
+    return out;
+}
+
 
 static uint64_t user_shader_hash(uint64_t h, const void *data, size_t size) {
     const uint8_t *p = data;
