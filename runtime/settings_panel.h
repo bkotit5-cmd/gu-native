@@ -19,6 +19,10 @@ void settings_panel_after_render(ImDrawData *draw_data);
 bool settings_panel_fading(void);
 #endif
 
+#ifdef __cplusplus
+extern "C"
+#endif
+void settings_panel_shader_files_changed(void); // Any thread: request a shader-list refresh on the game thread.
 void settings_panel_request_close(void); // Thread-safe request; consumed by the game frame.
 bool settings_panel_confirming(void);
 // Any thread, C too: a confirmation the menu opens at its next frame (a desktop's dialogs answer on their own thread:
