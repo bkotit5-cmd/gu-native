@@ -136,10 +136,14 @@ public class GameFolderActivity extends Activity {
     static volatile boolean gameStarted;
 
     private void startGame() {
-        gameStarted = true;
-        startActivity(new Intent(this, GameActivity.class));
-        overridePendingTransition(0, 0);
-        finish();
+        // The one-a-day release check runs in the background; any cached result is shown before entering the game.
+        Notices.checkInBackground(this);
+        Notices.beforeGame(this, () -> {
+            gameStarted = true;
+            startActivity(new Intent(this, GameActivity.class));
+            overridePendingTransition(0, 0);
+            finish();
+        });
     }
 
     /**
