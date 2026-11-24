@@ -4110,6 +4110,10 @@ void verify_row(std::vector<Row> &r) {
 // System > Your game (the MH4U port's same rows)
 void rows_system_game_10(std::vector<Row> &r) {
 #ifdef __ANDROID__
+    action(r, "app.update", en_es("App version & updates", "Versión y actualizaciones"),
+           []() { ui_request_activity("showAppUpdate"); });
+    r.back().help = en_es("Shows the installed app version, checks this repository's latest release, and lets you download and install a compatible update.",
+                          "Muestra la versión instalada de la app, comprueba la última versión de este repositorio y permite instalar una actualización compatible.");
     action(r, "game.folder", tr("Game folder"), []() { ui_request_game_folder(); });
     r.back().help = tr("Where the game's exefs and romfs are read from. A new folder is used the next time the game starts.");
     verify_row(r);
