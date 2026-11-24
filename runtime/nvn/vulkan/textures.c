@@ -1014,6 +1014,9 @@ void vk_upload_jobs_finish(void) {
     if (!U.n && !U.recs) return;
     pthread_mutex_lock(&U.mu);
     while (U.next < U.n) {
+        // ETC2 encoding is intentionally worker-only: never let submit-time work stealing move it back
+        // onto the render thread. The workers still complete it before this submission reaches the GPU.
+        if (U.q[U.next].conv == CV_BCN_ETC2) break;
         UpJob j = U.q[U.next++];
         U.busy++;
         pthread_mutex_unlock(&U.mu);
@@ -1023,10 +1026,11 @@ void vk_upload_jobs_finish(void) {
         pthread_mutex_lock(&U.mu);
         U.busy--;
     }
-    if (U.busy) {
+    if (U.busy || U.next < U.n) {
         uint64_t t0 = HITCH_ON ? plat_now_ns() : 0;
-        while (U.busy) pthread_cond_wait(&U.idle, &U.mu);
-        if (HITCH_ON) hitch_add(HC_TEX_WAIT, plat_now_ns() - t0, 0);  // ((debug) MHGU_HITCHLOG: the workers' last bands)
+        // Pending entries as well as active jobs must finish; cond_wait releases U.mu so workers can take them.
+        while (U.busy || U.next < U.n) pthread_cond_wait(&U.idle, &U.mu);
+        if (HITCH_ON) hitch_add(HC_TEX_WAIT, plat_now_ns() - t0, 0);  // ((debug) MHGU_HITCHLOG: worker completion)
     }
     U.n = U.next = 0;
     pthread_mutex_unlock(&U.mu);
