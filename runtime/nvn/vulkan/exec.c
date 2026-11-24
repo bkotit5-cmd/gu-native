@@ -2617,9 +2617,6 @@ static TexBackend mf_before, mf_after;
 typedef struct { float cx, cy, hx, hy; } UserHudMaskRect;
 #define USER_HUD_MASK_RECTS_MAX 8192
 
-typedef struct { float cx, cy, hx, hy; } UserHudMaskRect;
-#define USER_HUD_MASK_RECTS_MAX 8192
-
 static TexBackend user_hud_mask;
 static uint64_t user_hud_mask_frame, user_hud_mask_upload_frame;
 static bool user_hud_mask_frame_valid, user_hud_mask_full;
