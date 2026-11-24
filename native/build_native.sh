@@ -38,7 +38,6 @@ cd "$HERE"
 "$CMAKE" --build "$(m "$OUT")" --parallel ${JOBS:-12} 2>&1 | grep -E "error|warning: implicit|FAILED|^ninja: build stopped" | head -60
 "$CMAKE" --build "$(m "$OUT")" --parallel ${JOBS:-12} > "$OUT.build.log" 2>&1 || { tail -40 "$OUT.build.log"; exit 1; }
 
-# MSYS2's host glslangValidator is used only to embed Bloodframe's optional experimental shader set.
 # a jniLibs del proyecto Gradle
 J="$ROOT/android/app/src/main/jniLibs/$ABI"
 mkdir -p "$J"
