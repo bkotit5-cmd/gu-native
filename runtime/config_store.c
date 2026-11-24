@@ -204,13 +204,7 @@ void config_runtime_init(const Config *effective) {
         set_float(&live_fps, f);
     }
 }
-float config_live_fps(void) {
-#ifdef __ANDROID__
-    return (float)FPS_UNLIMITED;
-#else
-    return get_float(&live_fps);
-#endif
-}
+float config_live_fps(void) { return get_float(&live_fps); }
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }

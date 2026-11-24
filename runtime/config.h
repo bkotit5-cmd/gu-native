@@ -247,12 +247,16 @@ void config_combo_text(uint32_t mask, char *out, size_t size);  // and back
                              // keeps the 3D picture 320x180 at least)
 #define LOW_END_SCALE 40  // what the menu's Low-end mode sets: RenderScale, FPS
 #define LOW_END_FPS 30
-// [Performance] FPS: FPS_MIN..FPS_PHONE_MAX when capped; FPS_UNLIMITED requests the engine's fastest 1 ms frame step.
-// Android uses FPS_UNLIMITED, while VSync controls the maximum displayed refresh rate.
+// [Performance] FPS: FPS_MIN..FPS_MAX when capped; FPS_UNLIMITED requests the engine's fastest 1 ms frame step.
+// Android offers 30, 60, 90 and 120 FPS; desktop also supports Unlimited.
 #define FPS_MIN 15
 #define FPS_PHONE_MAX 240
 #define FPS_UNLIMITED 1000
+#ifdef __ANDROID__
+#define FPS_MAX 120
+#else
 #define FPS_MAX FPS_UNLIMITED
+#endif
 #define LOW_END_TOASTER 2   // LowEnd = Toaster: everything for speed and the battery (config.c, textures.c, the menu)
 #define TOASTER_SCALE 25    // what the menu's Toaster sets: RenderScale (and LOW_END_FPS)
 #define TOASTER_HUD_LINES 540  // Toaster (and Brick): the HUD's picture at most this tall (config.c, fsr.c's output)

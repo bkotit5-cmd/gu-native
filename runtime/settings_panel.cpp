@@ -3085,10 +3085,6 @@ void rows_graphics_10(std::vector<Row> &r) {
 void reset_graphics_10() { s.draft.low_end = config_defaults().low_end; }
 MENU_ENTRY("graphics", 10, rows_graphics_10, reset_graphics_10);
 void rows_graphics_20(std::vector<Row> &r) {
-#ifdef __ANDROID__
-    note(r, "graphics.fps.unlimited",
-         tr("The frame-rate cap is disabled on Android. With VSync on, displayed frames follow the screen's refresh rate."));
-#else
     Config &c = s.draft;
     number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
 #ifndef __ANDROID__  // (a desktop: past 240 comes Unlimited; a number in between, as the file may have it, stays a number)
@@ -3102,13 +3098,12 @@ void rows_graphics_20(std::vector<Row> &r) {
             v = v > FPS_PHONE_MAX ? FPS_PHONE_MAX : std::max(FPS_MIN, v + d);
     };
     r.back().help = tr("The most frames a second. Unlimited: as many as the PC can draw, with VSync off; with VSync on, the monitor's refresh rate is the most. On a PC that can't hold 60, 30 is steadier: Toaster sets it, and Low-end mode leaves the frame rate as it is.");
+    static const int presets[] = {15, 20, 30, 60, 90, 120, 144, 240, FPS_UNLIMITED};
+#else
+    r.back().help = tr("Choose 30, 60, 90 or 120 frames per second. A lower limit can reduce heat and battery use. VSync still controls how frames are displayed on the screen.");
+    static const int presets[] = {30, 60, 90, 120};
 #endif
-    // left / right: one frame per second more or less; Confirm: the common ones
-    static const int presets[] = {15, 20, 30, 60, 90, 120, 144, 240,  // (the MH4U port's same list; 15 and 20 since 1.0.1)
-#ifndef __ANDROID__
-                                  FPS_UNLIMITED,
-#endif
-    };
+    // Confirm opens the common frame-rate choices.
     r.back().menu = true;
     Row copy = r.back();
     r.back().activate = [copy]() {
@@ -3117,13 +3112,12 @@ void rows_graphics_20(std::vector<Row> &r) {
         for (int i = 0; i < (int)std::size(presets); i++) {
             names.push_back(presets[i] >= FPS_UNLIMITED ? std::string(tr("Unlimited")) : std::to_string(presets[i]));
             if (presets[i] <= s.draft.fps)
-                now = presets[i] == s.draft.fps ? i : -1 - i;  // (not one of them: start at the one below)
+                now = presets[i] == s.draft.fps ? i : -1 - i;
         }
         choices(copy, names, now, [](int v) { s.draft.fps = presets[v]; });
         if (now < -1)
             focus("choice." + std::to_string(-1 - now));
     };
-#endif
 }
 void reset_graphics_20() { s.draft.fps = config_defaults().fps; }
 MENU_ENTRY("graphics", 20, rows_graphics_20, reset_graphics_20);

@@ -58,7 +58,7 @@ _Static_assert(BIND_COMBO15 - BIND_COMBO1 + 1 == TOUCH_COMBOS, "a keybind for ea
 #define CONFIG_DEFAULT_SIZE 0, 0
 #ifdef __ANDROID__
 #define CONFIG_DEFAULT_FXAA 0  // (as the new mhgurecomp.ini says: the first run, before that file is read, too)
-#define CONFIG_DEFAULT_FPS FPS_UNLIMITED
+#define CONFIG_DEFAULT_FPS 60
 #else
 #define CONFIG_DEFAULT_FXAA 1
 #define CONFIG_DEFAULT_FPS 60
@@ -258,9 +258,9 @@ static const char DEFAULT_INI[] =
     "\n"
     "[Performance]\n"
 #ifdef __ANDROID__
-    "; Frame-rate cap disabled: the game runs as fast as the device can render; when VSync is on, displayed frames follow the screen's refresh rate.\n"
-    "; Default: Unlimited\n"
-    "FPS = Unlimited\n"
+    "; Frame-rate cap. Choose 30, 60, 90 or 120 FPS. VSync still follows the display's refresh rate.\n"
+    "; Default: 60\n"
+    "FPS = 60\n"
 #else
     "; Framerate cap. Unlimited: as many frames as the PC can draw, with VSync Off (with VSync On, the monitor's\n"
     "; refresh rate is the most)\n"
@@ -1650,13 +1650,6 @@ void config_load(void) {
     }
     recent_tidy(g_config.ldn_recent_server[0], LDN_RECENT, sizeof g_config.ldn_recent_server[0], true);
     recent_tidy(g_config.ldn_recent_key[0], LDN_RECENT, sizeof g_config.ldn_recent_key[0], false);
-
-#ifdef __ANDROID__
-    if (g_config.fps != FPS_UNLIMITED) {
-        LOG("[config] Android frame-rate cap disabled; ignoring saved FPS value %d\n", g_config.fps);
-        g_config.fps = FPS_UNLIMITED;
-    }
-#endif
 
     // (a file of an older version, with LowEnd on and no Shadows: off, as the menu's Low-end mode now sets them; a
     // desktop's Low-end mode keeps the shadows, and only Toaster turns them off)
