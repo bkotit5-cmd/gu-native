@@ -8430,16 +8430,13 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         {vk_default_sampler(!sharp), raw_view(b), VK_IMAGE_LAYOUT_GENERAL},
         {vk_default_sampler(false), depth_view, VK_IMAGE_LAYOUT_GENERAL}
     };
-    VkDescriptorImageInfo mask_info = {vk_default_sampler(false), hud_mask_view, VK_IMAGE_LAYOUT_GENERAL};
     VkWriteDescriptorSet w[4] = {
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[0]},
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 1, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 3, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mask_info}
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}
     };
-    uint32_t write_count = kind == 3 ? 4 : 2;
+    uint32_t write_count = 2;
     VkDescriptorBufferInfo param_buffer = {0};
     if (kind == 3 && vk_user_shader_param_count() > 0) {
         float shader_values[USER_SHADER_PARAM_MAX][4];
@@ -8451,11 +8448,17 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         param_buffer = (VkDescriptorBufferInfo){
             .buffer = param_span.buf, .offset = param_span.off, .range = sizeof shader_values
         };
-        w[2] = (VkWriteDescriptorSet){
+        w[write_count++] = (VkWriteDescriptorSet){
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 2, .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &param_buffer
         };
-        write_count = 3;
+    }
+    if (kind == 3) {
+        VkDescriptorImageInfo mask_info = {vk_default_sampler(false), hud_mask_view, VK_IMAGE_LAYOUT_GENERAL};
+        w[write_count++] = (VkWriteDescriptorSet){
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 3, .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mask_info
+        };
     }
     vkUpdateDescriptorSets(g_vk.dev, write_count, w, 0, NULL);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
