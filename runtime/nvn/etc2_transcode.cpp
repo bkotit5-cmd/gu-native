@@ -133,7 +133,7 @@ bool cache_read(const char *path, const CacheHeader &expected, uint8_t *out, siz
         h.version == expected.version && h.kind == expected.kind &&
         h.width == expected.width && h.height == expected.height &&
         h.srgb == expected.srgb && h.format == expected.format &&
-        h.output_bytes == expected.output_bytes && h.digest[64] == '\\0' &&
+        h.output_bytes == expected.output_bytes && h.digest[64] == 0 &&
         !strcmp(h.digest, expected.digest) &&
         fread(out, 1, bytes, f) == bytes && fgetc(f) == EOF && !ferror(f);
     fclose(f);
