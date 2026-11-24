@@ -74,13 +74,14 @@ Upscaling and frame-generation paths are hardware/driver dependent. An option be
 
 ## Custom GLSL shaders
 
-The **Shader** page can load a custom **single-pass Vulkan GLSL fragment shader** from a `.glsl` file. On Android, the shader manager lists imported shaders and lets you select, disable or remove them. On Windows, a file picker imports and selects a shader. Restart the game to apply a changed selection.
+The **Shader** page can load a custom **single-pass Vulkan GLSL fragment shader** from a `.glsl` file. On Android, the monochrome in-game Shader page lists installed shaders; the separate orange Android activity is only the import/remove file manager. On Windows, a file picker imports and selects a shader. Selecting, disabling, removing or replacing the active shader hot-reloads it on the next presented frame without restarting the game.
 
 The renderer expects Vulkan GLSL 450 with this interface:
 
 ```glsl
 #version 450
 layout(set = 0, binding = 0) uniform sampler2D t;
+layout(set = 0, binding = 1) uniform sampler2D depthTex; // optional scene depth
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 o;
 
@@ -90,13 +91,18 @@ void main() {
 ```
 
 - `t`: the resolved game image.
-- `uv`: fullscreen texture coordinates.
+- `depthTex`: optional scene depth paired with the presented colour target. It is raw device depth in the range 0..1, not linearized eye-space distance. Sample its depth value from the `.r` component.
+- `uv`: fullscreen texture coordinates shared by the colour and depth inputs.
 - `o`: output pixel colour.
 - The fragment entry point is `main`; the current renderer supports source files up to 2 MB.
 
+When a matching scene depth target is available, the renderer binds it to `depthTex` and resolves supported multisampled depth before presentation. A 1×1 fallback texture is bound when depth capture or view creation is unavailable. With a custom GLSL shader active in SDR, the log reports `[shader] depthTex: BOUND` or `FALLBACK`, the rejection reason, target dimensions and formats, sample count, depth aspect, and active colour attachments. These diagnostic messages are emitted when the reported state changes, rather than every frame.
+
+Raw device depth must be linearized by the shader before using it as eye-space distance. Do not assume a near/far plane, forward/reversed-Z convention, or identical depth availability in every menu, loading, cutscene or gameplay scene. The input does not provide a dedicated UI mask, camera near/far uniforms, or a separate depth prepass. A shader can therefore blur game HUD elements that are already part of `t`; the Forge overlay is drawn afterward.
+
 A compile or pipeline failure falls back to the built-in presentation shader and is logged. Custom GLSL replaces the built-in Colour/PS1 presentation filters in SDR; HDR output bypasses the custom shader.
 
-**Not supported:** ReShade `.fx` presets, RetroArch slang shaders, multipass chains, extra texture inputs, custom uniform interfaces or shader include files. These require conversion or a different shader framework.
+**Not supported:** ReShade `.fx` / `.fxh` effects and `.ini` presets, RetroArch slang shaders, multipass chains, custom uniform interfaces or shader include files. These require a separate runtime or conversion to the supported single-pass GLSL interface.
 
 See [the GLSL shader guide](docs/USER_GLSL_SHADERS.md) and [the sample saturation shader](examples/glsl/saturation.glsl).
 
