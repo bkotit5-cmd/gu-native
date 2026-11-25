@@ -2565,6 +2565,45 @@ static std::string active_user_shader_name() {
     return user_shader_filename(name) ? std::string(name) : std::string();
 }
 
+// Save the preference next to active.txt so the runtime can restore it before the first HUD draw.
+static bool save_user_shader_hud_mask_protection(bool enabled) {
+    const auto dir = user_shader_directory();
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        LOG("[shader] could not create shader settings directory: %s\n", ec.message().c_str());
+        return false;
+    }
+    const auto marker = dir / "hud_mask_protection.txt";
+    const auto tmp = dir / "hud_mask_protection.txt.tmp";
+    std::FILE *f = std::fopen(tmp.string().c_str(), "wb");
+    if (!f) {
+        LOG("[shader] could not save HUD mask preference: %s\n", std::strerror(errno));
+        return false;
+    }
+    const char value[2] = {enabled ? '1' : '0', '\n'};
+    bool ok = std::fwrite(value, 1, sizeof value, f) == sizeof value;
+    if (std::fclose(f) != 0) ok = false;
+    if (!ok) {
+        std::remove(tmp.string().c_str());
+        LOG("[shader] could not write HUD mask preference\n");
+        return false;
+    }
+    if (std::remove(marker.string().c_str()) != 0 && errno != ENOENT) {
+        std::remove(tmp.string().c_str());
+        LOG("[shader] could not replace HUD mask preference: %s\n", std::strerror(errno));
+        return false;
+    }
+    if (std::rename(tmp.string().c_str(), marker.string().c_str()) != 0) {
+        std::remove(tmp.string().c_str());
+        LOG("[shader] could not commit HUD mask preference: %s\n", std::strerror(errno));
+        return false;
+    }
+    vk_user_shader_hud_mask_protection_set(enabled);
+    LOG("[shader] HUD mask protection %s\n", enabled ? "enabled" : "disabled");
+    return true;
+}
+
 static std::vector<std::string> enumerate_user_shaders() {
     std::vector<std::string> names;
     std::error_code ec;
@@ -2747,6 +2786,23 @@ void user_shader_rows(std::vector<Row> &r) {
             LOG("[shader] could not disable custom shader from in-game menu\n");
     };
     r.push_back(std::move(disable));
+
+    Row hud_mask;
+    hud_mask.id = "shader.hud_mask_protection";
+    hud_mask.title = en_es("HUD Mask Protection", "Protección de HUD");
+    const bool hud_mask_enabled = vk_user_shader_hud_mask_protection_enabled();
+    hud_mask.value = hud_mask_enabled ? tr("On") : tr("Off");
+    hud_mask.toggle = hud_mask_enabled ? 1 : 0;
+    hud_mask.adjust = [](int d) { save_user_shader_hud_mask_protection(d > 0); };
+    hud_mask.activate = []() {
+        save_user_shader_hud_mask_protection(!vk_user_shader_hud_mask_protection_enabled());
+    };
+    hud_mask.help = en_es(
+        "On: keeps HUD elements such as health and stamina bars, the minimap and touch controls clear of custom GLSL effects. "
+        "Off: custom GLSL also affects the HUD. Applied immediately and remembered.",
+        "Activado: mantiene elementos del HUD como las barras de vida y resistencia, el minimapa y los controles táctiles "
+        "fuera de los efectos GLSL personalizados. Desactivado: el GLSL también afecta al HUD. Se aplica al instante y se guarda.");
+    r.push_back(std::move(hud_mask));
 
     if (!active.empty()) {
         action(r, "shader.parameters.open", en_es("Edit shader parameters", "Editar parámetros del shader"), []() {
