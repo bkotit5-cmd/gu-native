@@ -2615,18 +2615,6 @@ static void snapshots_invalidate(NvnTexture *t);
 static NvnTexture *mf_tex;        // the picture of the run of models open (NULL none)
 static uint64_t mf_frame;         // the frame it opened in
 static TexBackend mf_before, mf_after;
-typedef struct { float cx, cy, hx, hy; } UserHudMaskRect;
-#define USER_HUD_MASK_RECTS_MAX 8192
-
-static TexBackend user_hud_mask;
-static uint64_t user_hud_mask_frame, user_hud_mask_upload_frame;
-static bool user_hud_mask_frame_valid, user_hud_mask_full;
-static UserHudMaskRect user_hud_mask_rects[USER_HUD_MASK_RECTS_MAX];
-static uint32_t user_hud_mask_rect_count;
-static uint8_t *user_hud_mask_pixels;
-static size_t user_hud_mask_bytes;
-static uint32_t user_hud_mask_width, user_hud_mask_height;
-static _Atomic bool user_shader_hud_capture_enabled = true;
 
 static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (made as b's size and format)
     VkCommandBuffer cb = vk_cmd();
@@ -2651,151 +2639,6 @@ static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (mad
     vkCmdCopyImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, d->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
     vk_full_barrier(cb);
     return true;
-}
-
-void vk_user_shader_hud_capture_enable(bool enabled) {
-    atomic_store(&user_shader_hud_capture_enabled, enabled);
-}
-
-bool vk_user_shader_hud_capture_needed(void) {
-    return atomic_load(&user_shader_hud_capture_enabled);
-}
-
-static void user_hud_mask_frame_begin(void) {
-    if (!vk_user_shader_hud_capture_needed()) return;
-    if (!user_hud_mask_frame_valid || user_hud_mask_frame != g_present_count) {
-        user_hud_mask_frame = g_present_count;
-        user_hud_mask_frame_valid = true;
-        user_hud_mask_upload_frame = UINT64_MAX;
-        user_hud_mask_rect_count = 0;
-        user_hud_mask_full = false;
-    }
-}
-
-static void user_hud_mask_mark_full(void) {
-    if (!vk_user_shader_hud_capture_needed()) return;
-    user_hud_mask_frame_begin();
-    if (user_hud_mask_frame_valid && user_hud_mask_frame == g_present_count)
-        user_hud_mask_full = true;
-}
-
-// Keep transformed HUD bounds in logical game coordinates. The final image dimensions are
-// only known at present time, after FSR/PS1 have selected their output-size target.
-static void user_hud_mask_add(const float m[16]) {
-    if (!m || !vk_user_shader_hud_capture_needed()) return;
-    user_hud_mask_frame_begin();
-    if (!user_hud_mask_frame_valid || user_hud_mask_frame != g_present_count || user_hud_mask_full) return;
-    const float cx = m[12], cy = m[13];
-    const float hx = fabsf(m[0]) + fabsf(m[4]), hy = fabsf(m[1]) + fabsf(m[5]);
-    if (!isfinite(cx) || !isfinite(cy) || !isfinite(hx) || !isfinite(hy) || hx < 0.25f || hy < 0.25f)
-        return;
-    if (hx >= 640.0f || hy >= 360.0f || user_hud_mask_rect_count >= USER_HUD_MASK_RECTS_MAX) {
-        user_hud_mask_full = true;
-        return;
-    }
-    user_hud_mask_rects[user_hud_mask_rect_count++] = (UserHudMaskRect){cx, cy, hx, hy};
-}
-
-// Build and upload the mask at the exact dimensions of the final presented game image.
-void vk_user_shader_hud_mask_upload(TexBackend *presented) {
-    if (!vk_user_shader_hud_capture_needed() || !presented || !presented->image ||
-        !(presented->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) return;
-    user_hud_mask_frame_begin();
-    if (!user_hud_mask_frame_valid || user_hud_mask_frame != g_present_count) return;
-    const uint32_t w = presented->width, h = presented->height;
-    const uint64_t mask_bytes = (uint64_t)w * h;
-    if (!w || !h || mask_bytes > SIZE_MAX) return;
-    uint8_t *mask = (uint8_t *)realloc(user_hud_mask_pixels, (size_t)mask_bytes);
-    if (!mask) {
-        LOG("[shader] HUD separation unavailable: mask allocation failed\\n");
-        return;
-    }
-    user_hud_mask_pixels = mask;
-    user_hud_mask_bytes = (size_t)mask_bytes;
-    user_hud_mask_width = w;
-    user_hud_mask_height = h;
-    memset(user_hud_mask_pixels, user_hud_mask_full || !user_hud_mask_rect_count ? 255 : 0, user_hud_mask_bytes);
-
-    if (!user_hud_mask_full && user_hud_mask_rect_count) {
-        for (uint32_t i = 0; i < user_hud_mask_rect_count; ++i) {
-            const UserHudMaskRect *r = &user_hud_mask_rects[i];
-            float x0f = (r->cx - r->hx) * ((float)w / 1280.0f);
-            float x1f = (r->cx + r->hx) * ((float)w / 1280.0f);
-            float y0f = (r->cy - r->hy) * ((float)h / 720.0f);
-            float y1f = (r->cy + r->hy) * ((float)h / 720.0f);
-            if (nvn_window_origin() == 0) {
-                float top = (float)h - y1f;
-                y1f = (float)h - y0f;
-                y0f = top;
-            }
-            int x0 = (int)floorf(x0f) - 2, x1 = (int)ceilf(x1f) + 2;
-            int y0 = (int)floorf(y0f) - 2, y1 = (int)ceilf(y1f) + 2;
-            if (x1 <= 0 || y1 <= 0 || x0 >= (int)w || y0 >= (int)h) continue;
-            if (x0 < 0) x0 = 0;
-            if (y0 < 0) y0 = 0;
-            if (x1 > (int)w) x1 = (int)w;
-            if (y1 > (int)h) y1 = (int)h;
-            for (int y = y0; y < y1; y++)
-                memset(user_hud_mask_pixels + (size_t)y * w + x0, 255, (size_t)(x1 - x0));
-        }
-    }
-
-    const VkFormat format = VK_FORMAT_R8_UNORM;
-    const VkImageUsageFlags want = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (user_hud_mask.image && (user_hud_mask.width != w || user_hud_mask.height != h || user_hud_mask.format != format)) {
-        vk_views_forget(&user_hud_mask);
-        vk_defer_image(user_hud_mask.image, user_hud_mask.mem);
-        user_hud_mask = (TexBackend){0};
-    }
-    if (!user_hud_mask.image) {
-        VkImageUsageFlags usage = vk_usage_supported(format, want);
-        if ((usage & want) != want) {
-            LOG("[shader] HUD separation unavailable: R8 mask sampling/copy is unsupported\\n");
-            return;
-        }
-        VkImageCreateInfo ci = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = format,
-            .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
-            .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage
-        };
-        if (vk_create_image(&ci, &user_hud_mask.image, &user_hud_mask.mem) != VK_SUCCESS) {
-            user_hud_mask.image = VK_NULL_HANDLE;
-            LOG("[shader] HUD separation unavailable: could not create R8 mask image\\n");
-            return;
-        }
-        user_hud_mask.format = format;
-        user_hud_mask.width = w; user_hud_mask.height = h;
-        user_hud_mask.depth = user_hud_mask.layers = user_hud_mask.levels = user_hud_mask.samples = 1;
-        user_hud_mask.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-        user_hud_mask.base_type = VK_IMAGE_VIEW_TYPE_2D;
-        vk_image_init_layout(vk_cmd(), user_hud_mask.image, user_hud_mask.aspect);
-    }
-
-    VkSpan pixels = vk_transient_copy(user_hud_mask_pixels, user_hud_mask_bytes, 16);
-    if (!pixels.buf || !pixels.ptr) {
-        LOG("[shader] HUD separation unavailable: mask upload buffer allocation failed\\n");
-        return;
-    }
-    VkBufferImageCopy copy = {
-        .bufferOffset = pixels.off, .bufferRowLength = w, .bufferImageHeight = h,
-        .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-        .imageOffset = {0, 0, 0}, .imageExtent = {w, h, 1}
-    };
-    VkCommandBuffer cb = vk_cmd();
-    vk_full_barrier(cb);
-    vkCmdCopyBufferToImage(cb, pixels.buf, user_hud_mask.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
-    vk_full_barrier(cb);
-    user_hud_mask_upload_frame = g_present_count;
-    static uint32_t detail_last_w, detail_last_h, detail_last_rects;
-    static bool detail_last_full;
-    if (detail_last_w != w || detail_last_h != h || detail_last_rects != user_hud_mask_rect_count ||
-        detail_last_full != user_hud_mask_full) {
-        diag_log_detail("[shader][detail] HUD mask upload ready: %ux%u, %zu KB, %u rect(s), mode=%s\n",
-                        w, h, user_hud_mask_bytes / 1024, user_hud_mask_rect_count,
-                        user_hud_mask_full ? "full-frame" : "HUD bounds");
-        detail_last_w = w; detail_last_h = h; detail_last_rects = user_hud_mask_rect_count;
-        detail_last_full = user_hud_mask_full;
-    }
 }
 
 static void models_fxaa_begin(NvnTexture *t) {
@@ -5053,7 +4896,6 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
             if (is_fullscreen && g_hudtrace_active)
                 LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: whole screen, kept\\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
             if (is_fullscreen) {
-                user_hud_mask_mark_full();  // fullscreen overlays and backdrops are preserved as HUD
             }
             if (!is_fullscreen) {
                 // The HUD keeps the 16:9 shape it is laid out in: on a wider picture its parts are narrowed (s) and moved
@@ -5437,7 +5279,6 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                             part >= 0 && part_nearest ? " (nearest)" : "", hud_hidden ? " hidden" : "");
                 }
                 if (!hud_moves && !part_custom) {  // (the touch layer told; the piece, its scissor and its matrix stay the game's)
-                    if (!hud_hidden && !is_3d_overlay) user_hud_mask_add(m);
                     ui_relax_scissor = false;
                     return ubo_span(guest_copy(r.addr, size), size);
                 }
@@ -5459,7 +5300,6 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
-                if (!hud_hidden && !is_3d_overlay) user_hud_mask_add(m);
                 if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
                 // The game clips some windows (a list, the help windows' body) with a scissor laid out for the 16:9 window:
                 // it moves with the piece, as its group was anchored last frame (the group is not complete yet), or for a
@@ -7689,8 +7529,8 @@ static VkPipelineLayout present_fx_layout;
 
 // User presentation shader state. Polling and pipeline replacement happen on the render thread.
 // Keep the depth target paired with the exact colour image sent to presentation.
-static VkPipeline present_pipes[5];
-static VkRenderPass present_render_passes[5];
+static VkPipeline present_pipes[4];
+static VkRenderPass present_render_passes[4];
 static VkShaderModule user_shader;
 static uint64_t user_shader_file_key;
 static bool user_shader_key_valid;
@@ -8137,21 +7977,18 @@ static VkShaderModule user_shader_module(void) {
     if (!n) {
         user_shader_uses_depth = false;
         user_shader_params_clear();
-        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] custom GLSL disabled; built-in presentation restored\n");
         return VK_NULL_HANDLE;
     }
     if (!valid_name) {
         user_shader_uses_depth = false;
         user_shader_params_clear();
-        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] active GLSL marker has an invalid filename\n");
         return VK_NULL_HANDLE;
     }
     if (!shader_ok) {
         user_shader_uses_depth = false;
         user_shader_params_clear();
-        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] selected GLSL file is missing, empty, or larger than 2 MB: %s\n", source_path);
         return VK_NULL_HANDLE;
     }
@@ -8160,16 +7997,15 @@ static VkShaderModule user_shader_module(void) {
     if (!f) {
         user_shader_uses_depth = false;
         user_shader_params_clear();
-        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] could not open selected GLSL file: %s\n", source_path);
         return VK_NULL_HANDLE;
     }
     long bytes = (long)shader_stat.st_size;
     char *source = malloc((size_t)bytes + 1);
-    if (!source) { fclose(f); user_shader_uses_depth = false; user_shader_params_clear(); vk_user_shader_hud_capture_enable(false); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
+    if (!source) { fclose(f); user_shader_uses_depth = false; user_shader_params_clear(); LOG("[shader] out of memory reading %s\n", name); return VK_NULL_HANDLE; }
     bool read_ok = fread(source, 1, (size_t)bytes, f) == (size_t)bytes;
     fclose(f);
-    if (!read_ok) { free(source); user_shader_uses_depth = false; user_shader_params_clear(); vk_user_shader_hud_capture_enable(false); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
+    if (!read_ok) { free(source); user_shader_uses_depth = false; user_shader_params_clear(); LOG("[shader] could not read %s\n", name); return VK_NULL_HANDLE; }
     source[bytes] = 0;
 
     bool source_uses_depth = user_shader_source_uses_depth(source);
@@ -8187,12 +8023,10 @@ static VkShaderModule user_shader_module(void) {
     free(source);
     if (user_shader) {
         user_shader_uses_depth = source_uses_depth;
-        vk_user_shader_hud_capture_enable(true);
         LOG("[shader] user GLSL hot-loaded: %s\n", name);
     } else {
         user_shader_uses_depth = false;
         user_shader_params_clear();
-        vk_user_shader_hud_capture_enable(false);
         LOG("[shader] user GLSL failed; using the built-in presentation shader\n");
     }
     return user_shader;
@@ -8294,7 +8128,7 @@ void vk_present_depth_resolve(void) {
 }
 
 // kind 0: original SDR picture; 1: colour/PS1 filters; 2: colour/PS1 filters and HDR10 encoding;
-// kind 3: user GLSL on the final game image; kind 4: restore original HUD pixels over the processed image.
+// kind 3: user GLSL over the full final game image.
 static VkPipeline present_pipeline(int kind) {
     VkRenderPass rp = vk_window_pass();
     if (present_render_passes[kind] == rp) return present_pipes[kind];
@@ -8319,8 +8153,7 @@ static VkPipeline present_pipeline(int kind) {
     }
     VkPipeline *pp = &present_pipes[kind];
     VkShaderModule fragment = kind == 3 ? user_shader_module()
-                              : vk_builtin_shader(kind == 4 ? "present.hudoverlay" :
-                                                  kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag");
+                              : vk_builtin_shader(kind == 2 ? "present.hdr" : kind == 1 ? "present.color" : "present.frag");
     if (!fragment) return VK_NULL_HANDLE;
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
@@ -8336,7 +8169,7 @@ static VkPipeline present_pipeline(int kind) {
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
     VkPipelineColorBlendAttachmentState cba = {
-        .blendEnable = kind == 4,
+        .blendEnable = VK_FALSE,
         .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
         .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         .colorBlendOp = VK_BLEND_OP_ADD,
@@ -8387,29 +8220,9 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     const int stock_kind = hdr ? 2 : colour_neutral(&colour) && !ps1 ? 0 : 1;
     int kind = stock_kind;
     VkPipeline p = VK_NULL_HANDLE;
-    bool hud_separated = false;
-    VkImageView hud_mask_view = VK_NULL_HANDLE;
-    VkPipeline hud_overlay_pipeline = VK_NULL_HANDLE;
     if (!hdr && user_shader_module()) {
-        bool scene_pair = user_hud_mask_upload_frame == g_present_count &&
-                          user_hud_mask_width == b->width && user_hud_mask_height == b->height &&
-                          user_hud_mask.image;
-        if (scene_pair) {
-            hud_mask_view = vk_image_view(&user_hud_mask, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8_UNORM,
-                                          0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
-            hud_overlay_pipeline = present_pipeline(4);
-            hud_separated = hud_mask_view != VK_NULL_HANDLE && hud_overlay_pipeline != VK_NULL_HANDLE;
-        }
-        if (hud_separated) {
-            kind = 3;
-            p = present_pipeline(kind);
-        } else {
-            static uint64_t last_no_hud_scene_frame = UINT64_MAX;
-            if (last_no_hud_scene_frame != g_present_count) {
-                LOG("[shader] HUD mask unavailable; custom GLSL bypassed this frame so depth cannot blur the HUD\n");
-                last_no_hud_scene_frame = g_present_count;
-            }
-        }
+        kind = 3;
+        p = present_pipeline(kind);
     }
     if (!p) {
         kind = stock_kind;
@@ -8418,18 +8231,17 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     // Detailed presentation-path trace: only emit when the effective path or target format changes.
     static int detail_last_kind = -1, detail_last_format = -1;
     static uint32_t detail_last_width, detail_last_height;
-    static bool detail_last_hud, detail_last_depth;
+    static bool detail_last_depth;
     if (detail_last_kind != kind || detail_last_format != (int)b->format ||
         detail_last_width != b->width || detail_last_height != b->height ||
-        detail_last_hud != hud_separated || detail_last_depth != (kind == 3 && user_shader_uses_depth)) {
-        static const char *const kinds[] = {"built-in", "colour/PS1", "HDR10", "user GLSL", "HUD restore"};
-        diag_log_detail("[vk][detail] presentation path=%s target=%ux%u format=%d HUD-separated=%s depth-input=%s\n",
-                        kind >= 0 && kind < 5 ? kinds[kind] : "unknown", b->width, b->height, b->format,
-                        hud_separated ? "yes" : "no",
+        detail_last_depth != (kind == 3 && user_shader_uses_depth)) {
+        static const char *const kinds[] = {"built-in", "colour/PS1", "HDR10", "user GLSL"};
+        diag_log_detail("[vk][detail] presentation path=%s target=%ux%u format=%d depth-input=%s\n",
+                        kind >= 0 && kind < 4 ? kinds[kind] : "unknown", b->width, b->height, b->format,
                         kind == 3 && user_shader_uses_depth ? "requested" : "unused");
         detail_last_kind = kind; detail_last_format = (int)b->format;
         detail_last_width = b->width; detail_last_height = b->height;
-        detail_last_hud = hud_separated; detail_last_depth = kind == 3 && user_shader_uses_depth;
+        detail_last_depth = kind == 3 && user_shader_uses_depth;
     }
     VkPipelineLayout layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
@@ -8464,7 +8276,6 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     };
     uint32_t write_count = 2;
     VkDescriptorBufferInfo param_buffer = {0};
-    VkDescriptorImageInfo mask_info = {0};
     if (kind == 3 && vk_user_shader_param_count() > 0) {
         float shader_values[USER_SHADER_PARAM_MAX][4];
         vk_user_shader_params_pack(shader_values);
@@ -8481,10 +8292,13 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
         };
     }
     if (kind == 3) {
-        mask_info = (VkDescriptorImageInfo){vk_default_sampler(false), hud_mask_view, VK_IMAGE_LAYOUT_GENERAL};
+        // Compatibility for older shaders that still declare hudMask: black means no protected pixels.
+        VkDescriptorImageInfo no_hud_mask = {
+            vk_default_sampler(false), vk_dummy_view(TEXTYPE_2D), VK_IMAGE_LAYOUT_GENERAL
+        };
         w[write_count++] = (VkWriteDescriptorSet){
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 3, .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mask_info
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &no_hud_mask
         };
     }
     vkUpdateDescriptorSets(g_vk.dev, write_count, w, 0, NULL);
@@ -8525,26 +8339,7 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
     vkCmdDraw(cb, 3, 1, 0, 0);
 
-    // The custom shader has processed the final game image. Restore original HUD pixels from the
-    // quad mask accumulated while the game's non-depth-tested HUD transforms were translated.
-    if (kind == 3 && hud_separated) {
-        if (hud_overlay_pipeline && hud_mask_view) {
-            VkDescriptorSet hud_set = vk_alloc_set(present_set_layout);
-            VkDescriptorImageInfo hud_ii = {vk_default_sampler(false), raw_view(b), VK_IMAGE_LAYOUT_GENERAL};
-            VkDescriptorImageInfo mask_ii = {vk_default_sampler(false), hud_mask_view, VK_IMAGE_LAYOUT_GENERAL};
-            VkWriteDescriptorSet hud_w[2] = {
-                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 0,
-                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hud_ii},
-                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = hud_set, .dstBinding = 3,
-                 .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mask_ii}
-            };
-            vkUpdateDescriptorSets(g_vk.dev, 2, hud_w, 0, NULL);
-            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, hud_overlay_pipeline);
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, present_layout, 0, 1, &hud_set, 0, NULL);
-            vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
-            vkCmdDraw(cb, 3, 1, 0, 0);
-        }
-    }
+
 }
 
 // ================================================================== executor
