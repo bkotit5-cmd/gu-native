@@ -4166,7 +4166,7 @@ void rows_system_game_10(std::vector<Row> &r) {
     action(r, "save.folder", tr("Save folder"), []() { ui_request_save_folder(); });
     r.back().help = tr("Where your save is kept. Choose a folder that a sync app shares with your other devices (the PC version too) to carry your hunt between them. Your save is copied there first, and the game restarts to use it.");
     action(r, "save.import", tr("Import save"), []() { ui_request_save_import(); });
-    r.back().help = tr("Brings your save from an emulator or another device. It replaces the characters on this device, and the current save is kept in a copy.");
+    r.back().help = tr("Brings your save from an emulator or another device. The game restarts automatically after a valid file is selected; the current save is kept in a backup copy.");
     action(r, "save.export", tr("Export save"), []() { ui_request_save_export(); });
     r.back().help = tr("Copies your save to a folder you choose, to take it to an emulator or another device.");
     action(r, "log.share", tr("Share log"), []() { ui_request_share_log(); });
