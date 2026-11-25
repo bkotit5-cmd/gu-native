@@ -2792,7 +2792,7 @@ void vk_user_shader_hud_mask_upload(TexBackend *presented) {
         detail_last_full != user_hud_mask_full) {
         diag_log_detail("[shader][detail] HUD mask upload ready: %ux%u, %zu KB, %u rect(s), mode=%s\n",
                         w, h, user_hud_mask_bytes / 1024, user_hud_mask_rect_count,
-                        user_hud_mask_full ? "full-frame" : "HUD bounds");
+                        user_hud_mask_full ? "full-frame" : user_hud_mask_rect_count ? "HUD bounds" : "empty");
         detail_last_w = w; detail_last_h = h; detail_last_rects = user_hud_mask_rect_count;
         detail_last_full = user_hud_mask_full;
     }
@@ -8417,18 +8417,21 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     // Detailed presentation-path trace: only emit when the effective path or target format changes.
     static int detail_last_kind = -1, detail_last_format = -1;
     static uint32_t detail_last_width, detail_last_height;
-    static bool detail_last_hud, detail_last_depth;
+    static bool detail_last_hud, detail_last_mask, detail_last_depth;
     if (detail_last_kind != kind || detail_last_format != (int)b->format ||
         detail_last_width != b->width || detail_last_height != b->height ||
-        detail_last_hud != hud_separated || detail_last_depth != (kind == 3 && user_shader_uses_depth)) {
+        detail_last_hud != hud_separated || detail_last_mask != hud_mask_available ||
+        detail_last_depth != (kind == 3 && user_shader_uses_depth)) {
         static const char *const kinds[] = {"built-in", "colour/PS1", "HDR10", "user GLSL", "HUD restore"};
-        diag_log_detail("[vk][detail] presentation path=%s target=%ux%u format=%d HUD-separated=%s depth-input=%s\n",
+        diag_log_detail("[vk][detail] presentation path=%s target=%ux%u format=%d HUD-mask=%s HUD-separated=%s depth-input=%s\n",
                         kind >= 0 && kind < 5 ? kinds[kind] : "unknown", b->width, b->height, b->format,
+                        hud_mask_available ? "ready" : "fallback",
                         hud_separated ? "yes" : "no",
                         kind == 3 && user_shader_uses_depth ? "requested" : "unused");
         detail_last_kind = kind; detail_last_format = (int)b->format;
         detail_last_width = b->width; detail_last_height = b->height;
-        detail_last_hud = hud_separated; detail_last_depth = kind == 3 && user_shader_uses_depth;
+        detail_last_hud = hud_separated; detail_last_mask = hud_mask_available;
+        detail_last_depth = kind == 3 && user_shader_uses_depth;
     }
     VkPipelineLayout layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout;
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
