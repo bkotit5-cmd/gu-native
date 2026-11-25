@@ -2627,6 +2627,41 @@ static uint8_t *user_hud_mask_pixels;
 static size_t user_hud_mask_bytes;
 static uint32_t user_hud_mask_width, user_hud_mask_height;
 static _Atomic bool user_shader_hud_capture_enabled = true;
+// -1 means the saved HUD-mask preference has not been read yet. This is independent from
+// capture_enabled: selecting a custom shader must not silently turn protection back on.
+static _Atomic int user_shader_hud_mask_protection_state = -1;
+
+static bool user_shader_hud_mask_protection_load(void) {
+    int state = atomic_load(&user_shader_hud_mask_protection_state);
+    if (state < 0) {
+        char path[1024];
+        const char *home = getenv("MHGU_HOME");
+        if (home && *home)
+            snprintf(path, sizeof path, "%s/shaders/hud_mask_protection.txt", home);
+        else
+            snprintf(path, sizeof path, "shaders/hud_mask_protection.txt");
+        int enabled = 1;  // New installs keep HUD protection on by default.
+        FILE *f = fopen(path, "rb");
+        if (f) {
+            int ch = fgetc(f);
+            if (ch == '0') enabled = 0;
+            else if (ch == '1') enabled = 1;
+            fclose(f);
+        }
+        int expected = -1;
+        atomic_compare_exchange_strong(&user_shader_hud_mask_protection_state, &expected, enabled);
+        state = atomic_load(&user_shader_hud_mask_protection_state);
+    }
+    return state != 0;
+}
+
+bool vk_user_shader_hud_mask_protection_enabled(void) {
+    return user_shader_hud_mask_protection_load();
+}
+
+void vk_user_shader_hud_mask_protection_set(bool enabled) {
+    atomic_store(&user_shader_hud_mask_protection_state, enabled ? 1 : 0);
+}
 
 static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (made as b's size and format)
     VkCommandBuffer cb = vk_cmd();
@@ -2658,7 +2693,7 @@ void vk_user_shader_hud_capture_enable(bool enabled) {
 }
 
 bool vk_user_shader_hud_capture_needed(void) {
-    return atomic_load(&user_shader_hud_capture_enabled);
+    return atomic_load(&user_shader_hud_capture_enabled) && user_shader_hud_mask_protection_load();
 }
 
 static void user_hud_mask_frame_begin(void) {
