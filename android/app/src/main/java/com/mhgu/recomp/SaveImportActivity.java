@@ -190,15 +190,8 @@ public class SaveImportActivity extends Activity {
                             .show();
                     return;
                 }
-                new AlertDialog.Builder(this)
-                        .setTitle(es ? "¿Importar partida?" : "Import this save?")
-                        .setMessage(es
-                                ? "Se reemplazarán los personajes de este dispositivo. La partida actual se guardará en una copia de seguridad. El juego se reiniciará para aplicar la nueva partida."
-                                : "The hunters on this device will be replaced. Your current save will first be copied to MHGURecomp/save_backups. The game will restart to apply the imported save.")
-                        .setPositiveButton(es ? "Importar y reiniciar" : "Import and restart", (dialog, which) -> confirm())
-                        .setNegativeButton(es ? "Cancelar" : "Cancel", (dialog, which) -> finish())
-                        .setOnCancelListener(dialog -> finish())
-                        .show();
+                // A valid save is staged and the app restarts immediately; no extra confirmation dialog.
+                confirm();
             });
         }).start();
     }
