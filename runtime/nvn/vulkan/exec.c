@@ -8355,6 +8355,8 @@ static VkPipeline present_pipeline(int kind) {
                                        .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds,
                                        .pColorBlendState = &cb, .pDynamicState = &dy,
                                        .layout = (kind == 1 || kind == 2) ? present_fx_layout : present_layout, .renderPass = rp};
+    if (kind == 3) LOG("[shader] creating custom GLSL presentation pipeline\n");
+    else if (kind == 4) LOG("[shader] creating HUD restore presentation pipeline\n");
     VkResult result = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, pp);
     if (result != VK_SUCCESS) {
         present_render_passes[kind] = rp;  // don't retry a broken user pipeline on every presented frame
@@ -8362,6 +8364,8 @@ static VkPipeline present_pipeline(int kind) {
         return VK_NULL_HANDLE;
     }
     present_render_passes[kind] = rp;
+    if (kind == 3) LOG("[shader] custom GLSL presentation pipeline ready\n");
+    else if (kind == 4) LOG("[shader] HUD restore presentation pipeline ready\n");
     return *pp;
 }
 
