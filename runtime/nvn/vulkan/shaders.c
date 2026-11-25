@@ -309,6 +309,20 @@ static const char *builtin_src(const char *name, int *stage) {
                "layout(location = 0) out vec4 o;\n"
                "void main() { o = vec4(texture(t, uv).rgb, 1.0); }\n";
     }
+    // Restore the original game HUD over the custom-shaded 3D scene using the renderer's quad mask.
+    if (!strcmp(name, "present.hudoverlay")) {
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D finalImage;\n"
+               "layout(set = 0, binding = 3) uniform sampler2D hudMask;\n"
+               "layout(location = 0) in vec2 uv;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "void main() {\n"
+               "  vec3 original = texture(finalImage, uv).rgb;\n"
+               "  float mask = step(0.5, texture(hudMask, uv).r);\n"
+               "  o = vec4(original, mask);\n"
+               "}\n";
+    }
     // present.frag with the colour filter ([Colour], runtime/colour_filter.h; exec.c vk_present_draw), and present.hdr with
     // it and the HDR output's encoding (HDR10: BT.2020, SMPTE ST 2084). Push constants after the vertex stage's 32 bytes:
     // the filter's three rows (rgb weights, offset), g.x its gamma exponent; h (HDR): x the paper white in 10000s of nits,
