@@ -2608,7 +2608,6 @@ static bool set_active_user_shader(const std::string &name) {
     const auto marker = dir / "active.txt";
     if (name.empty()) {
         if (std::remove(marker.string().c_str()) != 0 && errno != ENOENT) return false;
-        vk_user_shader_hud_capture_enable(false);
         return true;
     }
     if (!user_shader_filename(name)) return false;
@@ -2627,7 +2626,6 @@ static bool set_active_user_shader(const std::string &name) {
         std::remove(tmp.string().c_str());
         return false;
     }
-    vk_user_shader_hud_capture_enable(true);
     return true;
 }
 
