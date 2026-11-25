@@ -29,7 +29,6 @@ bool vk_user_shader_param_get(int index, UserShaderParam *out);
 bool vk_user_shader_param_set(int index, float value);
 void vk_user_shader_params_reset(void);
 void vk_user_shader_params_pack(float values[USER_SHADER_PARAM_MAX][4]);
-void vk_user_shader_hud_capture_enable(bool enabled);
 
 #ifdef __cplusplus
 }
