@@ -94,13 +94,23 @@ uint32_t guest_sym(const char *name) {
 }
 
 static uint32_t hle_next = HLE_HEAP;
+static pthread_mutex_t hle_alloc_lock = PTHREAD_MUTEX_INITIALIZER;
+
+uint32_t hle_heap_used(void) {
+    pthread_mutex_lock(&hle_alloc_lock);
+    uint32_t used = hle_next - HLE_HEAP;
+    pthread_mutex_unlock(&hle_alloc_lock);
+    return used;
+}
+
 uint32_t hle_alloc(uint32_t size) {
-    static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&m);
+    pthread_mutex_lock(&hle_alloc_lock);
     uint32_t a = hle_next;
     hle_next += (size + 63) & ~63u;
-    if (hle_next > HLE_HEAP + HLE_HEAP_SIZE) FATAL("HLE heap exhausted\n");
-    pthread_mutex_unlock(&m);
+    if (hle_next > HLE_HEAP + HLE_HEAP_SIZE)
+        FATAL("HLE heap exhausted: %u KB used of %u KB\n",
+              (hle_next - HLE_HEAP) >> 10, HLE_HEAP_SIZE >> 10);
+    pthread_mutex_unlock(&hle_alloc_lock);
     plat_commit(GUEST_BASE + a, size);
     memset(G2H(a), 0, size);
     return a;
