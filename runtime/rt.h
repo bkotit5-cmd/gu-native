@@ -26,14 +26,18 @@
 #define HLE_SIZE      0x00100000u
 #define TLS_BASE      0x03100000u   // thread local regions, 0x200 bytes per thread
 #define TLS_SIZE      0x00100000u
-#define PLUGIN_BASE   0x03200000u   // Forge plugins (runtime/forge.c): modules, then Forge's hook trampolines / stubs
-#define PLUGIN_END    0x03E00000u
-#define FORGE_TRAMP   0x03E00000u   // trampolines to hooked functions' original code (dispatch.c runs them)
-#define FORGE_STUBS   0x03F00000u   // ARM stubs Forge writes (interpreted)
-#define FORGE_END     0x04000000u
-#define HLE_HEAP      0x04000000u   // guest-visible memory owned by host code
-#define HLE_HEAP_SIZE 0x04000000u
+#define PLUGIN_BASE   0x03200000u   // Forge plugin modules (runtime/forge.c); unchanged
+#define PLUGIN_SIZE   0x03200000u   // 50 MiB for plugin images and BSS
+#define PLUGIN_END    (PLUGIN_BASE + PLUGIN_SIZE)
+#define FORGE_TRAMP   PLUGIN_END    // 1 MiB for original-function trampolines
+#define FORGE_STUBS   (FORGE_TRAMP + 0x00100000u) // 1 MiB for Forge's interpreted ARM stubs
+#define FORGE_END     (FORGE_STUBS + 0x00100000u)
+#define HLE_HEAP      FORGE_END     // host-owned guest memory; the remainder up to CODE_END
 #define CODE_END      0x08000000u
+#define HLE_HEAP_SIZE (CODE_END - HLE_HEAP)
+#if PLUGIN_SIZE < 0x01000000u || HLE_HEAP_SIZE < 0x01000000u
+#error "guest layout: plugin region or HLE heap too small"
+#endif
 #define HEAP_BASE     0x08000000u   // svcSetHeapSize
 #define HEAP_MAX      0xA0000000u   // 2.5 GB
 #define ALIAS_BASE    0xA8000000u   // svcMapMemory targets
@@ -156,6 +160,7 @@ void quickhunt_poll(void);               // (debug) MHGU_QUICKHUNT's presses (ru
 void guest_call(Cpu *c, uint32_t addr);   // call a guest function (saves / restores lr)
 uint32_t guest_sym(const char *name);     // cached loader_find_symbol, fatal if missing
 uint32_t hle_alloc(uint32_t size);        // zeroed guest memory owned by the host (never freed): guest address
+uint32_t hle_heap_used(void);              // bytes used in the HLE heap
 extern const char *g_game_dir;            // folder holding exefs/ and romfs/
 extern const char *g_save_dir;            // host folder for save data (services/fs.c; MHGU_SAVE_DIR overrides)
 void rt_unwind_point(void);
