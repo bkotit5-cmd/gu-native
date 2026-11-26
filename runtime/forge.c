@@ -1526,6 +1526,9 @@ void forge_init(void) {
         LOG("[forge] plugin %s (%s)\n", name, found[i]);
         at = (at + m->size + 0xFFFF) & ~0xFFFFu;
     }
+    LOG("[forge] plugin region: %d plugin(s), %u KB of %u KB used (%u KB free)\n",
+        nplugins, (at - PLUGIN_BASE) >> 10, PLUGIN_SIZE >> 10, (PLUGIN_END - at) >> 10);
+    LOG("[hle] heap used: %u KB of %u KB\n", hle_heap_used() >> 10, HLE_HEAP_SIZE >> 10);
     // Host settings need the overlay even when no Forge mods are installed.
     fnhook_set(text_addr(OFF_UPDATE), hle_register("forge:update", frame_update));
     overlay_start(layers, nl);
