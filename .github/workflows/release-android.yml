@@ -43,6 +43,10 @@ jobs:
               $tag = "v$version"
             } else {
               $tag = $requested.Trim()
+              # Accept either 1.0.1.4 or v1.0.1.4 in the manual input.
+              if ($tag -eq $version) {
+                $tag = "v$tag"
+              }
             }
           } else {
             $tag = $env:GITHUB_REF_NAME
