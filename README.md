@@ -132,6 +132,19 @@ The current integration includes a **baseline of Forge 2.0.0 graphics/plugin sup
 
 This should not be read as a guarantee that every Forge 2.0.0 plugin or every API is compatible. Plugin behaviour depends on the APIs a plugin uses and the runtime environment. Use plugins from sources you trust; native plugins can affect stability and may execute code with the app's permissions.
 
+### Forge guest memory layout
+
+The current guest address-space layout reserves:
+
+| Region | Capacity | Purpose |
+| --- | ---: | --- |
+| Forge plugin region | 50 MiB | Plugin NRO images, data and BSS |
+| Forge trampolines | 1 MiB | Original-function trampoline code |
+| Forge stubs | 1 MiB | Forge-generated interpreted ARM stubs |
+| HLE heap | 26 MiB | Guest-visible allocations made by host-implemented HLE functions |
+
+These regions occupy the existing 78 MiB span from `0x03200000` up to `HEAP_BASE = 0x08000000`. The larger plugin region is a capacity limit; it does not mean every byte is automatically occupied by plugin images. The HLE heap uses a bump allocator, so allocations are not all returned for reuse. If it is exhausted, the runtime reports the used amount and limit before terminating. The start of the game's own heap (`HEAP_BASE`) is unchanged.
+
 ## Mods, cheats and extra content
 
 - **Mods:** import mod folders or ZIP archives containing supported `romfs`, `exefs`, `cheats` or native-NX content. Mods can be enabled, disabled and ordered. Later mods win when they replace the same file; the app can identify conflicts and lets you choose which mod takes precedence.
@@ -181,7 +194,17 @@ Open **Settings → System → Your game → Detailed log** and enable it before
 - HUD-mask capture and upload state.
 - Vulkan presentation path, image target and relevant format/resolution changes.
 
-The detailed traces are intended to record useful operations and state changes rather than repeatedly printing an unchanged status every frame. Important normal error messages remain available when Detailed Log is off. On Android, use **Share log** on the same **Your game** page; on Windows, use **Log folder** to open the log location. The log writer also limits log growth so long sessions do not create an unbounded log file.
+The detailed traces are intended to record useful operations and state changes rather than repeatedly printing an unchanged status every frame. Important normal error messages remain available when Detailed Log is off.
+
+Forge startup also reports the plugin-region capacity/usage and an HLE heap usage snapshot:
+
+```text
+[forge] plugin region: N plugin(s), X KB of Y KB used (Z KB free)
+[hle] heap used: X KB of Y KB
+```
+
+The HLE value is a startup snapshot taken during Forge initialization, not a live or peak-usage monitor. If a later allocation exhausts the heap, the fatal log includes the used amount and configured limit.
+ On Android, use **Share log** on the same **Your game** page; on Windows, use **Log folder** to open the log location. The log writer also limits log growth so long sessions do not create an unbounded log file.
 
 ## Compatibility and safety notes
 
@@ -205,7 +228,7 @@ You must supply your own copy of Monster Hunter Generations Ultimate and all gam
 
 ## Android app version and updates
 
-The repository-root `VERSION` file is the source of the app's visible version and Android `versionName`. `VERSION_CODE` is the Android package version code and must increase for every published update. The current source version is **1.0.1.3** (version code **18**).
+The repository-root `VERSION` file is the source of the app's visible version and Android `versionName`. `VERSION_CODE` is the Android package version code and must increase for every published update. The current source version is **1.0.1.4** (version code **19**).
 
 On Android, open **Settings → System → Your game → App version & updates** to see the installed version and check the latest stable release from this repository. When a newer release contains an APK, the updater downloads it, checks the package ID, version name/code, file size and the release SHA-256 digest when GitHub provides one, then compares the APK signing certificate with the installed app. Only a compatible APK is handed to Android's package installer. Android still asks the player to approve installation; the app does not install updates silently.
 
