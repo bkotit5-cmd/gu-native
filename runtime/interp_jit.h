@@ -37,16 +37,21 @@ int jit_mem_register(void *base, void *rf);
 void jit_mem_free(void *base, size_t n, void *rf);
 
 // ---- the JIT's fields in Cpu._pad
-#define JO_RET   128  // the run's return address (a direct branch to it goes back to the loop)
-#define JO_LINK  132  // set by an exit through a call (BL / BLX)
-#define JO_SITE  136  // the exit's patchable jump (offset in the arena; 0: none); JO_EXIT 1: the stale block's entry
-#define JO_RETPC 140  // a call's return address (the instruction after it)
-#define JO_EXIT  144  // 1: the block at eax changed and must be rebuilt
-#define JO_GEN   148  // g_code_gen the arena's blocks were made for
-#define JO_INSNS 152  // (u64) instructions run (MHGU_INTERP_STATS)
-#define JO_TLINK 160  // link out of an interpreter op the block called
-#define JO_END   164
-_Static_assert(offsetof(Cpu, _pad) == 128 && sizeof(((Cpu *)0)->_pad) >= JO_END - 128, "jit fields");
+// _pad[0..7] is the dispatch cache pointer, _pad[8..11] is hook-bypass state; leave both untouched.
+// Start at Cpu offset 144 (16 bytes into _pad), keeping the 64-bit counter naturally aligned.
+#define JO_RET   144  // the run's return address (a direct branch to it goes back to the loop)
+#define JO_LINK  148  // set by an exit through a call (BL / BLX)
+#define JO_SITE  152  // the exit's patchable jump (offset in the arena; 0: none); JO_EXIT 1: the stale block's entry
+#define JO_RETPC 156  // a call's return address (the instruction after it)
+#define JO_EXIT  160  // 1: the block at eax changed and must be rebuilt
+#define JO_GEN   164  // g_code_gen the arena's blocks were made for
+#define JO_INSNS 168  // (u64) instructions run (MHGU_INTERP_STATS)
+#define JO_TLINK 176  // link out of an interpreter op the block called
+#define JO_END   180
+_Static_assert(offsetof(Cpu, _pad) == 128 && JO_RET >= offsetof(Cpu, _pad) + 16 &&
+               JO_INSNS % _Alignof(uint64_t) == 0 && JO_END <= offsetof(Cpu, v) &&
+               sizeof(((Cpu *)0)->_pad) >= JO_END - offsetof(Cpu, _pad),
+               "JIT fields must not overlap dispatch/hook state or Cpu registers");
 #define JF(c, o) (*(uint32_t *)((uint8_t *)(c) + (o)))
 
 #define JIT_ARENA (8u << 20)
