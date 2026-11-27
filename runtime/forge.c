@@ -1489,20 +1489,25 @@ void forge_init(void) {
         if (d) closedir(d);
     }
     str_savedata = gstring("savedata");
-    uint32_t at = PLUGIN_BASE;
+    uint32_t at = PLUGIN_BASE, at2 = PLUGIN2_BASE;
     for (int i = 0; i < nf; i++) {
         size_t len;
         uint8_t *data = read_all(found[i], &len);
         const char *name = strrchr(found[i], '/') + 1;
+        bool read_ok = data != NULL;
         uint32_t bss = 0;
-        if (data && len >= 0x3C) memcpy(&bss, data + 0x38, 4);
-        // (the image, its bss and the 64 KiB alignment of the next one; the trampolines and stubs have their own regions)
-        bool room = data && (uint64_t)at + len + bss + 0x10000 <= PLUGIN_END;
-        Module *m = room ? loader_load_nro(name, data, len, at) : NULL;
+        if (read_ok && len >= 0x3C) memcpy(&bss, data + 0x38, 4);
+        // Try the original 12 MiB region first; only plugins that do not fit spill into the
+        // separate 128 MiB region above the guest stacks. Keep 64 KiB between plugin images.
+        bool room = read_ok && (uint64_t)at + len + bss + 0x10000 <= PLUGIN_END;
+        bool high = false;
+        if (read_ok && !room && (uint64_t)at2 + len + bss + 0x10000 <= PLUGIN2_END)
+            room = high = true;
+        Module *m = room ? loader_load_nro(name, data, len, high ? at2 : at) : NULL;
         free(data);
         if (!m) {
-            if (!data) flog(3, "Failed to read plugin file app:/nativeNX/plugins/%s (%s)", name, found[i]);
-            else if (!room) flog(3, "%s: skipped, no room left in the plugin memory region (%s)", name, found[i]);
+            if (!read_ok) flog(3, "Failed to read plugin file app:/nativeNX/plugins/%s (%s)", name, found[i]);
+            else if (!room) flog(3, "%s: skipped, both plugin memory regions are full (%s)", name, found[i]);
             else flog(3, "Failed to load plugin app:/nativeNX/plugins/%s: not a plugin this port can load (%s)", name, found[i]);
             continue;
         }
@@ -1524,10 +1529,16 @@ void forge_init(void) {
         kernel_map_region(m->base + m->data_off, m->size - m->data_off, 4, 3);
         flog(0, "Found plugin file: app:/nativeNX/plugins/%s", name);
         LOG("[forge] plugin %s (%s)\n", name, found[i]);
-        at = (at + m->size + 0xFFFF) & ~0xFFFFu;
+        if (high) {
+            LOG("[forge] %s allocated from extended plugin region at %08x\n", name, m->base);
+            at2 = (at2 + m->size + 0xFFFF) & ~0xFFFFu;
+        } else {
+            at = (at + m->size + 0xFFFF) & ~0xFFFFu;
+        }
     }
-    LOG("[forge] plugin region: %d plugin(s), %u KB of %u KB used (%u KB free)\n",
-        nplugins, (at - PLUGIN_BASE) >> 10, PLUGIN_SIZE >> 10, (PLUGIN_END - at) >> 10);
+    LOG("[forge] plugins loaded: %d; primary region %u/%u KB used (%u KB free); extended region %u/%u KB used (%u KB free)\n",
+        nplugins, (at - PLUGIN_BASE) >> 10, PLUGIN_SIZE >> 10, (PLUGIN_END - at) >> 10,
+        (at2 - PLUGIN2_BASE) >> 10, PLUGIN2_SIZE >> 10, (PLUGIN2_END - at2) >> 10);
     LOG("[hle] heap used: %u KB of %u KB\n", hle_heap_used() >> 10, HLE_HEAP_SIZE >> 10);
     // Host settings need the overlay even when no Forge mods are installed.
     fnhook_set(text_addr(OFF_UPDATE), hle_register("forge:update", frame_update));

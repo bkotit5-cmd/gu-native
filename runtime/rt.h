@@ -26,17 +26,17 @@
 #define HLE_SIZE      0x00100000u
 #define TLS_BASE      0x03100000u   // thread local regions, 0x200 bytes per thread
 #define TLS_SIZE      0x00100000u
-#define PLUGIN_BASE   0x03200000u   // Forge plugin modules (runtime/forge.c); unchanged
-#define PLUGIN_SIZE   0x03200000u   // 50 MiB for plugin images and BSS
+#define PLUGIN_BASE   0x03200000u   // Forge's primary plugin region (runtime/forge.c)
+#define PLUGIN_SIZE   0x00C00000u   // 12 MiB for plugin images and BSS
 #define PLUGIN_END    (PLUGIN_BASE + PLUGIN_SIZE)
 #define FORGE_TRAMP   PLUGIN_END    // 1 MiB for original-function trampolines
 #define FORGE_STUBS   (FORGE_TRAMP + 0x00100000u) // 1 MiB for Forge's interpreted ARM stubs
 #define FORGE_END     (FORGE_STUBS + 0x00100000u)
-#define HLE_HEAP      FORGE_END     // host-owned guest memory; the remainder up to CODE_END
+#define HLE_HEAP      FORGE_END     // host-owned guest memory
 #define CODE_END      0x08000000u
-#define HLE_HEAP_SIZE (CODE_END - HLE_HEAP)
-#if PLUGIN_SIZE < 0x01000000u || HLE_HEAP_SIZE < 0x01000000u
-#error "guest layout: plugin region or HLE heap too small"
+#define HLE_HEAP_SIZE 0x04000000u   // 64 MiB, as in the upstream two-region layout
+#if PLUGIN_SIZE < 0x00800000u || HLE_HEAP_SIZE < 0x01000000u
+#error "guest layout: primary plugin region or HLE heap too small"
 #endif
 #define HEAP_BASE     0x08000000u   // svcSetHeapSize
 #define HEAP_MAX      0xA0000000u   // 2.5 GB
@@ -44,7 +44,13 @@
 #define ALIAS_SIZE    0x28000000u
 #define STACK_BASE    0xD0000000u   // stack region (main thread stack, mapped thread stacks)
 #define STACK_SIZE    0x20000000u
+#define PLUGIN2_BASE  0xF0100000u   // fallback Forge plugin region, above the guest stacks
+#define PLUGIN2_SIZE  0x08000000u   // 128 MiB
+#define PLUGIN2_END   (PLUGIN2_BASE + PLUGIN2_SIZE)
 #define GUEST_SPACE   0x100000000ull
+#if PLUGIN2_BASE < (STACK_BASE + STACK_SIZE) || PLUGIN2_END > GUEST_SPACE
+#error "guest layout: fallback plugin region overlaps another guest range or exceeds guest space"
+#endif
 
 // ---- loader.c
 typedef struct Module {
