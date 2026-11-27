@@ -1523,6 +1523,7 @@ static void read_check(const Cpu *c, uint32_t pc, uint32_t w) {
 }
 
 static void interp_run_inner(Cpu *c);
+static void run_inner(Cpu *c);
 // (debug) MHGU_INTERP_STATS=1: every 5 s, the instructions the interpreter ran a second (all of them, and per function
 // a run started in, its callees included) and how often each was entered: what interpreted code costs.
 static int stats_on = -1;
@@ -1999,8 +2000,10 @@ static void interp_run_inner(Cpu *c) {
 }
 
 // Android AArch64 JIT for interpreted Forge/plugin code. Other targets retain the block-cached interpreter.
-#ifdef HAVE_JIT
+#if defined(__ANDROID__) && defined(__aarch64__) && !defined(MHGU_NO_JIT)
 #include "interp_jit.h"
+#endif
+#ifdef HAVE_JIT
 static void run_inner(Cpu *c) {
     if (!(g_interp_watch | read_hi) && jit_enabled()) {
         JitTls *t = jit_tls();
