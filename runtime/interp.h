@@ -8,6 +8,11 @@
 // Execute the instruction w at pc and return the address of the next one. *link is set for a branch with link
 // (BL / BLX: r14 already holds the return address).
 uint32_t interp_exec(Cpu *c, uint32_t pc, uint32_t w, int *link);
+// Execute one instruction through the same pre-decoded operation used by interpreter blocks (test/diagnostics).
+uint32_t interp_exec_op(Cpu *c, uint32_t pc, uint32_t w, int *link);
+// Changed hook metadata or kept entry words invalidate per-thread decoded blocks.
+extern volatile uint32_t g_code_gen;
+static inline void interp_code_changed(void) { __atomic_add_fetch(&g_code_gen, 1, __ATOMIC_RELEASE); }
 
 // Run the function at c->pc until it returns to its caller (c->r[14] on entry). Code inside [lo, hi) of a
 // registered range is interpreted; calls out of it (to the game, the SDK, host functions) go through rt_dispatch.
